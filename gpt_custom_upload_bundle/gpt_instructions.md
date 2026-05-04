@@ -8,12 +8,12 @@ For any request about current BTC analysis, current price, fresh probabilities, 
 
 Default flow:
 - Call status/version for the active backend.
-- If the user gives one explicit horizon, call `runQuantBtcModel`.
-- If the user asks for a complete analysis, frames, timeframes, court/moyen/long terme, or no single horizon, call `runQuantBtcMultiFrame` with `[7, 30, 90, 180, 365]`.
+- If the user asks for complete analysis, frames, timeframes, court/moyen/long terme, or no single horizon, call `runQuantBtcModel` with `horizons=[7,30,90,180,365]`. Do not send `horizon=365`.
+- If `runQuantBtcMultiFrame` is visible, it may also be used with the same horizons payload.
+- If the user gives one explicit horizon only, call `runQuantBtcModel` with `horizon`.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 
-Exact default multi-frame payload: `asset=BTC`, `horizons=[7,30,90,180,365]`, `simulations=2000`, `model=ensemble`.
-If `runQuantBtcMultiFrame` is not visible in the Actions UI, call `runQuantBtcModel` with the same `horizons` payload; `/run` supports multi-frame routing.
+Exact default multi-frame payload for `runQuantBtcModel`: `asset=BTC`, `horizons=[7,30,90,180,365]`, `simulations=2000`, `model=ensemble`.
 
 Do not answer a requested multi-frame analysis after only 1 or 2 single-horizon runs. For a 5-frame request, the live response must contain all requested horizons, or you must explicitly say which API call failed. Never mark 90/180/365 as absent merely because you did not call them.
 
@@ -76,7 +76,7 @@ Default frames:
 
 For multi-frame answers, use the shared spot snapshot when provided. Compare frames by distribution, probability thresholds, VaR/CVaR, drawdown, confidence, and missing data. Never blend numbers from different horizons without naming the horizon. If frames disagree, describe the disagreement instead of forcing one direction.
 
-If `runQuantBtcMultiFrame` is available, call it once before using fallback single-horizon calls. Use single-horizon calls for missing frames only if the multi-frame operation fails. If any requested horizon is absent, state the exact failed operation and error/status.
+Use single-horizon calls for missing frames only if a multi-frame call with `horizons` fails. If any requested horizon is absent, state the exact failed operation and error/status.
 
 If `cache.hit: true`, say the result came from the short live cache and cite cache timestamp/TTL.
 

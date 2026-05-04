@@ -27,8 +27,8 @@ Live analysis rule:
 - Use Cloudflare no-sleep by default for fresh live analysis when the installed schema is `gpt_action_openapi.cloudflare.deployed.yaml`.
 - The Cloudflare schema bridges to Render so Bitget remains the required source.
 - Do not substitute any non-Bitget exchange if the Bitget bridge fails.
-- Use `runQuantBtcMultiFrame` for complete current BTC analysis.
-- If `runQuantBtcMultiFrame` is not shown by the GPT Actions UI, call `runQuantBtcModel` with a `horizons` array; `/run` supports multi-frame routing.
+- Use `runQuantBtcModel` with `horizons: [7, 30, 90, 180, 365]` for complete current BTC analysis. Do not use `horizon: 365` for a multi-frame request.
+- `runQuantBtcMultiFrame` may be used if the GPT Actions UI exposes it, but it is optional because `/run` supports multi-frame routing.
 - Use `runQuantBtcModel` for one explicit horizon.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 - Use `getQuantBtcStatus` to inspect current public API limits, sources, cache TTL, and operational status.
