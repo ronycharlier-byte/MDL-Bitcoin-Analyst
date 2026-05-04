@@ -567,6 +567,16 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
         for result in results
         if result.get("provenance", {}).get("reference_spot_timestamp")
     ]
+    fundamental_statuses = {
+        result.get("data_status", {}).get("fundamental_variables")
+        for result in results
+        if result.get("data_status", {}).get("fundamental_variables")
+    }
+    market_statuses = {
+        result.get("data_status", {}).get("market_prices")
+        for result in results
+        if result.get("data_status", {}).get("market_prices")
+    }
 
     return {
         "status": "ok" if not errors else "partial",
@@ -587,10 +597,12 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
             "fresh_run": True,
         },
         "data_status": {
-            "market_prices": "real_or_mock_per_frame",
+            "market_prices": "real" if market_statuses == {"real"} else "real_or_mock_per_frame",
             "simulation_outputs": "inferred",
             "risk_metrics": "inferred",
-            "fundamental_variables": "absent_unless_supplied",
+            "fundamental_variables": "partial_real_absent"
+            if "partial_real_absent" in fundamental_statuses
+            else "absent_unless_supplied",
         },
         "version": version_payload(),
         "warning": (
