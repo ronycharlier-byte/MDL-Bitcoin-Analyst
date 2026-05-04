@@ -37,9 +37,6 @@ paths:
       operationId: runQuantBtcModel
       summary: Run the probabilistic BTC model
       description: Produces probabilities, distributions, risk metrics, stress tests and provenance. Never returns deterministic advice.
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -121,9 +118,6 @@ paths:
     get:
       operationId: latestQuantBtcReport
       summary: Return latest generated report artifacts
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
       responses:
         "200":
           description: Latest report and dashboard markdown.
@@ -143,14 +137,6 @@ paths:
                   warning:
                     type: string
 components:
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: x-api-key
-    BearerAuth:
-      type: http
-      scheme: bearer
   schemas:
     Placeholder:
       type: object
