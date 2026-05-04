@@ -120,9 +120,10 @@ No-sleep Cloudflare Worker requirements:
 - Default fresh analysis route: `getQuantBtcLiteStatus` then `runQuantBtcMultiFrame` with 7, 30, 90, 180 and 365 day horizons.
 - Required bridge fields when present: `cloudflare_bridge.mode`, `cloudflare_bridge.source_policy`, `cloudflare_bridge.render_api_base`.
 - Primary market source remains Bitget through Render. If the bridge fails, live output is absent.
-- Fundamental fields follow the Render response: ETF flows, funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq may be real when reachable; liquidations and exchange reserves are absent unless explicitly present.
+- Fundamental fields follow the Render response: ETF flows, funding rate, open interest, hash rate, exchange reserves, stablecoin supply, DXY, US rates and Nasdaq may be real when reachable. Liquidations are real only when the Bitget public WebSocket emits a BTCUSDT push during the configured observation window; otherwise they are absent.
 - Fresh run responses may include an `archive` object with `archive_id`, SQLite table and runtime JSON/Markdown paths.
 - GitHub Actions external archive may store compact live-run summaries under `external_archive/live_runs/`; these are audit snapshots, not raw simulation dumps.
+- GitHub Actions monitor opens or updates a visible `[quant-btc-monitor-alert]` issue if live quality checks fail, then closes it on recovery.
 - Public rate limit is best-effort per IP / Worker isolate. A 429 response means no live model output was produced.
 
 ## Known Coherence Note

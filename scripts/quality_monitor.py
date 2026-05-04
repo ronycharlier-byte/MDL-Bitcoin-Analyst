@@ -12,20 +12,18 @@ from typing import Any
 
 CF_BASE = os.getenv("CF_BASE", "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev").rstrip("/")
 RENDER_BASE = os.getenv("RENDER_BASE", "https://quant-btc-model-api.onrender.com").rstrip("/")
-MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.4.0")
+MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.5.0")
 EXPECTED_HORIZONS = [7, 30, 90, 180, 365]
 REQUIRED_REAL_FIELDS = {
     item.strip()
     for item in os.getenv(
         "REQUIRED_REAL_FIELDS",
-        "etf_flows,funding_rate,open_interest,hash_rate,stablecoins_supply,dxy,us_rates,nasdaq",
+        "etf_flows,funding_rate,open_interest,hash_rate,exchange_reserves,stablecoins_supply,dxy,us_rates,nasdaq",
     ).split(",")
     if item.strip()
 }
 ALLOWED_ABSENT_FIELDS = {
-    item.strip()
-    for item in os.getenv("ALLOWED_ABSENT_FIELDS", "liquidations,exchange_reserves").split(",")
-    if item.strip()
+    item.strip() for item in os.getenv("ALLOWED_ABSENT_FIELDS", "liquidations").split(",") if item.strip()
 }
 
 
@@ -100,6 +98,12 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     render_sources = render_status.get("data_sources") or {}
     require("etf_flows" in render_sources, "Render status does not expose ETF flows source", render_sources)
     require("etf_flows" not in set(render_sources.get("absent_without_connector") or []), "ETF flows still marked absent", render_sources)
+    require("exchange_reserves" in render_sources, "Render status does not expose exchange reserves source", render_sources)
+    require(
+        "exchange_reserves" not in set(render_sources.get("absent_without_connector") or []),
+        "Exchange reserves still marked absent",
+        render_sources,
+    )
 
     horizons = run.get("horizons") or []
     frames = run.get("frames") or []

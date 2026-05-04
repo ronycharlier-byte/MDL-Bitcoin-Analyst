@@ -22,7 +22,7 @@ All extracted corpus claims have reliability `unknown` unless independently veri
 |---|---|---|---|---|
 | G-001 | The BTC engine must output probabilities, distributions, and risk measures, not certainty. | model_governance | high | inferred from system rules |
 | G-002 | The stored latest market data source is Bitget BTCUSDT spot candles; live API runs also append the Bitget BTCUSDT spot ticker. | data_source | high | real |
-| G-003 | Fundamental coverage is partial: live API runs may include real point-in-time values for ETF flows, funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq when sources respond; missing fields remain absent. | data_quality | high | partial_real_absent |
+| G-003 | Fundamental coverage is partial: live API runs may include real point-in-time values for ETF flows, funding rate, open interest, hash rate, exchange reserves, stablecoin supply, DXY, US rates and Nasdaq when sources respond; liquidations are real only when observed from Bitget WebSocket; missing fields remain absent. | data_quality | high | partial_real_absent |
 | G-004 | The latest confidence score is 76/100 in the current latest_report.md export. | model_output | high | inferred |
 | G-005 | Stress tests are hypothetical shocks, not predictions. | risk | high | inferred |
 | G-006 | Backtests are empirical diagnostics, not proof of future performance. | validation | high | inferred |

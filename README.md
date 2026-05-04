@@ -101,11 +101,12 @@ Live online fundamentals are partial:
 
 - `etf_flows`: Farside Investors Bitcoin ETF flow total in USD millions.
 - `funding_rate` and `open_interest`: Bitget futures.
+- `liquidations`: Bitget UTA public liquidation WebSocket BTCUSDT quote amount when a push is received during the configured observation window; otherwise left `NULL`.
 - `hash_rate`: Blockchain.com hash-rate chart.
+- `exchange_reserves`: Bitget Proof of Reserves BTC platform assets.
 - `stablecoins_supply`: DeFiLlama stablecoin pegged USD total.
 - `dxy` and `nasdaq`: Stooq market quotes.
 - `us_rates`: FRED DGS10, with U.S. Treasury 10Y yield fallback.
-- `liquidations` and `exchange_reserves`: left `NULL` unless supplied by an audited file or future connector.
 
 The public API includes a short SQLite-backed cache, a SQLite-backed rate limit with in-memory fallback, and version metadata:
 
@@ -123,7 +124,7 @@ GitHub Actions monitoring:
 .github/workflows/archive-live-run.yml
 ```
 
-The monitor runs every 10 minutes and fails if critical quality checks regress: Bitget-only routing, 5 default frames, backend version, runtime archive creation, ETF flows, and required live fundamentals.
+The monitor runs every 10 minutes and fails if critical quality checks regress: Bitget-only routing, 5 default frames, backend version, runtime archive creation, ETF flows, exchange reserves, and required live fundamentals. If it fails, GitHub Actions opens or updates a visible issue titled `[quant-btc-monitor-alert] Live API quality monitor failing`; the next successful monitor closes it.
 
 The archive workflow runs every 6 hours and commits compact live-run summaries into:
 

@@ -61,8 +61,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.8.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.8.0";
+const WORKER_VERSION = "1.9.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.9.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -132,10 +132,19 @@ export default {
             fallback_market_sources: [],
             fundamental_features: "partial_real_absent_from_render_when_sources_are_reachable",
             partial_fundamental_sources: [
+              "farside_bitcoin_etf_flow_total_usd_m",
               "bitget_current_fund_rate",
               "bitget_open_interest",
+              "bitget_proof_of_reserves_btc_platform_assets",
+              "blockchain_info_hash_rate_chart",
+              "defillama_stablecoins_total_pegged_usd",
+              "fred_dgs10_10y_treasury_rate",
+              "treasury_daily_10y_yield_curve",
               "stooq_dx_f_quote",
               "stooq_ndx_quote"
+            ],
+            websocket_fundamental_sources: [
+              "bitget_uta_liquidation_ws_btcusdt_quote_observed_window"
             ],
             corpus_knowledge_base: "absent"
           },
@@ -145,8 +154,9 @@ export default {
             recommended_gpt_flow: "Call getQuantBtcLiteStatus, then runQuantBtcMultiFrame for complete analysis or runQuantBtcModel for one explicit horizon."
           },
           limitations: [
-            "Cloudflare direct egress to Bitget is not used because the required source is Bitget through the Render bridge.",
+            "Cloudflare routes GPT analysis to the Render Bitget full engine; direct Worker quant-lite code remains a backup implementation only.",
             "If the Render bridge is unavailable, live Bitget model output is absent rather than replaced by another exchange.",
+            "Liquidations are real only when the Bitget public WebSocket emits a BTCUSDT liquidation push during the configured observation window; otherwise the field is absent.",
             "Outputs are probabilistic scenarios, not deterministic predictions.",
             "Public endpoint has a best-effort per-IP in-isolate rate limit and simulation caps.",
             "Every precise number must be cited with model_run_id, report_date, reference_spot and data status."

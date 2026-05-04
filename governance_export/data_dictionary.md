@@ -71,9 +71,9 @@ Latest export status: partial_real_absent.
 | etf_flows | Latest published total Bitcoin ETF net flow in USD millions. | real in live API when Farside Investors provides it; absent otherwise |
 | funding_rate | Perpetual futures funding rate. | real in live API when Bitget provides it; absent otherwise |
 | open_interest | Derivatives open interest. | real in live API when Bitget provides it; absent otherwise |
-| liquidations | Liquidation volume. | absent |
+| liquidations | BTCUSDT liquidation amount from Bitget UTA public liquidation WebSocket, unit quote coin/USDT. | real only if a live Bitget push is observed during the configured observation window; absent otherwise |
 | hash_rate | Bitcoin network hash rate. | real in live API when Blockchain.com provides it; absent otherwise |
-| exchange_reserves | BTC reserves held on exchanges. | absent |
+| exchange_reserves | Bitget Proof of Reserves BTC platform assets, unit BTC. | real in live API when Bitget Proof of Reserves provides it; absent otherwise |
 | stablecoins_supply | Stablecoin supply/liquidity proxy. | real in live API when DeFiLlama provides it; absent otherwise |
 | dxy | US Dollar Index. | real in live API when Stooq provides it; absent otherwise |
 | us_rates | US 10Y Treasury rate proxy. | real in live API when FRED DGS10 or U.S. Treasury provides it; absent otherwise |

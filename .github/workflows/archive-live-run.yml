@@ -25,9 +25,9 @@ jobs:
         env:
           CF_BASE: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
           RENDER_BASE: https://quant-btc-model-api.onrender.com
-          MIN_API_VERSION: "1.4.0"
-          REQUIRED_REAL_FIELDS: etf_flows,funding_rate,open_interest,hash_rate,stablecoins_supply,dxy,us_rates,nasdaq
-          ALLOWED_ABSENT_FIELDS: liquidations,exchange_reserves
+          MIN_API_VERSION: "1.5.0"
+          REQUIRED_REAL_FIELDS: etf_flows,funding_rate,open_interest,hash_rate,exchange_reserves,stablecoins_supply,dxy,us_rates,nasdaq
+          ALLOWED_ABSENT_FIELDS: liquidations
         run: |
           set -euo pipefail
           python scripts/archive_live_run.py --output-dir external_archive/live_runs

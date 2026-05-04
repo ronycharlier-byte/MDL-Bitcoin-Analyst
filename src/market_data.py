@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import csv
+import os
 import re
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from html import unescape
@@ -388,6 +390,118 @@ def _fetch_bitget_open_interest(logger) -> tuple[float | None, str | None]:
     return None, None
 
 
+def _fetch_bitget_liquidations(logger) -> tuple[float | None, str | None]:
+    timeout_seconds = float(os.getenv("BITGET_LIQUIDATION_WS_TIMEOUT_SECONDS", "6"))
+    source_name = "bitget_uta_liquidation_ws_btcusdt_quote_observed_window"
+    if timeout_seconds <= 0:
+        logger.warning("liquidations_absent | source=%s | reason=websocket_disabled", source_name)
+        return None, None
+    try:
+        import websocket  # type: ignore
+    except Exception as exc:
+        logger.warning("liquidations_absent | source=%s | reason=websocket_client_unavailable | error=%s", source_name, exc)
+        return None, None
+
+    ws = None
+    try:
+        ws = websocket.create_connection("wss://ws.bitget.com/v3/ws/public", timeout=min(timeout_seconds, 10))
+        ws.settimeout(max(1.0, timeout_seconds))
+        ws.send(
+            json.dumps(
+                {
+                    "op": "subscribe",
+                    "args": [{"instType": "usdt-futures", "topic": "liquidation"}],
+                }
+            )
+        )
+        deadline = time.monotonic() + timeout_seconds
+        total_quote_amount = 0.0
+        btc_events = 0
+        observed_push = False
+        last_error = None
+        while time.monotonic() < deadline:
+            ws.settimeout(max(0.5, deadline - time.monotonic()))
+            try:
+                payload = json.loads(ws.recv())
+            except Exception as exc:
+                last_error = exc
+                break
+            if payload.get("event") == "error":
+                logger.warning(
+                    "liquidations_absent | source=%s | reason=bitget_subscription_error | msg=%s",
+                    source_name,
+                    payload.get("msg"),
+                )
+                return None, None
+            rows = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                continue
+            observed_push = True
+            for row in rows:
+                if not isinstance(row, dict) or str(row.get("symbol", "")).upper() != "BTCUSDT":
+                    continue
+                amount = pd.to_numeric(pd.Series([row.get("amount")]), errors="coerce").iloc[0]
+                if pd.notna(amount):
+                    total_quote_amount += float(amount)
+                    btc_events += 1
+            break
+        if observed_push:
+            logger.info(
+                "fundamental_loaded | field=liquidations | source=%s | value=%s | unit=USDT_quote | events=%s",
+                source_name,
+                total_quote_amount,
+                btc_events,
+            )
+            return total_quote_amount, source_name
+        logger.warning(
+            "liquidations_absent | source=%s | reason=no_bitget_push_within_timeout | timeout_seconds=%s | last_error=%s",
+            source_name,
+            timeout_seconds,
+            last_error,
+        )
+    except Exception as exc:
+        logger.warning("liquidations_fetch_failed | source=%s | error=%s", source_name, exc)
+    finally:
+        try:
+            if ws is not None:
+                ws.close()
+        except Exception:
+            pass
+    return None, None
+
+
+def _fetch_bitget_exchange_reserves(logger) -> tuple[float | None, str | None]:
+    url = "https://api.bitget.com/api/v3/market/proof-of-reserves"
+    source_name = "bitget_proof_of_reserves_btc_platform_assets"
+    try:
+        payload = _request_json(url, timeout=15)
+        if not payload or payload.get("code") != "00000":
+            logger.warning(
+                "exchange_reserves_absent | source=%s | payload_code=%s | msg=%s",
+                source_name,
+                (payload or {}).get("code"),
+                (payload or {}).get("msg"),
+            )
+            return None, None
+        reserve_data = (payload.get("data") or {}).get("list") or []
+        for row in reserve_data:
+            if str(row.get("coin", "")).upper() != "BTC":
+                continue
+            platform_assets = float(row["platformAssets"])
+            logger.info(
+                "fundamental_loaded | field=exchange_reserves | source=%s | value=%s | unit=BTC | reserve_ratio=%s | merkle_root=%s",
+                source_name,
+                platform_assets,
+                row.get("reserveRatio"),
+                (payload.get("data") or {}).get("merkleRootHash"),
+            )
+            return platform_assets, source_name
+        logger.warning("exchange_reserves_absent | source=%s | reason=btc_row_missing", source_name)
+    except Exception as exc:
+        logger.warning("exchange_reserves_fetch_failed | source=%s | error=%s", source_name, exc)
+    return None, None
+
+
 def _fetch_stooq_quote(symbol: str, field_name: str, source_name: str, logger) -> tuple[float | None, str | None]:
     url = f"https://stooq.com/q/l/?s={symbol}&i=d"
     try:
@@ -632,10 +746,20 @@ def load_online_fundamental_snapshot(price_frame: pd.DataFrame, logger) -> tuple
         values["open_interest"] = open_interest
         sources.append(source or "bitget_open_interest")
 
+    liquidations, source = _fetch_bitget_liquidations(logger)
+    if liquidations is not None:
+        values["liquidations"] = liquidations
+        sources.append(source or "bitget_uta_liquidation_ws_btcusdt_quote_observed_window")
+
     hash_rate, source = _fetch_blockchain_hash_rate(logger)
     if hash_rate is not None:
         values["hash_rate"] = hash_rate
         sources.append(source or "blockchain_info_hash_rate_chart")
+
+    exchange_reserves, source = _fetch_bitget_exchange_reserves(logger)
+    if exchange_reserves is not None:
+        values["exchange_reserves"] = exchange_reserves
+        sources.append(source or "bitget_proof_of_reserves_btc_platform_assets")
 
     stablecoins_supply, source = _fetch_defillama_stablecoins_supply(logger)
     if stablecoins_supply is not None:

@@ -103,7 +103,7 @@ When relevant, state these limits explicitly:
 
 Default live frames are 7, 30, 90, 180 and 365 days. Each numeric value must remain attached to its frame.
 
-Current online fundamental coverage is partial. ETF flows, funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq may be real when the API provides them. Liquidations and exchange reserves remain absent unless supplied by a connected source or user file.
+Current online fundamental coverage is partial. ETF flows, funding rate, open interest, hash rate, exchange reserves, stablecoin supply, DXY, US rates and Nasdaq may be real when the API provides them. Liquidations are real only when the Bitget public liquidation WebSocket emits a BTCUSDT push during the configured observation window; otherwise they remain absent.
 
 If rate limit 429 is returned, the GPT must not loop retries. It must report temporary rate limiting and keep the answer qualitative unless a valid run result is available.
 

@@ -34,9 +34,9 @@ DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
-API_VERSION = "1.4.0"
+API_VERSION = "1.5.0"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.4.0"
+SCHEMA_VERSION = "gpt_action_schema_v1.5.0"
 
 
 def resolve_git_commit() -> str:
@@ -917,14 +917,18 @@ def status() -> dict[str, Any]:
             "etf_flows": "Farside Investors Bitcoin ETF Flow total net flow in USD millions when available",
             "funding_rate": "Bitget current funding rate when available",
             "open_interest": "Bitget open interest when available",
+            "liquidations": (
+                "Bitget UTA public liquidation WebSocket BTCUSDT observed quote amount. "
+                "If no push is received during the configured observation window, the field remains absent."
+            ),
             "hash_rate": "Blockchain.com hash-rate chart when available",
+            "exchange_reserves": "Bitget Proof of Reserves BTC platform assets when available",
             "dxy": "Stooq DX.F quote when available",
             "us_rates": "FRED DGS10 or U.S. Treasury 10Y rate when available",
             "nasdaq": "Stooq ^NDX quote when available",
             "stablecoins_supply": "DeFiLlama stablecoins peggedUSD total when available",
             "absent_without_connector": [
                 "liquidations",
-                "exchange_reserves",
             ],
         },
         "runtime_controls": {

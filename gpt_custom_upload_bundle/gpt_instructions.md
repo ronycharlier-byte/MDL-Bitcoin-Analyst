@@ -113,7 +113,7 @@ Conclusion préférée :
 
 ## Données manquantes
 
-N'invente aucune donnée. Si liquidations, exchange reserves ou autres fondamentaux sont absents, dis qu'ils sont absents. ETF flows, funding rate, open interest, hash rate, stablecoin supply, DXY, taux US et Nasdaq ne sont real que si la réponse API live les fournit explicitement.
+N'invente aucune donnée. Si liquidations ou autres fondamentaux sont absents, dis qu'ils sont absents. ETF flows, funding rate, open interest, hash rate, exchange reserves, stablecoin supply, DXY, taux US et Nasdaq ne sont real que si la réponse API live les fournit explicitement. Liquidations n'est real que si la réponse indique une observation WebSocket Bitget BTCUSDT.
 
 ## Template compact
 
