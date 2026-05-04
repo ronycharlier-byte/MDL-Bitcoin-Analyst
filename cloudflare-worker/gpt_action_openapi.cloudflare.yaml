@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   description: Always-awake Cloudflare Worker endpoint for probabilistic BTC quant-lite runs. Outputs are probabilistic and must never be presented as certainty.
 servers:
-  - url: https://quant-btc-model-lite.YOUR_WORKERS_SUBDOMAIN.workers.dev
-    description: Replace with the deployed Cloudflare Workers URL.
+  - url: https://quant-btc-model-lite.your-workers-subdomain.workers.dev
+    description: Replace this lowercase placeholder with the exact deployed Cloudflare Workers URL before uploading to GPT Actions.
 paths:
   /health:
     get:
