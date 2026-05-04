@@ -23,6 +23,8 @@ jobs:
           from api_server import app
           client = TestClient(app)
           response = client.get("/health")
+          print(response.status_code)
+          print(response.json())
           assert response.status_code == 200
           assert response.json()["status"] == "ok"
           PY
