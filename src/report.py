@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import os
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -25,6 +27,27 @@ def _fmt_price(value) -> str:
     if value is None or not np.isfinite(value):
         return "NULL"
     return f"${float(value):,.2f}"
+
+
+def _code_version() -> str:
+    for key in ("RENDER_GIT_COMMIT", "GIT_COMMIT", "SOURCE_VERSION"):
+        value = os.getenv(key)
+        if value:
+            return value[:12]
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if completed.returncode == 0 and completed.stdout.strip():
+            return completed.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 def _missing_data(price_frame: pd.DataFrame, fundamentals: pd.DataFrame) -> list[str]:
@@ -125,7 +148,18 @@ def generate_reports(
     data_tag = "MOCK" if STATUS_MOCK in statuses else ",".join(statuses)
     missing = _missing_data(price_frame, fundamentals)
     fundamental_missing = [item for item in missing if item.startswith("fundamental_features.")]
-    fundamentals_status = "absent" if fundamental_missing else ",".join(sorted(set(fundamentals["statut"].dropna().astype(str))))
+    fundamental_columns = [column for column in FUNDAMENTAL_COLUMNS if column in fundamentals.columns]
+    available_fundamental_columns = [
+        column
+        for column in fundamental_columns
+        if pd.to_numeric(fundamentals[column], errors="coerce").notna().any()
+    ]
+    if not available_fundamental_columns:
+        fundamentals_status = "absent"
+    elif fundamental_missing:
+        fundamentals_status = "partial_real_absent"
+    else:
+        fundamentals_status = ",".join(sorted(set(fundamentals["statut"].dropna().astype(str))))
     regimes = _regime_breakdown(distribution)
     report_source_name = "reports/latest_report.md"
     weights = simulation_result.get("weights", {})
@@ -176,6 +210,7 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 - Report date: {timestamp}
 - Model run ID: `{run_id}`
 - Model version: source-code snapshot in `quant_btc_model/src`
+- Code version / git commit: {_code_version()}
 - Reference spot price: {_fmt_price(spot)}
 - Reference spot timestamp: {spot_timestamp}
 - Reference spot source: {spot_source}
@@ -183,6 +218,7 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 - Simulation outputs status: inferred
 - Risk metrics status: inferred
 - Fundamental variables status: {fundamentals_status}
+- Fundamental variables with real values: {", ".join(available_fundamental_columns) if available_fundamental_columns else "none"}
 - Rule: no precise quantitative figure should be reused without this source, report date, run ID, reference spot, and status context.
 
 ## Donnees utilisees

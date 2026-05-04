@@ -95,6 +95,28 @@ For multi-frame GPT analysis, use `POST /multi-run` with the standard horizons:
 }
 ```
 
+`/multi-run` uses a fast in-memory runtime. It captures one shared Bitget spot snapshot and applies it to every frame, so the 7/30/90/180/365 day outputs are comparable from the same reference price.
+
+Live online fundamentals are partial:
+
+- `funding_rate` and `open_interest`: Bitget futures.
+- `dxy` and `nasdaq`: Stooq market quotes.
+- `etf_flows`, `liquidations`, `hash_rate`, `exchange_reserves`, `stablecoins_supply`, and `us_rates`: left `NULL` unless supplied by an audited file or future connector.
+
+The public API includes a lightweight in-memory rate limit and version metadata:
+
+- `GET /version`
+- `api_version`
+- `model_version`
+- `schema_version`
+- `git_commit`
+
+GPT Custom upload bundle:
+
+```text
+gpt_custom_upload_bundle/
+```
+
 ## Data policy
 
 - No source file outside `quant_btc_model` is modified.

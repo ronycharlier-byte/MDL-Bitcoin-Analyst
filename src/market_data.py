@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -160,14 +161,18 @@ def fetch_bitget_prices(asset: str, logger, days: int = 1095) -> pd.DataFrame | 
         return None
 
 
+def _request_json(url: str, timeout: int = 10) -> dict | None:
+    request = urllib.request.Request(url, headers={"User-Agent": "quant-btc-model/1.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def fetch_bitget_spot_quote(asset: str, logger) -> pd.DataFrame | None:
     if asset.upper() != "BTC":
         return None
     url = "https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT"
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "quant-btc-model/1.0"})
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = _request_json(url, timeout=10)
         if payload.get("code") != "00000":
             logger.warning("bitget_spot_fetch_failed | code=%s | msg=%s", payload.get("code"), payload.get("msg"))
             return None
@@ -206,10 +211,71 @@ def fetch_bitget_spot_quote(asset: str, logger) -> pd.DataFrame | None:
         return None
 
 
-def append_realtime_spot(price_frame: pd.DataFrame, asset: str, logger, allow_online: bool = True) -> pd.DataFrame:
+def spot_override_frame(
+    asset: str,
+    price: float | None,
+    timestamp: str | None,
+    source: str | None,
+    logger,
+) -> pd.DataFrame | None:
+    if price is None:
+        return None
+    try:
+        numeric_price = float(price)
+        if not np.isfinite(numeric_price) or numeric_price <= 0:
+            return None
+        ts = pd.to_datetime(timestamp, errors="coerce", utc=True) if timestamp else pd.Timestamp.utcnow()
+        if pd.isna(ts):
+            ts = pd.Timestamp.utcnow()
+        frame = _standardize_price_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "timestamp": ts,
+                        "open": np.nan,
+                        "high": np.nan,
+                        "low": np.nan,
+                        "close": numeric_price,
+                        "volume": np.nan,
+                    }
+                ]
+            ),
+            asset,
+            source or "api_spot_snapshot_override",
+            STATUS_REAL,
+        )
+        logger.info(
+            "market_spot_override_loaded | source=%s | price=%s | timestamp=%s",
+            frame["source"].iloc[-1],
+            numeric_price,
+            frame["timestamp"].iloc[-1],
+        )
+        return frame
+    except Exception as exc:
+        logger.warning("spot_override_invalid | error=%s", exc)
+        return None
+
+
+def append_realtime_spot(
+    price_frame: pd.DataFrame,
+    asset: str,
+    logger,
+    allow_online: bool = True,
+    spot_override: dict | None = None,
+) -> pd.DataFrame:
     if not allow_online:
         return price_frame
-    spot_frame = fetch_bitget_spot_quote(asset, logger)
+    spot_frame = None
+    if spot_override:
+        spot_frame = spot_override_frame(
+            asset,
+            spot_override.get("price"),
+            spot_override.get("timestamp"),
+            spot_override.get("source"),
+            logger,
+        )
+    if spot_frame is None:
+        spot_frame = fetch_bitget_spot_quote(asset, logger)
     if spot_frame is None or spot_frame.empty:
         logger.warning("realtime_spot_absent | keeping_latest_available_close")
         return price_frame
@@ -256,7 +322,13 @@ def generate_mock_prices(asset: str, logger, days: int = 1095, seed: int = 42) -
     return _standardize_price_frame(raw, asset, "synthetic_market_generator", STATUS_MOCK)
 
 
-def load_market_prices(asset: str, logger, days: int = 1095, allow_online: bool = True) -> pd.DataFrame:
+def load_market_prices(
+    asset: str,
+    logger,
+    days: int = 1095,
+    allow_online: bool = True,
+    spot_override: dict | None = None,
+) -> pd.DataFrame:
     frame = load_prices_from_csv(asset, logger)
     if frame is None and allow_online:
         frame = fetch_bitget_prices(asset, logger, days=days)
@@ -264,7 +336,7 @@ def load_market_prices(asset: str, logger, days: int = 1095, allow_online: bool 
         frame = fetch_coingecko_prices(asset, logger, days=days)
     if frame is None or frame.empty:
         frame = generate_mock_prices(asset, logger, days=days)
-    frame = append_realtime_spot(frame, asset, logger, allow_online=allow_online)
+    frame = append_realtime_spot(frame, asset, logger, allow_online=allow_online, spot_override=spot_override)
 
     for column in ["open", "high", "low", "close", "volume"]:
         if frame[column].isna().all():
@@ -273,6 +345,93 @@ def load_market_prices(asset: str, logger, days: int = 1095, allow_online: bool 
     out = PROCESSED_DIR / f"{asset.upper()}_market_prices.csv"
     frame.to_csv(out, index=False)
     return frame
+
+
+def _latest_price_timestamp(price_frame: pd.DataFrame) -> str:
+    if price_frame is None or price_frame.empty:
+        return pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamps = pd.to_datetime(price_frame["timestamp"], errors="coerce", utc=True).dropna()
+    if timestamps.empty:
+        return pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return timestamps.iloc[-1].strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _fetch_bitget_funding_rate(logger) -> tuple[float | None, str | None]:
+    url = "https://api.bitget.com/api/v2/mix/market/current-fund-rate?symbol=BTCUSDT&productType=usdt-futures"
+    try:
+        payload = _request_json(url, timeout=10)
+        if payload and payload.get("code") == "00000" and payload.get("data"):
+            value = float(payload["data"][0]["fundingRate"])
+            logger.info("fundamental_loaded | field=funding_rate | source=bitget_current_fund_rate | value=%s", value)
+            return value, "bitget_current_fund_rate"
+        logger.warning("funding_rate_absent | source=bitget_current_fund_rate | payload_code=%s", (payload or {}).get("code"))
+    except Exception as exc:
+        logger.warning("funding_rate_fetch_failed | source=bitget_current_fund_rate | error=%s", exc)
+    return None, None
+
+
+def _fetch_bitget_open_interest(logger) -> tuple[float | None, str | None]:
+    url = "https://api.bitget.com/api/v2/mix/market/open-interest?symbol=BTCUSDT&productType=usdt-futures"
+    try:
+        payload = _request_json(url, timeout=10)
+        if payload and payload.get("code") == "00000" and payload.get("data"):
+            values = payload["data"].get("openInterestList") or []
+            if values:
+                value = float(values[0]["size"])
+                logger.info("fundamental_loaded | field=open_interest | source=bitget_open_interest | value=%s", value)
+                return value, "bitget_open_interest"
+        logger.warning("open_interest_absent | source=bitget_open_interest | payload_code=%s", (payload or {}).get("code"))
+    except Exception as exc:
+        logger.warning("open_interest_fetch_failed | source=bitget_open_interest | error=%s", exc)
+    return None, None
+
+
+def _fetch_stooq_quote(symbol: str, field_name: str, source_name: str, logger) -> tuple[float | None, str | None]:
+    url = f"https://stooq.com/q/l/?s={symbol}&i=d"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "quant-btc-model/1.0"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            text = response.read().decode("utf-8", errors="ignore").strip()
+        rows = list(csv.reader(text.splitlines()))
+        if not rows:
+            return None, None
+        row = rows[-1]
+        if len(row) < 7 or row[1].upper() == "N/D":
+            logger.warning("%s_absent | source=%s | raw=%s", field_name, source_name, text[:200])
+            return None, None
+        value = float(row[6])
+        logger.info("fundamental_loaded | field=%s | source=%s | value=%s", field_name, source_name, value)
+        return value, source_name
+    except Exception as exc:
+        logger.warning("%s_fetch_failed | source=%s | error=%s", field_name, source_name, exc)
+    return None, None
+
+
+def load_online_fundamental_snapshot(price_frame: pd.DataFrame, logger) -> tuple[dict[str, float], list[str]]:
+    values: dict[str, float] = {}
+    sources: list[str] = []
+
+    funding_rate, source = _fetch_bitget_funding_rate(logger)
+    if funding_rate is not None:
+        values["funding_rate"] = funding_rate
+        sources.append(source or "bitget_current_fund_rate")
+
+    open_interest, source = _fetch_bitget_open_interest(logger)
+    if open_interest is not None:
+        values["open_interest"] = open_interest
+        sources.append(source or "bitget_open_interest")
+
+    dxy, source = _fetch_stooq_quote("dx.f", "dxy", "stooq_dx_f_quote", logger)
+    if dxy is not None:
+        values["dxy"] = dxy
+        sources.append(source or "stooq_dx_f_quote")
+
+    nasdaq, source = _fetch_stooq_quote("%5Endx", "nasdaq", "stooq_ndx_quote", logger)
+    if nasdaq is not None:
+        values["nasdaq"] = nasdaq
+        sources.append(source or "stooq_ndx_quote")
+
+    return values, sorted(set(sources))
 
 
 def load_fundamental_features(asset: str, price_frame: pd.DataFrame, logger) -> pd.DataFrame:
@@ -303,9 +462,6 @@ def load_fundamental_features(asset: str, price_frame: pd.DataFrame, logger) -> 
             except Exception as exc:
                 logger.exception("fundamentals_csv_error | path=%s | error=%s", path, exc)
 
-    logger.warning("fundamentals_absent | all required fields left NULL | statut=missing")
-    for column in FUNDAMENTAL_COLUMNS:
-        log_missing(logger, f"fundamental_features.{column}", "no_local_file")
     frame = pd.DataFrame(
         {
             "timestamp": price_frame["timestamp"],
@@ -315,6 +471,39 @@ def load_fundamental_features(asset: str, price_frame: pd.DataFrame, logger) -> 
             "statut": STATUS_MISSING,
         }
     )
+    if asset.upper() == "BTC":
+        snapshot, sources = load_online_fundamental_snapshot(price_frame, logger)
+        if snapshot:
+            latest_timestamp = _latest_price_timestamp(price_frame)
+            if frame.empty:
+                frame = pd.DataFrame(
+                    {
+                        "timestamp": [latest_timestamp],
+                        "asset": [asset.upper()],
+                        **{column: [np.nan] for column in FUNDAMENTAL_COLUMNS},
+                        "source": ["no_fundamental_source"],
+                        "statut": [STATUS_MISSING],
+                    }
+                )
+            latest_index = frame.index[-1]
+            frame.loc[latest_index, "timestamp"] = latest_timestamp
+            for column, value in snapshot.items():
+                frame.loc[latest_index, column] = value
+            frame.loc[latest_index, "source"] = ",".join(sources)
+            frame.loc[latest_index, "statut"] = STATUS_REAL
+            logger.info(
+                "fundamentals_partial_snapshot_loaded | fields=%s | sources=%s",
+                sorted(snapshot),
+                sources,
+            )
+
+    for column in FUNDAMENTAL_COLUMNS:
+        if pd.to_numeric(frame[column], errors="coerce").isna().all():
+            log_missing(logger, f"fundamental_features.{column}", "no_online_or_local_source")
+    if frame[FUNDAMENTAL_COLUMNS].isna().all().all():
+        logger.warning("fundamentals_absent | all required fields left NULL | statut=missing")
+    else:
+        logger.warning("fundamentals_partial | unavailable_fields_left_NULL | statut=mixed_real_missing")
     out = PROCESSED_DIR / f"{asset.upper()}_fundamental_features.csv"
     frame.to_csv(out, index=False)
     return frame

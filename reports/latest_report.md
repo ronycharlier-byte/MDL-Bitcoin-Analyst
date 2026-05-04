@@ -1,7 +1,7 @@
 # Quant BTC Model - Latest Report
 
-Generated: 2026-05-04T12:45:43.086312+00:00
-Run ID: `BTC_ensemble_20260504T124542Z_24e975ff`
+Generated: 2026-05-04T13:17:22.171207+00:00
+Run ID: `BTC_ensemble_20260504T131721Z_26e52ae0`
 Asset: BTC
 Horizon: 365 days
 Simulations: 5000
@@ -13,23 +13,25 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 ## Provenance des chiffres
 
 - Report source: reports/latest_report.md
-- Report date: 2026-05-04T12:45:43.086312+00:00
-- Model run ID: `BTC_ensemble_20260504T124542Z_24e975ff`
+- Report date: 2026-05-04T13:17:22.171207+00:00
+- Model run ID: `BTC_ensemble_20260504T131721Z_26e52ae0`
 - Model version: source-code snapshot in `quant_btc_model/src`
-- Reference spot price: $78,955.53
-- Reference spot timestamp: 2026-05-04T12:45:40Z
+- Code version / git commit: 16ab407b5622
+- Reference spot price: $78,912.63
+- Reference spot timestamp: 2026-05-04T13:17:18Z
 - Reference spot source: bitget_btcusdt_spot_ticker_realtime
 - Market prices status: real
 - Simulation outputs status: inferred
 - Risk metrics status: inferred
-- Fundamental variables status: absent
+- Fundamental variables status: partial_real_absent
+- Fundamental variables with real values: funding_rate, open_interest, dxy, nasdaq
 - Rule: no precise quantitative figure should be reused without this source, report date, run ID, reference spot, and status context.
 
 ## Donnees utilisees
 
 - Market rows: 1091
-- Latest spot used: $78,955.53
-- Latest spot timestamp: 2026-05-04T12:45:40Z
+- Latest spot used: $78,912.63
+- Latest spot timestamp: 2026-05-04T13:17:18Z
 - Market sources: bitget_btcusdt_spot_candles, bitget_btcusdt_spot_ticker_realtime
 - Fundamental rows: 1091
 - Technical feature rows: 1091
@@ -40,15 +42,11 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 ## Donnees manquantes
 
 - fundamental_features.etf_flows: NULL, warning logged
-- fundamental_features.funding_rate: NULL, warning logged
-- fundamental_features.open_interest: NULL, warning logged
 - fundamental_features.liquidations: NULL, warning logged
 - fundamental_features.hash_rate: NULL, warning logged
 - fundamental_features.exchange_reserves: NULL, warning logged
 - fundamental_features.stablecoins_supply: NULL, warning logged
-- fundamental_features.dxy: NULL, warning logged
 - fundamental_features.us_rates: NULL, warning logged
-- fundamental_features.nasdaq: NULL, warning logged
 
 ## Hypotheses
 
@@ -70,65 +68,65 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 
 ## Distribution horizon 365 jours
 
-- P10 return: -33.00%
-- Median return: 27.62%
-- P90 return: 150.35%
-- P10 price: $52,900.03
-- Median price: $100,765.44
-- P90 price: $197,665.19
+- P10 return: -34.49%
+- Median return: 24.07%
+- P90 return: 146.48%
+- P10 price: $51,693.42
+- Median price: $97,904.94
+- P90 price: $194,501.05
 
 ## Probabilites seuils
 
-- P(return > 0): 68.02%
-- P(return <= -10%): 25.04%
-- P(return <= -30%): 11.86%
-- P(return >= +30%): 48.70%
+- P(return > 0): 66.20%
+- P(return <= -10%): 26.78%
+- P(return <= -30%): 12.68%
+- P(return >= +30%): 46.56%
 
 ## Repartition des regimes
 
-- Bull: 54.48%
-- Bear: 17.30%
-- Range: 14.02%
-- Non classe / transition: 14.20%
-- Controle de coherence: The bull/bear/range probabilities sum to 85.80%, leaving 14.20% as non-classified / transition. Do not present the bull/bear/range split as complete.
+- Bull: 52.16%
+- Bear: 19.90%
+- Range: 14.26%
+- Non classe / transition: 13.68%
+- Controle de coherence: The bull/bear/range probabilities sum to 86.32%, leaving 13.68% as non-classified / transition. Do not present the bull/bear/range split as complete.
 
 ## VaR / CVaR
 
-- VaR 95 du rendement simule, exprimee comme perte positive: 44.83%
-- VaR 99 du rendement simule, exprimee comme perte positive: 60.39%
-- CVaR 95 du rendement simule, exprimee comme perte moyenne de queue positive: 53.63%
-- CVaR 99 du rendement simule, exprimee comme perte moyenne de queue positive: 68.24%
+- VaR 95 du rendement simule, exprimee comme perte positive: 44.62%
+- VaR 99 du rendement simule, exprimee comme perte positive: 60.67%
+- CVaR 95 du rendement simule, exprimee comme perte moyenne de queue positive: 54.48%
+- CVaR 99 du rendement simule, exprimee comme perte moyenne de queue positive: 66.74%
 - Interpretation VaR 95: under model assumptions, the worst 5% simulated scenarios begin around this loss threshold or worse.
 - Interpretation CVaR 95: this estimates the average loss inside scenarios worse than VaR 95.
-- Skewness: 2.55
-- Kurtosis: 19.33
-- Expected max drawdown: -36.17%
-- Conditional volatility: 34.02%
+- Skewness: 2.64
+- Kurtosis: 21.12
+- Expected max drawdown: -37.31%
+- Conditional volatility: 34.00%
 
 ## Stress tests
 
 | Scenario | Instant shock | Shocked spot | Shocked median terminal |
 |---|---:|---:|---:|
-| crash_-30pct | -30.00% | $55,268.87 | $70,535.81 |
-| crash_-50pct | -50.00% | $39,477.76 | $50,382.72 |
-| etf_outflow_massif | -18.00% | $64,743.53 | $82,627.66 |
-| hausse_dxy | -8.00% | $72,639.09 | $92,704.20 |
-| hausse_taux_us | -10.00% | $71,059.98 | $90,688.89 |
-| chute_nasdaq | -12.00% | $69,480.87 | $88,673.58 |
-| cascade_liquidations | -28.00% | $56,847.98 | $72,551.11 |
+| crash_-30pct | -30.00% | $55,238.84 | $68,533.46 |
+| crash_-50pct | -50.00% | $39,456.32 | $48,952.47 |
+| etf_outflow_massif | -18.00% | $64,708.36 | $80,282.05 |
+| hausse_dxy | -8.00% | $72,599.62 | $90,072.55 |
+| hausse_taux_us | -10.00% | $71,021.37 | $88,114.45 |
+| chute_nasdaq | -12.00% | $69,443.11 | $86,156.35 |
+| cascade_liquidations | -28.00% | $56,817.09 | $70,491.56 |
 
 ## Position sizing
 
 - Risk budget: 2.00%
-- VaR based fraction: 4.46%
-- CVaR based fraction: 3.73%
+- VaR based fraction: 4.48%
+- CVaR based fraction: 3.67%
 - Kelly fraction: 25.00%
-- Drawdown limited fraction: 2.06%
+- Drawdown limited fraction: 1.97%
 
 ## Confidence score
 
 - Score: 42/100
-- Components: {'data_quality': 70.0, 'model_stability': 0.0, 'backtest': 63.6, 'uncertainty': 10.0}
+- Components: {'data_quality': 70.01, 'model_stability': 0.0, 'backtest': 63.6, 'uncertainty': 10.0}
 - Notes: Most fundamental features are NULL.; Wide P10-P90 interval.; High tail loss estimate.; Distribution uncertainty is high.
 
 ## Backtest

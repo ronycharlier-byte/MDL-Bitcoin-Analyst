@@ -57,6 +57,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-corpus", action="store_true", help="Skip corpus copy/chunk/claim pipeline.")
     parser.add_argument("--no-online", action="store_true", help="Do not attempt online market data fetch.")
     parser.add_argument("--max-corpus-docs", type=int, default=100, help="Maximum relevant corpus files to copy.")
+    parser.add_argument("--spot-override-price", type=float, default=None, help="Optional externally captured spot price snapshot.")
+    parser.add_argument("--spot-override-timestamp", default=None, help="Timestamp for --spot-override-price.")
+    parser.add_argument("--spot-override-source", default=None, help="Source label for --spot-override-price.")
     return parser.parse_args(argv)
 
 
@@ -97,6 +100,13 @@ def run(argv: list[str] | None = None) -> int:
             logger,
             days=max(1095, args.horizon + 500),
             allow_online=not args.no_online,
+            spot_override={
+                "price": args.spot_override_price,
+                "timestamp": args.spot_override_timestamp,
+                "source": args.spot_override_source,
+            }
+            if args.spot_override_price is not None
+            else None,
         )
         input_status = _status_from_inputs(price_frame)
         insert_dataframe("market_prices", price_frame)
