@@ -20,3 +20,4 @@ logs/*
 cloudflare-worker/node_modules/
 cloudflare-worker/.wrangler/
 cloudflare-worker/dist/
+cloudflare-worker/gpt_action_openapi.cloudflare.deployed.yaml

@@ -58,10 +58,18 @@ npx wrangler login
 npm run deploy
 ```
 
-After deployment:
+Safer one-command path after `npm install`:
+
+```powershell
+npm run deploy:schema
+```
+
+This logs in if needed, deploys the Worker, detects the real `workers.dev` URL, and writes `gpt_action_openapi.cloudflare.deployed.yaml`. Upload the generated file, not the placeholder template.
+
+Manual path after deployment:
 
 1. Copy the generated `workers.dev` URL.
-2. Replace `YOUR_WORKERS_SUBDOMAIN` in `cloudflare-worker/gpt_action_openapi.cloudflare.yaml`.
+2. Replace `https://quant-btc-model-lite.your-workers-subdomain.workers.dev` in `cloudflare-worker/gpt_action_openapi.cloudflare.yaml`.
 3. Upload that schema into GPT Custom Actions.
 4. Keep the governance export files in the GPT Knowledge.
 
