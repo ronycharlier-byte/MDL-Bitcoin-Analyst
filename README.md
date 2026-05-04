@@ -263,3 +263,10 @@ Reports include data used, missing data, assumptions, model weights, P10/median/
 - Mock data are never presented as real data.
 - Exceptions are caught, logged, and written to `data/last_error.json`.
 - This is research infrastructure, not financial advice.
+
+## License
+
+This repository is proprietary and source-visible for review/evaluation only.
+Commercial use, resale, hosted services, production deployments, GPT products,
+client work, or redistribution require prior written permission. See
+[`LICENSE`](LICENSE).

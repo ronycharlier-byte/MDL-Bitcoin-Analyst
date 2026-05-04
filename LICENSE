@@ -1,0 +1,65 @@
+Quant BTC Model Proprietary License
+
+Copyright (c) 2026 Rony Charlier / MDL Bitcoin Analyst.
+All rights reserved.
+
+This repository and its contents, including source code, documentation, model
+logic, schemas, prompts, governance files, reports, deployment configuration,
+and related assets (the "Software"), are proprietary.
+
+1. Permitted Use
+
+You may view, download, clone, and run the Software only for personal review,
+internal evaluation, security review, or non-production testing.
+
+2. Commercial Use Requires Written Permission
+
+You may not use the Software for any commercial, revenue-generating, client,
+fund, trading-desk, advisory, SaaS, API, hosted, resale, redistribution, or
+production purpose without prior written permission from the copyright holder.
+
+3. Restrictions
+
+Without prior written permission, you may not:
+
+- sell, sublicense, rent, lease, or otherwise commercialize the Software;
+- offer the Software, or a derivative of it, as a hosted service, GPT, API,
+  dashboard, trading tool, analytics product, or consulting deliverable;
+- copy substantial parts of the model logic, prompts, governance framework,
+  schemas, reports, or backend design into another product or repository;
+- remove copyright, license, provenance, risk, or governance notices;
+- present the Software as providing deterministic predictions, guaranteed
+  returns, or financial advice.
+
+4. Contributions
+
+Unless a separate written agreement says otherwise, any contribution submitted
+to this repository may be used by the copyright holder in the Software,
+including in commercial versions.
+
+5. No Financial Advice
+
+The Software is research and decision-support infrastructure. It produces
+probabilistic scenarios, distributions, and risk estimates. It is not financial
+advice, investment advice, a trading signal service, or a guarantee of future
+market behavior.
+
+6. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, DATA ACCURACY, AVAILABILITY, OR
+FITNESS FOR TRADING OR INVESTMENT USE.
+
+7. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER SHALL NOT BE
+LIABLE FOR ANY CLAIM, DAMAGE, LOSS, TRADING LOSS, LOST PROFIT, DATA LOSS,
+BUSINESS INTERRUPTION, OR OTHER LIABILITY ARISING FROM OR RELATED TO THE
+SOFTWARE OR ITS USE.
+
+8. Separate Commercial License
+
+Commercial, production, institutional, hosted, or redistributed use requires a
+separate written commercial license from the copyright holder.
+
