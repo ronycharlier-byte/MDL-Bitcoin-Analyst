@@ -28,6 +28,7 @@ Live analysis rule:
 - The Cloudflare schema bridges to Render so Bitget remains the required source.
 - Do not substitute any non-Bitget exchange if the Bitget bridge fails.
 - Use `runQuantBtcMultiFrame` for complete current BTC analysis.
+- If `runQuantBtcMultiFrame` is not shown by the GPT Actions UI, call `runQuantBtcModel` with a `horizons` array; `/run` supports multi-frame routing.
 - Use `runQuantBtcModel` for one explicit horizon.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 - Use `getQuantBtcStatus` to inspect current public API limits, sources, cache TTL, and operational status.

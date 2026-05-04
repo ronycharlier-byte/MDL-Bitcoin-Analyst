@@ -61,8 +61,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.3.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.3.0";
+const WORKER_VERSION = "1.4.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.4.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -117,7 +117,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/run", "/multi-run", "/latest"],
+          endpoints: ["/health", "/version", "/status", "/run", "/multi-run", "/multiRun", "/latest"],
           runtime_controls: {
             max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
@@ -165,12 +165,18 @@ export default {
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
         }
-        const body = normalizeRenderRunPayload(await readJson(request), env);
+        const input = await readJson(request);
+        if (Array.isArray(input.horizons)) {
+          const body = normalizeRenderMultiRunPayload(input, env);
+          const result = await proxyRenderPost("/multi-run", body, env);
+          return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+        }
+        const body = normalizeRenderRunPayload(input, env);
         const result = await proxyRenderPost("/run", body, env);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
-      if (url.pathname === "/multi-run" && request.method === "POST") {
+      if ((url.pathname === "/multi-run" || url.pathname === "/multiRun") && request.method === "POST") {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
