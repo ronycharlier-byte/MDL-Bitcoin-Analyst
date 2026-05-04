@@ -28,7 +28,8 @@ Status:
 - Deployed and publicly reachable over HTTPS.
 - TypeScript check passes.
 - GPT Action schema generated and copied into `gpt_custom_upload_bundle/`.
-- `/health`, `/version`, `/status`, `/latest`, and `/run` tested successfully.
+- `/health`, `/version`, `/status`, `/latest`, `/run`, and `/multi-run` tested successfully.
+- Worker version: `1.2.0`.
 
 Public endpoint:
 
@@ -58,6 +59,9 @@ Live data note:
 - Bitget currently returns HTTP 403 from the Cloudflare Worker runtime.
 - The Worker therefore falls back to real Kraken XBT/USD daily OHLC data and discloses this in `data_status.market_source` and `warnings`.
 - If Bitget becomes reachable from Cloudflare later, the Worker will use Bitget automatically.
+- Funding rate, open interest, DXY and Nasdaq are attempted as partial live fundamentals.
+- ETF flows, liquidations, hash rate, exchange reserves, stablecoin supply and US rates remain absent unless a future connected source is added.
+- Public run endpoints have a best-effort per-IP rate limit and simulation caps for safety.
 
 Important limitation:
 

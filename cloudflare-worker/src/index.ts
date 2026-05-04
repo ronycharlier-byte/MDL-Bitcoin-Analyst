@@ -2,11 +2,21 @@ interface Env {
   MAX_SIMULATIONS?: string;
   DEFAULT_SIMULATIONS?: string;
   DEFAULT_HORIZON?: string;
+  DEFAULT_HORIZONS?: string;
+  RATE_LIMIT_RUNS_PER_MINUTE?: string;
+  RATE_LIMIT_WINDOW_SECONDS?: string;
 }
 
 interface RunRequest {
   asset?: string;
   horizon?: number;
+  simulations?: number;
+  model?: string;
+}
+
+interface MultiRunRequest {
+  asset?: string;
+  horizons?: number[];
   simulations?: number;
   model?: string;
 }
@@ -27,6 +37,22 @@ interface MarketCandles {
   warning?: string;
 }
 
+interface FundamentalSnapshot {
+  values: Record<string, number | null>;
+  sources: Record<string, string | null>;
+  status: "partial_real_absent" | "absent";
+  warnings: string[];
+}
+
+interface RateLimitResult {
+  allowed: boolean;
+  key: string;
+  limit: number;
+  remaining: number;
+  reset_at: string;
+  window_seconds: number;
+}
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
@@ -34,9 +60,11 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.1.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.1.0";
+const WORKER_VERSION = "1.2.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.2.0";
 const MODEL_VERSION = "cloudflare_quant_lite_v1";
+const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
+const rateLimitBuckets = new Map<string, number[]>();
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -68,6 +96,9 @@ export default {
           max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
           default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
           default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650),
+          default_horizons: parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS),
+          rate_limit_runs_per_minute: getRateLimit(env).limit,
+          rate_limit_window_seconds: getRateLimit(env).windowSeconds,
           timestamp: new Date().toISOString()
         });
       }
@@ -79,11 +110,14 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/run", "/latest"],
+          endpoints: ["/health", "/version", "/status", "/run", "/multi-run", "/latest"],
           runtime_controls: {
             max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
-            default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650)
+            default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650),
+            default_horizons: parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS),
+            rate_limit_runs_per_minute: getRateLimit(env).limit,
+            rate_limit_window_seconds: getRateLimit(env).windowSeconds
           },
           data_sources: {
             primary_market_source: "bitget_btcusdt_spot_candles",
@@ -91,13 +125,25 @@ export default {
               "kraken_xbtusd_daily_ohlc",
               "coingecko_btc_usd_daily_prices"
             ],
-            fundamental_features: "absent",
+            fundamental_features: "partial_real_absent_when_sources_are_reachable",
+            partial_fundamental_sources: [
+              "bitget_current_fund_rate",
+              "bitget_open_interest",
+              "stooq_dx_f_quote",
+              "stooq_ndx_quote"
+            ],
             corpus_knowledge_base: "absent"
+          },
+          backend_routing: {
+            cloudflare_default: "Use this Worker first for no-sleep fresh quant-lite BTC analysis.",
+            render_full_engine: "Use Render when the full Python/numpy multi-model engine or corpus-backed report generation is explicitly required.",
+            recommended_gpt_flow: "Call getQuantBtcLiteStatus, then runQuantBtcMultiFrame for complete analysis or runQuantBtcModel for one explicit horizon."
           },
           limitations: [
             "This is a quant-lite Worker runtime, not the full Python/numpy engine.",
             "Bitget may reject Cloudflare edge requests; fallback market sources are explicitly disclosed.",
             "Outputs are probabilistic scenarios, not deterministic predictions.",
+            "Public endpoint has a best-effort per-IP in-isolate rate limit and simulation caps.",
             "Every precise number must be cited with model_run_id, report_date, reference_spot and data status."
           ],
           timestamp: new Date().toISOString()
@@ -119,9 +165,23 @@ export default {
       }
 
       if (url.pathname === "/run" && request.method === "POST") {
-        const body = await readJson(request);
+        const rateLimit = checkRateLimit(request, env);
+        if (!rateLimit.allowed) {
+          return json(rateLimitResponse(rateLimit), 429);
+        }
+        const body = await readJson(request) as RunRequest;
         const result = await runQuantLite(body, env);
-        return json(result);
+        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+      }
+
+      if (url.pathname === "/multi-run" && request.method === "POST") {
+        const rateLimit = checkRateLimit(request, env);
+        if (!rateLimit.allowed) {
+          return json(rateLimitResponse(rateLimit), 429);
+        }
+        const body = await readJson(request) as MultiRunRequest;
+        const result = await runQuantLiteMultiFrame(body, env);
+        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
       return json({ error: "not_found", path: url.pathname }, 404);
@@ -140,19 +200,88 @@ export default {
   }
 };
 
-async function readJson(request: Request): Promise<RunRequest> {
+async function readJson(request: Request): Promise<Record<string, unknown>> {
   try {
     const parsed = await request.json();
     if (!parsed || typeof parsed !== "object") {
       return {};
     }
-    return parsed as RunRequest;
+    return parsed as Record<string, unknown>;
   } catch {
     return {};
   }
 }
 
-async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string, unknown>> {
+function getRateLimit(env: Env) {
+  return {
+    limit: clampInt(parseNumber(env.RATE_LIMIT_RUNS_PER_MINUTE, 20), 1, 120),
+    windowSeconds: clampInt(parseNumber(env.RATE_LIMIT_WINDOW_SECONDS, 60), 10, 3600)
+  };
+}
+
+function checkRateLimit(request: Request, env: Env): RateLimitResult {
+  const { limit, windowSeconds } = getRateLimit(env);
+  const now = Date.now();
+  const windowMs = windowSeconds * 1000;
+  const key = request.headers.get("cf-connecting-ip")
+    || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || "unknown-client";
+  const existing = rateLimitBuckets.get(key) || [];
+  const recent = existing.filter((timestamp) => now - timestamp < windowMs);
+  const allowed = recent.length < limit;
+  if (allowed) {
+    recent.push(now);
+    rateLimitBuckets.set(key, recent);
+  } else {
+    rateLimitBuckets.set(key, recent);
+  }
+  for (const [bucketKey, timestamps] of rateLimitBuckets) {
+    const fresh = timestamps.filter((timestamp) => now - timestamp < windowMs);
+    if (fresh.length === 0) {
+      rateLimitBuckets.delete(bucketKey);
+    } else if (fresh.length !== timestamps.length) {
+      rateLimitBuckets.set(bucketKey, fresh);
+    }
+  }
+  const oldest = recent[0] || now;
+  return {
+    allowed,
+    key,
+    limit,
+    remaining: allowed ? Math.max(0, limit - recent.length) : 0,
+    reset_at: new Date(oldest + windowMs).toISOString(),
+    window_seconds: windowSeconds
+  };
+}
+
+function publicRateLimit(rateLimit: RateLimitResult) {
+  return {
+    limit: rateLimit.limit,
+    remaining: rateLimit.remaining,
+    reset_at: rateLimit.reset_at,
+    window_seconds: rateLimit.window_seconds,
+    scope: "best_effort_per_ip_in_worker_isolate"
+  };
+}
+
+function rateLimitResponse(rateLimit: RateLimitResult) {
+  return {
+    error: "rate_limited",
+    message: "Public Cloudflare Worker run limit reached. Wait before calling the endpoint again.",
+    rate_limit: publicRateLimit(rateLimit),
+    data_status: {
+      model_output: "absent",
+      market_data: "absent"
+    },
+    warning: "No deterministic prediction was produced."
+  };
+}
+
+async function runQuantLite(
+  input: RunRequest,
+  env: Env,
+  shared?: { market?: MarketCandles; fundamentals?: FundamentalSnapshot; groupRunId?: string }
+): Promise<Record<string, unknown>> {
   const asset = normalizeAsset(input.asset);
   if (asset !== "BTC") {
     throw new Error("Only BTC is supported by the quant-lite Worker.");
@@ -168,9 +297,11 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
   const model = requestedModel === "ensemble" ? "quant_lite" : "quant_lite";
 
   const runStartedAt = new Date();
-  const modelRunId = `cfql_${runStartedAt.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomRunSuffix()}`;
+  const baseRunId = shared?.groupRunId || `cfql_${runStartedAt.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomRunSuffix()}`;
+  const modelRunId = shared?.groupRunId ? `${baseRunId}_h${horizon}` : baseRunId;
 
-  const market = await fetchMarketCandles();
+  const market = shared?.market || await fetchMarketCandles();
+  const fundamentals = shared?.fundamentals || await fetchFundamentalSnapshot();
   const candles = market.candles;
   if (candles.length < 30) {
     throw new Error("Insufficient real market history for quant-lite run.");
@@ -220,7 +351,14 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
 
   const risk = calculateRisk(simpleReturns, returns);
   const stress = calculateStressScenarios(spot);
-  const confidence = calculateConfidence(candles.length, simulations, calibration, requestedSimulations > simulations);
+  const confidence = calculateConfidence(
+    candles.length,
+    simulations,
+    calibration,
+    requestedSimulations > simulations,
+    market.source,
+    fundamentals.status
+  );
   const runCompletedAt = new Date();
 
   const warnings = [
@@ -236,6 +374,7 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
   if (market.warning) {
     warnings.push(market.warning);
   }
+  warnings.push(...fundamentals.warnings);
 
   return {
     status: "ok",
@@ -269,10 +408,12 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
       simulation_results: "inferred",
       risk_metrics: "inferred",
       stress_tests: "inferred",
-      fundamental_features: "absent",
+      fundamental_features: fundamentals.status,
+      fundamental_sources: fundamentals.sources,
       corpus_knowledge_base: "absent",
       full_python_engine: "absent"
     },
+    fundamental_features: fundamentals.values,
     calibration: {
       daily_observations: returns.length,
       annualized_drift: calibration.mean * 365,
@@ -289,7 +430,8 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
     assumptions: [
       `${market.source} is used as the real market input for this run.`,
       "Terminal distribution is inferred from a heavy-tail jump approximation calibrated on recent log returns.",
-      "No ETF flow, DXY, rates, Nasdaq, funding, open interest, liquidation, hash rate, exchange reserve or stablecoin fields are connected in the Worker.",
+      "Worker fundamental variables are partial and must be read from fundamental_features plus data_status.fundamental_sources.",
+      "ETF flow, liquidations, hash rate, exchange reserves, stablecoin supply and US rates remain absent unless a future connected source provides them.",
       "The result is a scenario distribution, not a deterministic forecast."
     ],
     governance: {
@@ -305,6 +447,102 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
       ],
       numeric_traceability_required: true,
       no_hidden_extrapolation: true
+    },
+    warnings
+  };
+}
+
+async function runQuantLiteMultiFrame(input: MultiRunRequest, env: Env): Promise<Record<string, unknown>> {
+  const asset = normalizeAsset(input.asset);
+  if (asset !== "BTC") {
+    throw new Error("Only BTC is supported by the quant-lite Worker.");
+  }
+
+  const maxSimulations = clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000);
+  const defaultSimulations = clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, maxSimulations);
+  const requestedSimulations = clampInt(parseNumber(input.simulations, defaultSimulations), 100, 250000);
+  const simulations = Math.min(requestedSimulations, maxSimulations);
+  const horizons = parseHorizons(input.horizons, parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS));
+  const model = String(input.model || "quant_lite");
+  const runStartedAt = new Date();
+  const groupRunId = `cfqlmf_${runStartedAt.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomRunSuffix()}`;
+
+  const market = await fetchMarketCandles();
+  const fundamentals = await fetchFundamentalSnapshot();
+  const sharedSpotSnapshot = getMarketSpotSnapshot(market);
+  const frameResults: Record<string, unknown>[] = [];
+
+  for (const horizon of horizons) {
+    const frame = await runQuantLite(
+      { asset, horizon, simulations, model },
+      env,
+      { market, fundamentals, groupRunId }
+    );
+    frameResults.push(frame);
+  }
+
+  const frameSummaries = frameResults.map(summarizeFrameResult);
+  const runCompletedAt = new Date();
+  const warnings = uniqueStrings([
+    "Cloudflare multi-run is quant-lite and optimized for no-sleep GPT latency, not the full Python/numpy engine.",
+    "All frames share one market snapshot and one fundamental snapshot for coherent comparison.",
+    ...frameResults.flatMap((frame) => {
+      const values = objectValue(frame).warnings;
+      return Array.isArray(values) ? values.map(String) : [];
+    })
+  ]);
+
+  return {
+    status: "ok",
+    service: "quant-btc-model-lite-worker",
+    asset,
+    horizons,
+    simulations,
+    requested_simulations: requestedSimulations,
+    model: model === "ensemble" ? "quant_lite" : "quant_lite",
+    model_version: MODEL_VERSION,
+    model_run_id: groupRunId,
+    report_date: runCompletedAt.toISOString(),
+    runtime: "cloudflare_worker_quant_lite_multi_frame",
+    provenance_summary: {
+      source_report: "runtime_response",
+      report_date: runCompletedAt.toISOString(),
+      run_started_at: runStartedAt.toISOString(),
+      run_completed_at: runCompletedAt.toISOString(),
+      model_run_id: groupRunId,
+      model_version: MODEL_VERSION,
+      shared_spot_snapshot: sharedSpotSnapshot,
+      calculation_origin: "cloudflare_worker_quant_lite_multi_frame_runtime",
+      status: "mixed"
+    },
+    data_status: {
+      market_prices: "real",
+      market_source: market.source,
+      bitget_market_prices: market.source.startsWith("bitget") ? "real" : "absent",
+      fallback_market_prices: market.source.startsWith("bitget") ? "absent" : "real",
+      simulation_results: "inferred",
+      risk_metrics: "inferred",
+      stress_tests: "inferred",
+      fundamental_features: fundamentals.status,
+      fundamental_sources: fundamentals.sources,
+      corpus_knowledge_base: "absent",
+      full_python_engine: "absent"
+    },
+    fundamental_features: fundamentals.values,
+    frame_summaries: frameSummaries,
+    aggregate: buildMultiFrameAggregate(frameSummaries),
+    frames: frameResults,
+    governance: {
+      numeric_traceability_required: true,
+      no_hidden_extrapolation: true,
+      required_citation_fields: [
+        "model_run_id",
+        "report_date",
+        "provenance_summary.shared_spot_snapshot.price",
+        "provenance_summary.shared_spot_snapshot.source",
+        "data_status"
+      ],
+      required_language: "Probabilistic scenario distribution; never a deterministic prediction."
     },
     warnings
   };
@@ -340,6 +578,148 @@ async function fetchMarketCandles(): Promise<MarketCandles> {
         throw new Error(`Market data unavailable. Bitget error: ${bitgetMessage}. Kraken error: ${krakenMessage}. CoinGecko error: ${coinGeckoMessage}.`);
       }
     }
+  }
+}
+
+async function fetchFundamentalSnapshot(): Promise<FundamentalSnapshot> {
+  const values: Record<string, number | null> = {
+    funding_rate: null,
+    open_interest: null,
+    dxy: null,
+    nasdaq: null,
+    etf_flows: null,
+    liquidations: null,
+    hash_rate: null,
+    exchange_reserves: null,
+    stablecoins_supply: null,
+    us_rates: null
+  };
+  const sources: Record<string, string | null> = {};
+  const warnings: string[] = [];
+
+  const fundingRate = await fetchBitgetFundingRate();
+  if (fundingRate.value !== null) {
+    values.funding_rate = fundingRate.value;
+    sources.funding_rate = fundingRate.source;
+  } else {
+    sources.funding_rate = null;
+    warnings.push(`funding_rate absent in Worker runtime: ${fundingRate.warning}`);
+  }
+
+  const openInterest = await fetchBitgetOpenInterest();
+  if (openInterest.value !== null) {
+    values.open_interest = openInterest.value;
+    sources.open_interest = openInterest.source;
+  } else {
+    sources.open_interest = null;
+    warnings.push(`open_interest absent in Worker runtime: ${openInterest.warning}`);
+  }
+
+  const dxy = await fetchStooqQuote("dx.f", "stooq_dx_f_quote");
+  if (dxy.value !== null) {
+    values.dxy = dxy.value;
+    sources.dxy = dxy.source;
+  } else {
+    sources.dxy = null;
+    warnings.push(`dxy absent in Worker runtime: ${dxy.warning}`);
+  }
+
+  const nasdaq = await fetchStooqQuote("^ndx", "stooq_ndx_quote");
+  if (nasdaq.value !== null) {
+    values.nasdaq = nasdaq.value;
+    sources.nasdaq = nasdaq.source;
+  } else {
+    sources.nasdaq = null;
+    warnings.push(`nasdaq absent in Worker runtime: ${nasdaq.warning}`);
+  }
+
+  for (const field of ["etf_flows", "liquidations", "hash_rate", "exchange_reserves", "stablecoins_supply", "us_rates"]) {
+    sources[field] = null;
+  }
+
+  const hasRealFundamentals = Object.values(sources).some((source) => source !== null);
+  return {
+    values,
+    sources,
+    status: hasRealFundamentals ? "partial_real_absent" : "absent",
+    warnings: [
+      ...warnings,
+      "ETF flows, liquidations, hash rate, exchange reserves, stablecoin supply and US rates are absent in the Cloudflare Worker."
+    ]
+  };
+}
+
+async function fetchBitgetFundingRate(): Promise<{ value: number | null; source: string | null; warning: string }> {
+  const url = "https://api.bitget.com/api/v2/mix/market/current-fund-rate?symbol=BTCUSDT&productType=usdt-futures";
+  try {
+    const response = await fetch(url, { headers: { "accept": "application/json" } });
+    if (!response.ok) {
+      return { value: null, source: null, warning: `HTTP ${response.status}` };
+    }
+    const payload = await response.json() as { code?: string; data?: unknown; msg?: string };
+    if (payload.code !== "00000") {
+      return { value: null, source: null, warning: payload.msg || `code ${payload.code || "unknown"}` };
+    }
+    const data = Array.isArray(payload.data) ? payload.data[0] : payload.data;
+    const record = objectValue(data);
+    const value = parseNullableNumber(record.fundingRate);
+    return value === null
+      ? { value: null, source: null, warning: "fundingRate missing" }
+      : { value, source: "bitget_current_fund_rate", warning: "" };
+  } catch (error) {
+    return { value: null, source: null, warning: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function fetchBitgetOpenInterest(): Promise<{ value: number | null; source: string | null; warning: string }> {
+  const url = "https://api.bitget.com/api/v2/mix/market/open-interest?symbol=BTCUSDT&productType=usdt-futures";
+  try {
+    const response = await fetch(url, { headers: { "accept": "application/json" } });
+    if (!response.ok) {
+      return { value: null, source: null, warning: `HTTP ${response.status}` };
+    }
+    const payload = await response.json() as { code?: string; data?: unknown; msg?: string };
+    if (payload.code !== "00000") {
+      return { value: null, source: null, warning: payload.msg || `code ${payload.code || "unknown"}` };
+    }
+    const data = objectValue(payload.data);
+    const list = Array.isArray(data.openInterestList) ? data.openInterestList : [];
+    const first = objectValue(list[0]);
+    const value = parseNullableNumber(first.size ?? first.openInterest);
+    return value === null
+      ? { value: null, source: null, warning: "openInterestList size missing" }
+      : { value, source: "bitget_open_interest", warning: "" };
+  } catch (error) {
+    return { value: null, source: null, warning: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function fetchStooqQuote(symbol: string, source: string): Promise<{ value: number | null; source: string | null; warning: string }> {
+  const url = `https://stooq.com/q/l/?s=${encodeURIComponent(symbol)}&i=d`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "accept": "text/plain,text/csv,*/*",
+        "user-agent": "quant-btc-model-lite-worker/1.0"
+      }
+    });
+    if (!response.ok) {
+      return { value: null, source: null, warning: `HTTP ${response.status}` };
+    }
+    const text = await response.text();
+    const lines = text.trim().split(/\r?\n/).filter(Boolean);
+    if (lines.length < 2) {
+      return { value: null, source: null, warning: "empty Stooq response" };
+    }
+    const headers = lines[0].split(",").map((item) => item.trim().toLowerCase());
+    const values = lines[1].split(",").map((item) => item.trim());
+    const closeIndex = headers.indexOf("close");
+    const value = closeIndex >= 0 ? parseNullableNumber(values[closeIndex]) : null;
+    return value === null
+      ? { value: null, source: null, warning: "close missing in Stooq response" }
+      : { value, source, warning: "" };
+  } catch (error) {
+    return { value: null, source: null, warning: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -490,13 +870,109 @@ function normalizeAsset(asset: unknown): string {
   return String(asset || "BTC").trim().toUpperCase();
 }
 
+function parseHorizons(value: unknown, fallback: number[]): number[] {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+  const parsed = raw
+    .map((item) => clampInt(parseNumber(item, NaN), 1, 3650))
+    .filter((item) => Number.isFinite(item));
+  const unique = Array.from(new Set(parsed));
+  const horizons = unique.length > 0 ? unique : fallback;
+  return horizons.slice(0, 8);
+}
+
 function parseNumber(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function parseNullableNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function numberField(value: unknown, key: string): number | null {
+  const parsed = parseNullableNumber(objectValue(value)[key]);
+  return parsed;
+}
+
+function stringField(value: unknown, key: string): string | null {
+  const raw = objectValue(value)[key];
+  return typeof raw === "string" ? raw : null;
+}
+
+function getMarketSpotSnapshot(market: MarketCandles) {
+  const sorted = [...market.candles].sort((a, b) => a.timestamp - b.timestamp);
+  const latest = sorted[sorted.length - 1];
+  return {
+    price: latest?.close || null,
+    timestamp: latest ? new Date(latest.timestamp).toISOString() : null,
+    source: market.source,
+    status: "real"
+  };
+}
+
+function summarizeFrameResult(frame: Record<string, unknown>) {
+  const distribution = objectValue(frame.distribution);
+  const risk = objectValue(frame.risk_metrics);
+  const confidence = objectValue(frame.confidence_score);
+  const regime = objectValue(frame.regime_distribution);
+  return {
+    horizon: numberField(frame, "horizon"),
+    model_run_id: stringField(frame, "model_run_id"),
+    report_date: stringField(frame, "report_date"),
+    reference_spot: numberField(objectValue(frame.provenance), "reference_spot"),
+    p10_return: numberField(distribution, "p10_return"),
+    median_return: numberField(distribution, "median_return"),
+    p90_return: numberField(distribution, "p90_return"),
+    probability_positive_return: numberField(distribution, "probability_positive_return"),
+    var_95_return: numberField(risk, "var_95_return"),
+    cvar_95_return: numberField(risk, "cvar_95_return"),
+    confidence_score: numberField(confidence, "score"),
+    regime_sum_with_residual: numberField(regime, "sum_with_residual"),
+    dominant_regime: dominantRegime(regime)
+  };
+}
+
+function dominantRegime(regime: Record<string, unknown>): string {
+  const entries = [
+    ["bull", numberField(regime, "bull") || 0],
+    ["bear", numberField(regime, "bear") || 0],
+    ["range", numberField(regime, "range") || 0],
+    ["non_classified_transition", numberField(regime, "non_classified_transition") || 0]
+  ] as const;
+  return [...entries].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function buildMultiFrameAggregate(frameSummaries: Record<string, unknown>[]) {
+  const valid = frameSummaries.filter((frame) => numberField(frame, "horizon") !== null);
+  const byMedian = [...valid].sort((a, b) => (numberField(b, "median_return") || -Infinity) - (numberField(a, "median_return") || -Infinity));
+  const byRisk = [...valid].sort((a, b) => (numberField(a, "cvar_95_return") || Infinity) - (numberField(b, "cvar_95_return") || Infinity));
+  const confidenceValues = valid.map((frame) => numberField(frame, "confidence_score")).filter((value): value is number => value !== null);
+  return {
+    strongest_median_return_horizon: numberField(byMedian[0], "horizon"),
+    weakest_median_return_horizon: numberField(byMedian[byMedian.length - 1], "horizon"),
+    most_severe_cvar_95_horizon: numberField(byRisk[0], "horizon"),
+    average_confidence_score: confidenceValues.length > 0 ? mean(confidenceValues) : null,
+    directional_note: "Compare horizons probabilistically; do not collapse them into one deterministic BTC prediction."
+  };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => value.trim().length > 0)));
 }
 
 function logReturns(closes: number[]): number[] {
@@ -621,23 +1097,27 @@ function calculateConfidence(
   candleCount: number,
   simulations: number,
   calibration: ReturnType<typeof calibrateReturns>,
-  capped: boolean
+  capped: boolean,
+  marketSource = "unknown",
+  fundamentalStatus: FundamentalSnapshot["status"] = "absent"
 ) {
   let score = 35;
   score += Math.min(25, candleCount / 40);
   score += Math.min(15, simulations / 500);
   score += calibration.std > 0 && calibration.std < 0.08 ? 10 : 3;
   score -= capped ? 8 : 0;
-  score -= 15;
+  score -= fundamentalStatus === "partial_real_absent" ? 8 : 15;
   const rounded = Math.round(clamp(score, 0, 100));
   return {
     score: rounded,
     level: rounded < 50 ? "low_to_moderate_fragile" : rounded < 70 ? "moderate" : "high",
     drivers: {
-      market_price_quality: "real_bitget_spot_candles",
+      market_price_quality: `real_${marketSource}`,
       model_stability: "simplified_terminal_distribution",
       backtest_performance: "absent",
-      uncertainty: "elevated_due_to_missing_fundamentals_and_worker_runtime_cap"
+      uncertainty: fundamentalStatus === "partial_real_absent"
+        ? "elevated_due_to_partial_fundamentals_and_worker_runtime_cap"
+        : "elevated_due_to_missing_fundamentals_and_worker_runtime_cap"
     }
   };
 }

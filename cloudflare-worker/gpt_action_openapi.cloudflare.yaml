@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model Lite Worker
-  version: 1.1.1
+  version: 1.2.0
   description: Always-awake Cloudflare Worker endpoint for probabilistic BTC quant-lite runs. Outputs are probabilistic and must never be presented as certainty.
 servers:
   - url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
@@ -96,6 +96,80 @@ paths:
                 additionalProperties: true
         "500":
           description: Quant-lite run failed JSON.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+                additionalProperties: true
+        "429":
+          description: Public endpoint rate limit reached JSON.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+                additionalProperties: true
+  /multi-run:
+    post:
+      operationId: runQuantBtcMultiFrame
+      summary: Run the always-awake BTC quant-lite model across multiple horizons
+      description: Produces multiple probabilistic BTC horizon frames using one shared real market snapshot and one shared fundamental snapshot. This is a lightweight Worker runtime, not the full Python engine.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - asset
+                - horizons
+                - simulations
+                - model
+              properties:
+                asset:
+                  type: string
+                  default: BTC
+                  description: Asset symbol. BTC is supported.
+                horizons:
+                  type: array
+                  description: Horizon frames in days.
+                  items:
+                    type: integer
+                    minimum: 1
+                    maximum: 3650
+                simulations:
+                  type: integer
+                  default: 2000
+                  minimum: 100
+                  maximum: 5000
+                  description: Requested simulations per horizon. Worker may cap this value.
+                model:
+                  type: string
+                  default: quant_lite
+                  enum:
+                    - quant_lite
+                    - ensemble
+                  description: Model name. ensemble is accepted but mapped to quant_lite in the Worker.
+      responses:
+        "200":
+          description: Multi-frame probabilistic quant-lite JSON result with shared provenance, frame summaries, full frames, data statuses, confidence and warnings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+                additionalProperties: true
+        "500":
+          description: Multi-frame quant-lite run failed JSON.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+                additionalProperties: true
+        "429":
+          description: Public endpoint rate limit reached JSON.
           content:
             application/json:
               schema:

@@ -43,9 +43,13 @@ Use these phrases when appropriate:
 - "Reference spot: $78,912.63."
 - "Regime residual: non-classified / transition."
 
-For current market analysis, prefer the live `runQuantBtcModel` response over stored Knowledge snapshots. For multi-frame analysis, prefer `runQuantBtcMultiFrame`. If only `latestQuantBtcReport` is available, state that the report may be stale and do not call it real-time.
+For current market analysis, prefer live Action responses over stored Knowledge snapshots. Use Cloudflare no-sleep by default unless the user explicitly asks for the full Render Python engine. For one horizon, use `runQuantBtcModel`. For multi-frame analysis, prefer `runQuantBtcMultiFrame`. If only `latestQuantBtcReport` is available, state that the report may be stale and do not call it real-time.
 
 When a live response includes version metadata, include it in the provenance block or keep it available for audit. When a multi-frame response includes `shared_spot_snapshot`, cite it as the common reference price for all frames.
+
+If Cloudflare returns a disclosed market fallback, state it plainly: "Bitget market data were absent for this run; fallback market prices are real from [source]." Do not treat fallback data as Bitget data.
+
+If the public endpoint returns 429, do not retry repeatedly. Report temporary rate limiting and avoid precise live numbers unless a valid run result was returned.
 
 If `cache.hit` is true, disclose that the answer uses the short live cache and include the cache validity window.
 
