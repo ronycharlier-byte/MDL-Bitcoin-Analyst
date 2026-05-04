@@ -1,11 +1,10 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model Lite Worker
-  version: 1.1.0
+  version: 1.1.1
   description: Always-awake Cloudflare Worker endpoint for probabilistic BTC quant-lite runs. Outputs are probabilistic and must never be presented as certainty.
 servers:
   - url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
-    description: Public Cloudflare Workers URL.
 paths:
   /health:
     get:
@@ -13,33 +12,39 @@ paths:
       summary: Health check
       responses:
         "200":
-          description: Service health.
+          description: Service health JSON.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
+                type: object
+                properties: {}
+                additionalProperties: true
   /version:
     get:
       operationId: getQuantBtcLiteVersion
       summary: Return Cloudflare Worker version metadata
       responses:
         "200":
-          description: Version metadata.
+          description: Version metadata JSON.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/VersionResponse"
+                type: object
+                properties: {}
+                additionalProperties: true
   /status:
     get:
       operationId: getQuantBtcLiteStatus
       summary: Return Cloudflare Worker runtime status
       responses:
         "200":
-          description: Runtime status, sources and limitations.
+          description: Runtime status, sources and limitations JSON.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StatusResponse"
+                type: object
+                properties: {}
+                additionalProperties: true
   /run:
     post:
       operationId: runQuantBtcModel
@@ -50,20 +55,53 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RunRequest"
+              type: object
+              required:
+                - asset
+                - horizon
+                - simulations
+                - model
+              properties:
+                asset:
+                  type: string
+                  default: BTC
+                  description: Asset symbol. BTC is supported.
+                horizon:
+                  type: integer
+                  default: 365
+                  minimum: 1
+                  maximum: 3650
+                  description: Horizon in days.
+                simulations:
+                  type: integer
+                  default: 2000
+                  minimum: 100
+                  maximum: 5000
+                  description: Requested simulations. Worker may cap this value to protect the free runtime CPU limit.
+                model:
+                  type: string
+                  default: quant_lite
+                  enum:
+                    - quant_lite
+                    - ensemble
+                  description: Model name. ensemble is accepted but mapped to quant_lite in the Worker.
       responses:
         "200":
           description: Probabilistic quant-lite JSON result with provenance, statuses, distribution, regime residual, risk metrics, confidence and warnings.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunResponse"
+                type: object
+                properties: {}
+                additionalProperties: true
         "500":
-          description: Quant-lite run failed.
+          description: Quant-lite run failed JSON.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                type: object
+                properties: {}
+                additionalProperties: true
   /latest:
     get:
       operationId: latestQuantBtcReport
@@ -74,391 +112,6 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LatestResponse"
-components:
-  schemas:
-    HealthResponse:
-      type: object
-      properties:
-        status:
-          type: string
-        service:
-          type: string
-        worker_version:
-          type: string
-        mode:
-          type: string
-        timestamp:
-          type: string
-    VersionResponse:
-      type: object
-      properties:
-        status:
-          type: string
-        service:
-          type: string
-        worker_version:
-          type: string
-        schema_version:
-          type: string
-        model_version:
-          type: string
-        runtime:
-          type: string
-        max_simulations:
-          type: integer
-        default_simulations:
-          type: integer
-        default_horizon:
-          type: integer
-        timestamp:
-          type: string
-    StatusResponse:
-      type: object
-      properties:
-        status:
-          type: string
-        service:
-          type: string
-        worker_version:
-          type: string
-        always_awake_target:
-          type: boolean
-        runtime:
-          type: string
-        endpoints:
-          type: array
-          items:
-            type: string
-        runtime_controls:
-          $ref: "#/components/schemas/RuntimeControls"
-        data_sources:
-          $ref: "#/components/schemas/DataSources"
-        limitations:
-          type: array
-          items:
-            type: string
-        timestamp:
-          type: string
-    RuntimeControls:
-      type: object
-      properties:
-        max_simulations:
-          type: integer
-        default_simulations:
-          type: integer
-        default_horizon:
-          type: integer
-    DataSources:
-      type: object
-      properties:
-        primary_market_source:
-          type: string
-        fallback_market_sources:
-          type: array
-          items:
-            type: string
-        fundamental_features:
-          type: string
-        corpus_knowledge_base:
-          type: string
-    RunRequest:
-      type: object
-      required:
-        - asset
-        - horizon
-        - simulations
-        - model
-      properties:
-        asset:
-          type: string
-          default: BTC
-          description: Asset symbol. BTC is supported.
-        horizon:
-          type: integer
-          default: 365
-          minimum: 1
-          maximum: 3650
-        simulations:
-          type: integer
-          default: 2000
-          minimum: 100
-          maximum: 5000
-          description: Requested simulations. Worker may cap this value to protect the free runtime CPU limit.
-        model:
-          type: string
-          default: quant_lite
-          enum:
-            - quant_lite
-            - ensemble
-    RunResponse:
-      type: object
-      properties:
-        status:
-          type: string
-        service:
-          type: string
-        asset:
-          type: string
-        horizon:
-          type: integer
-        simulations:
-          type: integer
-        requested_simulations:
-          type: integer
-        model:
-          type: string
-        model_version:
-          type: string
-        model_run_id:
-          type: string
-        report_date:
-          type: string
-        provenance:
-          $ref: "#/components/schemas/Provenance"
-        data_status:
-          $ref: "#/components/schemas/DataStatus"
-        calibration:
-          $ref: "#/components/schemas/Calibration"
-        distribution:
-          $ref: "#/components/schemas/Distribution"
-        regime_distribution:
-          $ref: "#/components/schemas/RegimeDistribution"
-        risk_metrics:
-          $ref: "#/components/schemas/RiskMetrics"
-        stress_tests:
-          type: array
-          items:
-            $ref: "#/components/schemas/StressScenario"
-        confidence_score:
-          $ref: "#/components/schemas/ConfidenceScore"
-        assumptions:
-          type: array
-          items:
-            type: string
-        governance:
-          $ref: "#/components/schemas/Governance"
-        warnings:
-          type: array
-          items:
-            type: string
-    Provenance:
-      type: object
-      properties:
-        source_report:
-          type: string
-        report_date:
-          type: string
-        run_started_at:
-          type: string
-        run_completed_at:
-          type: string
-        model_run_id:
-          type: string
-        model_version:
-          type: string
-        reference_spot:
-          type: number
-        reference_spot_source:
-          type: string
-        reference_spot_timestamp:
-          type: string
-        calculation_origin:
-          type: string
-        status:
-          type: string
-    DataStatus:
-      type: object
-      properties:
-        market_prices:
-          type: string
-        market_source:
-          type: string
-        bitget_market_prices:
-          type: string
-        fallback_market_prices:
-          type: string
-        simulation_results:
-          type: string
-        risk_metrics:
-          type: string
-        stress_tests:
-          type: string
-        fundamental_features:
-          type: string
-        corpus_knowledge_base:
-          type: string
-        full_python_engine:
-          type: string
-    Calibration:
-      type: object
-      properties:
-        daily_observations:
-          type: integer
-        annualized_drift:
-          type: number
-        annualized_volatility:
-          type: number
-        jump_probability_daily:
-          type: number
-        jump_mean_log_return:
-          type: number
-        jump_std_log_return:
-          type: number
-    Distribution:
-      type: object
-      properties:
-        p10_return:
-          type: number
-        median_return:
-          type: number
-        p90_return:
-          type: number
-        p10_price:
-          type: number
-        median_price:
-          type: number
-        p90_price:
-          type: number
-        probability_positive_return:
-          type: number
-        probability_loss_10_or_more:
-          type: number
-        probability_loss_30_or_more:
-          type: number
-        probability_gain_30_or_more:
-          type: number
-    RegimeDistribution:
-      type: object
-      properties:
-        bull:
-          type: number
-        bear:
-          type: number
-        range:
-          type: number
-        non_classified_transition:
-          type: number
-        sum_without_residual:
-          type: number
-        sum_with_residual:
-          type: number
-        is_complete:
-          type: boolean
-        note:
-          type: string
-    RiskMetrics:
-      type: object
-      properties:
-        var_95_return:
-          type: number
-        var_99_return:
-          type: number
-        cvar_95_return:
-          type: number
-        cvar_99_return:
-          type: number
-        var_95_interpretation:
-          type: string
-        cvar_95_interpretation:
-          type: string
-        skewness:
-          type: number
-        kurtosis:
-          type: number
-        historical_max_drawdown:
-          type: number
-        conditional_volatility:
-          type: number
-    StressScenario:
-      type: object
-      properties:
-        scenario:
-          type: string
-        shock_return:
-          type: number
-        stressed_price:
-          type: number
-        status:
-          type: string
-        source:
-          type: string
-    ConfidenceScore:
-      type: object
-      properties:
-        score:
-          type: integer
-        level:
-          type: string
-        drivers:
-          $ref: "#/components/schemas/ConfidenceDrivers"
-    ConfidenceDrivers:
-      type: object
-      properties:
-        market_price_quality:
-          type: string
-        model_stability:
-          type: string
-        backtest_performance:
-          type: string
-        uncertainty:
-          type: string
-    Governance:
-      type: object
-      properties:
-        allowed_language:
-          type: array
-          items:
-            type: string
-        forbidden_language:
-          type: array
-          items:
-            type: string
-        numeric_traceability_required:
-          type: boolean
-        no_hidden_extrapolation:
-          type: boolean
-    LatestResponse:
-      type: object
-      properties:
-        status:
-          type: string
-        service:
-          type: string
-        latest_report:
-          type:
-            - "null"
-            - string
-        dashboard_summary:
-          type:
-            - "null"
-            - string
-        message:
-          type: string
-        data_status:
-          $ref: "#/components/schemas/LatestDataStatus"
-    LatestDataStatus:
-      type: object
-      properties:
-        latest_report:
-          type: string
-        dashboard_summary:
-          type: string
-    ErrorResponse:
-      type: object
-      properties:
-        error:
-          type: string
-        message:
-          type: string
-        data_status:
-          $ref: "#/components/schemas/ErrorDataStatus"
-        warning:
-          type: string
-    ErrorDataStatus:
-      type: object
-      properties:
-        model_output:
-          type: string
-        market_data:
-          type: string
+                type: object
+                properties: {}
+                additionalProperties: true
