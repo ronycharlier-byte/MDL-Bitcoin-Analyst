@@ -82,6 +82,19 @@ cloudflare-worker/gpt_action_openapi.cloudflare.yaml
 
 `GET /latest` only returns stored local artifacts. Use it for context, not for a fresh market calculation.
 
+For multi-frame GPT analysis, use `POST /multi-run` with the standard horizons:
+
+```json
+{
+  "asset": "BTC",
+  "horizons": [7, 30, 90, 180, 365],
+  "simulations": 2000,
+  "model": "ensemble",
+  "skip_corpus": true,
+  "no_online": false
+}
+```
+
 ## Data policy
 
 - No source file outside `quant_btc_model` is modified.

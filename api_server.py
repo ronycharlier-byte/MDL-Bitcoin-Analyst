@@ -17,6 +17,8 @@ REPORT_PATH = ROOT / "reports" / "latest_report.md"
 DASHBOARD_PATH = ROOT / "reports" / "dashboard_summary.md"
 MAX_API_SIMULATIONS = int(os.getenv("MAX_API_SIMULATIONS", "250000"))
 DEFAULT_API_SIMULATIONS = min(int(os.getenv("DEFAULT_API_SIMULATIONS", "5000")), MAX_API_SIMULATIONS)
+DEFAULT_MULTIFRAME_SIMULATIONS = min(int(os.getenv("DEFAULT_MULTIFRAME_SIMULATIONS", "2000")), MAX_API_SIMULATIONS)
+DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 
 
 app = FastAPI(
@@ -33,6 +35,22 @@ class RunRequest(BaseModel):
     asset: str = Field(default="BTC", pattern="^[A-Za-z0-9_-]{2,12}$")
     horizon: int = Field(default=365, ge=1, le=3650)
     simulations: int = Field(default=DEFAULT_API_SIMULATIONS, ge=100, le=MAX_API_SIMULATIONS)
+    model: str = Field(
+        default="ensemble",
+        pattern=(
+            "^(ensemble|monte_carlo|student_t|student_t_model|jump_diffusion|"
+            "garch|garch_model|regime_switching|liquidation|liquidation_model|"
+            "correlation|correlation_model)$"
+        ),
+    )
+    skip_corpus: bool = Field(default=True)
+    no_online: bool = Field(default=False)
+
+
+class MultiFrameRunRequest(BaseModel):
+    asset: str = Field(default="BTC", pattern="^[A-Za-z0-9_-]{2,12}$")
+    horizons: list[int] = Field(default_factory=lambda: DEFAULT_MULTIFRAME_HORIZONS.copy(), min_length=1, max_length=8)
+    simulations: int = Field(default=DEFAULT_MULTIFRAME_SIMULATIONS, ge=100, le=MAX_API_SIMULATIONS)
     model: str = Field(
         default="ensemble",
         pattern=(
@@ -62,6 +80,17 @@ class RunResponse(BaseModel):
     report_markdown: str
     dashboard_markdown: str
     warning: str
+
+
+def normalized_horizons(horizons: list[int]) -> list[int]:
+    cleaned = []
+    for horizon in horizons:
+        value = int(horizon)
+        if value < 1 or value > 3650:
+            raise HTTPException(status_code=400, detail=f"Invalid horizon: {value}. Use 1..3650 days.")
+        if value not in cleaned:
+            cleaned.append(value)
+    return cleaned
 
 
 def require_api_key(
@@ -190,17 +219,7 @@ def run_cli(payload: RunRequest) -> dict[str, Any]:
     return json.loads(summary_path.read_text(encoding="utf-8"))
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {
-        "status": "ok",
-        "service": "quant-btc-model",
-        "mode": "probabilistic",
-    }
-
-
-@app.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key)])
-def run_model(payload: RunRequest) -> RunResponse:
+def build_run_response(payload: RunRequest) -> RunResponse:
     summary = run_cli(payload)
     report = read_text(REPORT_PATH)
     dashboard = read_text(DASHBOARD_PATH)
@@ -245,6 +264,93 @@ def run_model(payload: RunRequest) -> RunResponse:
             "response as a deterministic prediction."
         ),
     )
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "quant-btc-model",
+        "mode": "probabilistic",
+    }
+
+
+@app.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key)])
+def run_model(payload: RunRequest) -> RunResponse:
+    return build_run_response(payload)
+
+
+@app.post("/multi-run", dependencies=[Depends(require_api_key)])
+def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
+    horizons = normalized_horizons(payload.horizons)
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for horizon in horizons:
+        run_payload = RunRequest(
+            asset=payload.asset,
+            horizon=horizon,
+            simulations=payload.simulations,
+            model=payload.model,
+            skip_corpus=payload.skip_corpus,
+            no_online=payload.no_online,
+        )
+        try:
+            result = build_run_response(run_payload)
+            results.append(result.model_dump() if hasattr(result, "model_dump") else result.dict())
+        except HTTPException as exc:
+            errors.append({"horizon": horizon, "status_code": exc.status_code, "detail": exc.detail})
+        except Exception as exc:
+            errors.append({"horizon": horizon, "status_code": 500, "detail": str(exc)})
+
+    if not results:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "All multi-frame runs failed.",
+                "errors": errors,
+                "warning": "No deterministic prediction was produced.",
+            },
+        )
+
+    reference_spots = [
+        result.get("provenance", {}).get("reference_spot")
+        for result in results
+        if result.get("provenance", {}).get("reference_spot")
+    ]
+    reference_timestamps = [
+        result.get("provenance", {}).get("reference_spot_timestamp")
+        for result in results
+        if result.get("provenance", {}).get("reference_spot_timestamp")
+    ]
+
+    return {
+        "status": "ok" if not errors else "partial",
+        "asset": payload.asset.upper(),
+        "model": payload.model,
+        "horizons": horizons,
+        "simulations_per_horizon": payload.simulations,
+        "frames": results,
+        "errors": errors,
+        "provenance_summary": {
+            "source": "live runQuantBtcMultiFrame response",
+            "operation": "runQuantBtcMultiFrame",
+            "reference_spots": reference_spots,
+            "reference_spot_timestamps": reference_timestamps,
+            "reference_spot_source": "bitget_btcusdt_spot_ticker_realtime unless a frame reports otherwise",
+            "fresh_run": True,
+        },
+        "data_status": {
+            "market_prices": "real_or_mock_per_frame",
+            "simulation_outputs": "inferred",
+            "risk_metrics": "inferred",
+            "fundamental_variables": "absent_unless_supplied",
+        },
+        "warning": (
+            "Multi-frame output is probabilistic only. Compare horizons as scenario distributions, "
+            "not as deterministic price paths or financial advice."
+        ),
+    }
 
 
 @app.get("/latest", dependencies=[Depends(require_api_key)])

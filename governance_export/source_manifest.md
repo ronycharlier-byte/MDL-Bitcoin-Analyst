@@ -39,8 +39,8 @@ These exclusions are intentional to keep GPT Custom Knowledge focused and lightw
 
 | Item | Value | Status |
 |---|---|---|
-| Run ID | BTC_ensemble_20260504T122603Z_4f5be51e | inferred |
-| Report timestamp | 2026-05-04T12:26:03.918344+00:00 | inferred |
+| Run ID | BTC_ensemble_20260504T124542Z_24e975ff | inferred |
+| Report timestamp | 2026-05-04T12:45:43.086312+00:00 | inferred |
 | Asset | BTC | real |
 | Horizon | 365 days | inferred |
 | Simulations | 5000 | inferred |
@@ -95,23 +95,25 @@ Latest numeric provenance:
 
 | Source file | Report date | Run ID | Reference spot | Status mix |
 |---|---|---|---:|---|
-| latest_report.md | 2026-05-04T12:26:03.918344+00:00 | BTC_ensemble_20260504T122603Z_4f5be51e | $78,952.42 | prices real; simulations inferred; fundamentals absent |
+| latest_report.md | 2026-05-04T12:45:43.086312+00:00 | BTC_ensemble_20260504T124542Z_24e975ff | $78,955.53 | prices real; simulations inferred; fundamentals absent |
 
 Live Action provenance requirements:
 
 - Operation: `runQuantBtcModel`.
+- Multi-frame operation: `runQuantBtcMultiFrame`.
 - Required source fields: `model_run_id`, `report_date`, `reference_spot`, `reference_spot_timestamp`, `reference_spot_source`.
 - Expected market source for realtime price: `bitget_btcusdt_spot_ticker_realtime`.
 - Expected status mix unless extra data are supplied: prices real; simulations inferred; fundamentals absent.
+- Default live frames: 7, 30, 90, 180 and 365 days.
 
 ## Known Coherence Note
 
 Latest regime probabilities:
 
-- Bull: 54.54%.
-- Bear: 19.22%.
-- Range: 13.16%.
-- Sum: 86.92%.
-- Residual: 13.08% non-classified / transition.
+- Bull: 54.48%.
+- Bear: 17.30%.
+- Range: 14.02%.
+- Sum: 85.80%.
+- Residual: 14.20% non-classified / transition.
 
 The regime split is incomplete and must not be presented as a complete 100% partition unless the residual is included.

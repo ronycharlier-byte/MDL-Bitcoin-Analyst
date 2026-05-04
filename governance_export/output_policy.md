@@ -38,11 +38,12 @@ Use these phrases when appropriate:
 - "This claim is corpus-derived and reliability is unknown."
 - "Source: latest_report.md."
 - "Source: live runQuantBtcModel response."
-- "Run ID: BTC_ensemble_20260504T122603Z_4f5be51e."
-- "Reference spot: $78,952.42."
+- "Source: live runQuantBtcMultiFrame response."
+- "Run ID: BTC_ensemble_20260504T124542Z_24e975ff."
+- "Reference spot: $78,955.53."
 - "Regime residual: non-classified / transition."
 
-For current market analysis, prefer the live `runQuantBtcModel` response over stored Knowledge snapshots. If only `latestQuantBtcReport` is available, state that the report may be stale and do not call it real-time.
+For current market analysis, prefer the live `runQuantBtcModel` response over stored Knowledge snapshots. For multi-frame analysis, prefer `runQuantBtcMultiFrame`. If only `latestQuantBtcReport` is available, state that the report may be stale and do not call it real-time.
 
 ## Authorized Formulations
 
@@ -98,7 +99,7 @@ If regime probabilities do not sum to 100%:
 ## Recommended Answer Shape
 
 ```text
-Horizon:
+Horizon / frames:
 Numeric provenance:
 Data status:
 Distribution:

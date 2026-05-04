@@ -37,8 +37,8 @@ Probabilistic quantitative infrastructure for Bitcoin scenario analysis, risk es
 
 ## Latest Export Snapshot
 
-- Generated report timestamp: 2026-05-04T12:26:03.918344+00:00.
-- Run ID: BTC_ensemble_20260504T122603Z_4f5be51e.
+- Generated report timestamp: 2026-05-04T12:45:43.086312+00:00.
+- Run ID: BTC_ensemble_20260504T124542Z_24e975ff.
 - Asset: BTC.
 - Horizon: 365 days.
 - Simulations: 5000.
@@ -53,41 +53,41 @@ Probabilistic quantitative infrastructure for Bitcoin scenario analysis, risk es
 Every precise figure from this model card must be cited with:
 
 - source: model_card.md or latest_report.md;
-- report timestamp: 2026-05-04T12:26:03.918344+00:00;
-- run ID: BTC_ensemble_20260504T122603Z_4f5be51e;
-- reference spot: $78,952.42 when price levels or returns are discussed;
+- report timestamp: 2026-05-04T12:45:43.086312+00:00;
+- run ID: BTC_ensemble_20260504T124542Z_24e975ff;
+- reference spot: $78,955.53 when price levels or returns are discussed;
 - status: real for market source, absent for fundamentals, inferred for simulations/risk/backtests.
 
 Do not reproduce precise figures from memory without provenance.
 
 ## Latest Distribution Snapshot
 
-- P10 return: -34.44%.
-- Median return: 27.13%.
-- P90 return: 144.89%.
-- P10 price: $51,762.17.
-- Median price: $100,370.89.
-- P90 price: $193,349.17.
+- P10 return: -33.00%.
+- Median return: 27.62%.
+- P90 return: 150.35%.
+- P10 price: $52,900.03.
+- Median price: $100,765.44.
+- P90 price: $197,665.19.
 
 These values are inferred from simulations and are not deterministic predictions.
 
 ## Latest Risk Snapshot
 
-- VaR 95 of simulated return, expressed as positive loss: 45.70%.
-- VaR 99 of simulated return, expressed as positive loss: 61.19%.
-- CVaR 95, average tail loss beyond VaR 95: 55.15%.
-- CVaR 99, average tail loss beyond VaR 99: 67.28%.
+- VaR 95 of simulated return, expressed as positive loss: 44.83%.
+- VaR 99 of simulated return, expressed as positive loss: 60.39%.
+- CVaR 95, average tail loss beyond VaR 95: 53.63%.
+- CVaR 99, average tail loss beyond VaR 99: 68.24%.
 - Expected max drawdown: -36.10%.
 - Conditional volatility: 35.00%.
 
 ## Latest Regime Split
 
-- Bull: 54.54%.
-- Bear: 19.22%.
-- Range: 13.16%.
-- Non-classified / transition: 13.08%.
+- Bull: 54.48%.
+- Bear: 17.30%.
+- Range: 14.02%.
+- Non-classified / transition: 14.20%.
 
-Bull, bear, and range sum to 86.92%, not 100%. The split is incomplete and should be interpreted with caution.
+Bull, bear, and range sum to 85.80%, not 100%. The split is incomplete and should be interpreted with caution.
 
 ## Confidence Interpretation
 

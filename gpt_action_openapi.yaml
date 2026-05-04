@@ -72,6 +72,74 @@ paths:
           description: Missing or invalid API key.
         "500":
           description: Model run failed.
+  /multi-run:
+    post:
+      operationId: runQuantBtcMultiFrame
+      summary: Run fresh BTC model across multiple timeframes
+      description: Runs fresh probabilistic calculations for several horizons in one server call. Use this for multi-frame analysis such as 7, 30, 90, 180 and 365 days. The API reloads online BTC market data and appends the latest Bitget BTCUSDT spot ticker for each frame.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - asset
+                - horizons
+                - simulations
+                - model
+              properties:
+                asset:
+                  type: string
+                  default: BTC
+                  description: Asset symbol. BTC is the supported production target.
+                horizons:
+                  type: array
+                  default:
+                    - 7
+                    - 30
+                    - 90
+                    - 180
+                    - 365
+                  minItems: 1
+                  maxItems: 8
+                  items:
+                    type: integer
+                    minimum: 1
+                    maximum: 3650
+                  description: Timeframes in days. Use [7, 30, 90, 180, 365] for the standard multi-frame view.
+                simulations:
+                  type: integer
+                  default: 2000
+                  minimum: 100
+                  maximum: 250000
+                  description: Simulations per horizon. Default is optimized for GPT Action latency.
+                model:
+                  type: string
+                  default: ensemble
+                  enum:
+                    - ensemble
+                    - monte_carlo
+                    - student_t
+                    - jump_diffusion
+                    - garch
+                    - regime_switching
+                    - liquidation
+                    - correlation
+                skip_corpus:
+                  type: boolean
+                  default: true
+                no_online:
+                  type: boolean
+                  default: false
+                  description: Keep false for real-time multi-frame runs.
+      responses:
+        "200":
+          description: Fresh multi-frame probabilistic result with one frame per horizon, including provenance, source statuses, distributions and risks.
+        "401":
+          description: Missing or invalid API key.
+        "500":
+          description: All multi-frame model runs failed.
   /latest:
     get:
       operationId: latestQuantBtcReport
