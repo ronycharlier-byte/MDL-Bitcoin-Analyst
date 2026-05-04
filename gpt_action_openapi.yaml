@@ -17,7 +17,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/HealthResponse"
   /run:
     post:
       operationId: runQuantBtcModel
@@ -30,63 +30,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                asset:
-                  type: string
-                  default: BTC
-                horizon:
-                  type: integer
-                  default: 365
-                  minimum: 1
-                  maximum: 3650
-                simulations:
-                  type: integer
-                  default: 200000
-                  minimum: 100
-                  maximum: 250000
-                model:
-                  type: string
-                  default: ensemble
-                  enum:
-                    - ensemble
-                    - monte_carlo
-                    - student_t
-                    - jump_diffusion
-                    - garch
-                    - regime_switching
-                    - liquidation
-                    - correlation
-                skip_corpus:
-                  type: boolean
-                  default: true
-                no_online:
-                  type: boolean
-                  default: false
+              $ref: "#/components/schemas/RunRequest"
       responses:
         "200":
           description: Probabilistic model result with provenance.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  run_id:
-                    type: string
-                  provenance:
-                    type: object
-                  data_status:
-                    type: object
-                  distribution:
-                    type: object
-                  regime_distribution:
-                    type: object
-                  risk_metrics:
-                    type: object
-                  confidence:
-                    type: object
-                  warning:
-                    type: string
+                $ref: "#/components/schemas/RunResponse"
         "401":
           description: Missing or invalid API key.
         "500":
@@ -100,9 +51,255 @@ paths:
       responses:
         "200":
           description: Latest report and dashboard markdown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LatestResponse"
 components:
   securitySchemes:
     ApiKeyAuth:
       type: apiKey
       in: header
       name: x-api-key
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+        - mode
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: quant-btc-model
+        mode:
+          type: string
+          example: probabilistic
+    RunRequest:
+      type: object
+      properties:
+        asset:
+          type: string
+          default: BTC
+          description: Asset symbol. BTC is the supported production target.
+        horizon:
+          type: integer
+          default: 365
+          minimum: 1
+          maximum: 3650
+        simulations:
+          type: integer
+          default: 200000
+          minimum: 100
+          maximum: 250000
+        model:
+          type: string
+          default: ensemble
+          enum:
+            - ensemble
+            - monte_carlo
+            - student_t
+            - jump_diffusion
+            - garch
+            - regime_switching
+            - liquidation
+            - correlation
+        skip_corpus:
+          type: boolean
+          default: true
+        no_online:
+          type: boolean
+          default: false
+    Provenance:
+      type: object
+      required:
+        - source
+        - report_date
+        - model_run_id
+        - reference_spot
+        - market_source
+        - calculation_origin
+      properties:
+        source:
+          type: string
+        report_date:
+          type: string
+        model_run_id:
+          type: string
+        reference_spot:
+          type: string
+        market_source:
+          type: string
+        calculation_origin:
+          type: string
+    DataStatus:
+      type: object
+      properties:
+        market_prices:
+          type: string
+        simulation_outputs:
+          type: string
+        risk_metrics:
+          type: string
+        fundamental_variables:
+          type: string
+    Distribution:
+      type: object
+      properties:
+        p10_return:
+          type: number
+        median_return:
+          type: number
+        p90_return:
+          type: number
+        p10_price:
+          type: number
+        median_price:
+          type: number
+        p90_price:
+          type: number
+        prob_up:
+          type: number
+        prob_down_10:
+          type: number
+        prob_down_30:
+          type: number
+        prob_up_30:
+          type: number
+        prob_bull:
+          type: number
+        prob_bear:
+          type: number
+        prob_range:
+          type: number
+    RegimeDistribution:
+      type: object
+      properties:
+        bull:
+          type: number
+        bear:
+          type: number
+        range:
+          type: number
+        classified_total:
+          type: number
+        non_classified_transition:
+          type: number
+        is_complete:
+          type: boolean
+        note:
+          type: string
+    RiskMetrics:
+      type: object
+      properties:
+        var_95:
+          type: number
+        var_99:
+          type: number
+        cvar_95:
+          type: number
+        cvar_99:
+          type: number
+        skewness:
+          type: number
+        kurtosis:
+          type: number
+        max_drawdown:
+          type: number
+        conditional_volatility:
+          type: number
+    StressTest:
+      type: object
+      properties:
+        scenario:
+          type: string
+        description:
+          type: string
+        instant_return:
+          type: number
+        price_after_instant_shock:
+          type: number
+        median_terminal_after_shock:
+          type: number
+        statut:
+          type: string
+    Confidence:
+      type: object
+      properties:
+        score:
+          type: integer
+        notes:
+          type: array
+          items:
+            type: string
+    PositionSizing:
+      type: object
+      properties:
+        risk_budget:
+          type: number
+        var_based_fraction:
+          type: number
+        cvar_based_fraction:
+          type: number
+        kelly_fraction:
+          type: number
+        drawdown_limited_fraction:
+          type: number
+    RunResponse:
+      type: object
+      required:
+        - run_id
+        - provenance
+        - data_status
+        - distribution
+        - regime_distribution
+        - risk_metrics
+        - confidence
+        - warning
+      properties:
+        run_id:
+          type: string
+        asset:
+          type: string
+        horizon:
+          type: integer
+        simulations:
+          type: integer
+        model:
+          type: string
+        provenance:
+          $ref: "#/components/schemas/Provenance"
+        data_status:
+          $ref: "#/components/schemas/DataStatus"
+        distribution:
+          $ref: "#/components/schemas/Distribution"
+        regime_distribution:
+          $ref: "#/components/schemas/RegimeDistribution"
+        risk_metrics:
+          $ref: "#/components/schemas/RiskMetrics"
+        stress_tests:
+          type: array
+          items:
+            $ref: "#/components/schemas/StressTest"
+        confidence:
+          $ref: "#/components/schemas/Confidence"
+        position_sizing:
+          $ref: "#/components/schemas/PositionSizing"
+        report_markdown:
+          type: string
+        dashboard_markdown:
+          type: string
+        warning:
+          type: string
+    LatestResponse:
+      type: object
+      properties:
+        report_markdown:
+          type: string
+        dashboard_markdown:
+          type: string
+        warning:
+          type: string
