@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model Bitget Bridge Worker
-  version: 1.10.0
+  version: 1.11.0
   description: Always-awake Cloudflare Worker facade for the Render Bitget-backed
     probabilistic BTC model. Outputs are probabilistic and must never be presented
-    as certainty.
+    as certainty. Report and spot timestamps must be displayed as UTC and Europe/Paris.
 servers:
 - url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
 paths:
@@ -60,6 +60,14 @@ paths:
                       type: string
                   source_policy:
                     type: string
+                  checked_at_utc:
+                    type: string
+                  checked_at_paris:
+                    type: string
+                  timezone_policy:
+                    type: string
+                  user_display_timezone:
+                    type: string
                   fundamental_snapshot:
                     type: object
                     additionalProperties: true
@@ -89,8 +97,35 @@ paths:
           default: BTC
       responses:
         '200':
-          description: Probabilistic Bitget-backed JSON result with provenance, statuses,
-            distribution, regime residual, risk metrics, confidence and warnings.
+          description: Probabilistic Bitget-backed JSON result with provenance, UTC/Europe-Paris timestamps, statuses,
+            distribution, regime residual, risk metrics, confidence, archive_id and warnings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  asset:
+                    type: string
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  provenance_summary:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                  archive:
+                    type: object
+                    additionalProperties: true
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
         '500':
           description: Bitget bridge run failed JSON.
         '429':
@@ -110,7 +145,7 @@ paths:
           default: BTC
       responses:
         '200':
-          description: Probabilistic multi-frame JSON result with one frame per horizon, provenance, statuses, risk metrics, confidence and warnings.
+          description: Probabilistic multi-frame JSON result with one frame per horizon, one archive_id, UTC/Europe-Paris provenance, statuses, risk metrics, confidence and warnings.
           content:
             application/json:
               schema:

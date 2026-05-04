@@ -1,10 +1,10 @@
-openapi: 3.1.0
+﻿openapi: 3.1.0
 info:
   title: Quant BTC Model Bitget Bridge Worker
-  version: 1.8.1
+  version: 1.11.0
   description: Always-awake Cloudflare Worker facade for the Render Bitget-backed
     probabilistic BTC model. Outputs are probabilistic and must never be presented
-    as certainty.
+    as certainty. Report and spot timestamps must be displayed as UTC and Europe/Paris.
 servers:
 - url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
 paths:
@@ -29,6 +29,58 @@ paths:
       responses:
         '200':
           description: Runtime status, sources and limitations JSON.
+  /audit:
+    get:
+      operationId: auditQuantBtcLiteSystem
+      summary: Audit Cloudflare bridge and Render model readiness
+      description: Preflight governance audit. Call this before live analysis; it reports readiness, source policy, latest archive status and fundamental field status. It does not return forecasts.
+      responses:
+        '200':
+          description: Audit JSON with readiness, blockers, warnings, source policy, latest archive metadata, fundamental field status and bridge metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  ready_for_gpt_live_analysis:
+                    type: boolean
+                  can_attempt_live_run:
+                    type: boolean
+                  latest_outputs_auditable:
+                    type: boolean
+                  blockers:
+                    type: array
+                    items:
+                      type: string
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                  source_policy:
+                    type: string
+                  checked_at_utc:
+                    type: string
+                  checked_at_paris:
+                    type: string
+                  timezone_policy:
+                    type: string
+                  user_display_timezone:
+                    type: string
+                  fundamental_snapshot:
+                    type: object
+                    additionalProperties: true
+                  latest_runtime_archive:
+                    type: object
+                    additionalProperties: true
+                  version:
+                    type: object
+                    additionalProperties: true
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
   /run:
     get:
       operationId: runQuantBtcModel
@@ -45,8 +97,89 @@ paths:
           default: BTC
       responses:
         '200':
-          description: Probabilistic Bitget-backed JSON result with provenance, statuses,
-            distribution, regime residual, risk metrics, confidence and warnings.
+          description: Probabilistic Bitget-backed JSON result with provenance, UTC/Europe-Paris timestamps, statuses,
+            distribution, regime residual, risk metrics, confidence, archive_id and warnings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  asset:
+                    type: string
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  provenance_summary:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                  archive:
+                    type: object
+                    additionalProperties: true
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
+        '500':
+          description: Bitget bridge run failed JSON.
+        '429':
+          description: Public endpoint rate limit reached JSON.
+  /multi-run:
+    get:
+      operationId: runQuantBtcMultiFrame
+      summary: Run the default Bitget-backed BTC multi-frame analysis
+      description: Multi-frame analysis operation. Send asset=BTC. The backend returns the standard five-frame BTC analysis [7,30,90,180,365]. No horizons parameter is required.
+      parameters:
+      - name: asset
+        in: query
+        required: true
+        description: Asset symbol. Use BTC.
+        schema:
+          type: string
+          default: BTC
+      responses:
+        '200':
+          description: Probabilistic multi-frame JSON result with one frame per horizon, one archive_id, UTC/Europe-Paris provenance, statuses, risk metrics, confidence and warnings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  asset:
+                    type: string
+                  horizons:
+                    type: array
+                    items:
+                      type: integer
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  provenance_summary:
+                    type: object
+                    additionalProperties: true
+                  fundamental_inputs:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                  archive:
+                    type: object
+                    additionalProperties: true
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
         '500':
           description: Bitget bridge run failed JSON.
         '429':

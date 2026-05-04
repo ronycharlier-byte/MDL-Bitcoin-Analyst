@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model API
-  version: 1.0.0
-  description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions.
+  version: 1.7.0
+  description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions. Numeric outputs include UTC and Europe/Paris provenance fields when available.
 servers:
   - url: https://quant-btc-model-api.onrender.com
     description: Render deployment.
@@ -28,6 +28,55 @@ paths:
       responses:
         "200":
           description: Public status metadata including data sources, runtime controls, limitations, default frames and version.
+  /audit:
+    get:
+      operationId: auditQuantBtcSystem
+      summary: Audit API health, provenance, source policy and latest archive readiness
+      description: Preflight governance audit. Use before live analysis. This endpoint does not produce model forecasts; it reports whether the system is ready for a fresh probabilistic run.
+      responses:
+        "200":
+          description: Audit JSON with readiness, blockers, warnings, source policy, latest archive metadata, fundamental field status and version.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  ready_for_gpt_live_analysis:
+                    type: boolean
+                  can_attempt_live_run:
+                    type: boolean
+                  latest_outputs_auditable:
+                    type: boolean
+                  blockers:
+                    type: array
+                    items:
+                      type: string
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                  source_policy:
+                    type: string
+                  checked_at_utc:
+                    type: string
+                  checked_at_paris:
+                    type: string
+                  timezone_policy:
+                    type: string
+                  user_display_timezone:
+                    type: string
+                  fundamental_snapshot:
+                    type: object
+                    additionalProperties: true
+                  latest_runtime_archive:
+                    type: object
+                    additionalProperties: true
+                  version:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
   /run:
     post:
       operationId: runQuantBtcModel
@@ -81,7 +130,30 @@ paths:
                   description: Keep false for real-time runs. If true, the API will not fetch online candles or the live Bitget spot ticker.
       responses:
         "200":
-          description: Fresh probabilistic model result with JSON body including run_id, report_date, reference_spot, reference_spot_timestamp, source statuses, report_markdown, dashboard_markdown, distribution, risk metrics and warning.
+          description: Fresh probabilistic model result with run_id, report_date UTC/Europe-Paris, reference_spot, reference_spot_timestamp UTC/Europe-Paris, source statuses, report_markdown, dashboard_markdown, distribution, risk metrics and warning.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  provenance:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                  distribution:
+                    type: object
+                    additionalProperties: true
+                  risk_metrics:
+                    type: object
+                    additionalProperties: true
+                  archive:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
         "401":
           description: Missing or invalid API key.
         "429":
@@ -145,7 +217,35 @@ paths:
                   description: Keep false for real-time multi-frame runs.
       responses:
         "200":
-          description: Fresh multi-frame probabilistic result with one frame per horizon, including provenance, source statuses, distributions and risks.
+          description: Fresh multi-frame probabilistic result with one frame per horizon, single archive_id, shared spot provenance, UTC/Europe-Paris timestamps, source statuses, distributions and risks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  asset:
+                    type: string
+                  horizons:
+                    type: array
+                    items:
+                      type: integer
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  provenance_summary:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                  archive:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
         "401":
           description: Missing or invalid API key.
         "429":

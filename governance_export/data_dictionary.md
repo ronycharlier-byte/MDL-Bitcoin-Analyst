@@ -17,12 +17,18 @@ For every precise quantitative output, the GPT must identify:
 |---|---|
 | source_file | Export file or report containing the number. |
 | report_date | Date/time of the report used. |
+| report_date_utc | UTC report timestamp from the API/source. |
+| report_date_paris | Europe/Paris conversion for user-facing display. |
+| archive_id | Runtime archive ID when the Action response includes one. |
 | model_run_id | Run ID if present. |
 | reference_spot | BTC spot used for return-to-price conversion when relevant. |
+| reference_spot_timestamp_utc | UTC timestamp of the spot reference when available. |
+| reference_spot_timestamp_paris | Europe/Paris timestamp of the spot reference when available. |
 | status | real, mock, absent, or inferred. |
 | calculation_origin | present_in_export, recalculated, database_result, or user_supplied. |
 
 If these provenance fields cannot be supplied, the GPT should not display the precise number.
+Do not mix numeric outputs from different archive_id values or different reference spot timestamps in one analysis unless the user explicitly asks for a run comparison.
 
 ## Market Prices
 
@@ -31,6 +37,8 @@ Latest export status: real.
 | Field | Meaning | Latest status |
 |---|---|---|
 | timestamp | Candle date/time. | real |
+| timestamp_utc | UTC timestamp supplied or normalized by the API. | real when provided |
+| timestamp_paris | Europe/Paris display timestamp derived from timestamp_utc. | inferred conversion |
 | asset | Asset symbol. | real |
 | open | Daily open price. | real |
 | high | Daily high price. | real |

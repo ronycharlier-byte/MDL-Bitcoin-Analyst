@@ -117,8 +117,9 @@ The public API includes a short SQLite-backed cache, a SQLite-backed rate limit 
 - `model_version`
 - `schema_version`
 - `git_commit`
+- UTC and Europe/Paris timestamp fields for report, audit, archive, cache, and spot provenance
 
-`GET /audit` is the GPT preflight endpoint. It does not run a market simulation; it reports readiness, source policy, latest archive metadata, required real/absent fundamental fields, and the visible monitor alert rule.
+`GET /audit` is the GPT preflight endpoint. It does not run a market simulation; it reports readiness, source policy, latest archive metadata, required real/absent fundamental fields, timezone policy, and the visible monitor alert rule.
 
 GitHub Actions monitoring:
 
@@ -258,6 +259,7 @@ Reports include data used, missing data, assumptions, model weights, P10/median/
 - Data quality status is explicit.
 - GitHub monitoring fails on silent regressions in frame count, source policy, required fundamentals, version, or archive creation.
 - Live API responses include `archive.archive_id`; scheduled GitHub archives preserve compact summaries externally.
+- GPT-facing outputs must not mix multiple archive IDs or spot snapshots in one analysis unless explicitly comparing runs.
 - Mock data are never presented as real data.
 - Exceptions are caught, logged, and written to `data/last_error.json`.
 - This is research infrastructure, not financial advice.

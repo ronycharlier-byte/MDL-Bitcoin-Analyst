@@ -8,12 +8,14 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 CF_BASE = os.getenv("CF_BASE", "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev").rstrip("/")
 RENDER_BASE = os.getenv("RENDER_BASE", "https://quant-btc-model-api.onrender.com").rstrip("/")
-MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.6.0")
+MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.7.0")
 EXPECTED_HORIZONS = [7, 30, 90, 180, 365]
+PARIS_TZ = ZoneInfo("Europe/Paris")
 REQUIRED_REAL_FIELDS = {
     item.strip()
     for item in os.getenv(
@@ -45,6 +47,10 @@ def fetch_json(url: str, timeout: int = 180) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+def paris_now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone(PARIS_TZ).isoformat()
+
+
 def require(condition: bool, message: str, context: Any = None) -> None:
     if condition:
         return
@@ -61,8 +67,12 @@ def compact_frame(frame: dict[str, Any]) -> dict[str, Any]:
         "horizon": frame.get("horizon"),
         "run_id": frame.get("run_id"),
         "report_date": provenance.get("report_date"),
+        "report_date_utc": provenance.get("report_date_utc"),
+        "report_date_paris": provenance.get("report_date_paris"),
         "reference_spot": provenance.get("reference_spot"),
         "reference_spot_timestamp": provenance.get("reference_spot_timestamp"),
+        "reference_spot_timestamp_utc": provenance.get("reference_spot_timestamp_utc"),
+        "reference_spot_timestamp_paris": provenance.get("reference_spot_timestamp_paris"),
         "p10_return": distribution.get("p10_return"),
         "median_return": distribution.get("median_return"),
         "p90_return": distribution.get("p90_return"),
@@ -77,6 +87,7 @@ def compact_frame(frame: dict[str, Any]) -> dict[str, Any]:
 
 def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     fetched_at = datetime.now(timezone.utc).isoformat()
+    fetched_at_paris = paris_now_iso()
     render_health = fetch_json(f"{RENDER_BASE}/health", timeout=60)
     render_version = fetch_json(f"{RENDER_BASE}/version", timeout=60)
     render_status = fetch_json(f"{RENDER_BASE}/status", timeout=60)
@@ -127,6 +138,11 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     require(audit.get("ready_for_gpt_live_analysis") is True, "Audit endpoint is not ready for GPT live analysis", audit)
     require(audit.get("source_policy") == "bitget_required_no_exchange_fallback", "Audit source policy is unexpected", audit)
     require((audit.get("version") or {}).get("api_version") == str(backend_version), "Audit API version mismatch", audit)
+    require(bool(audit.get("checked_at_utc")), "Audit checked_at_utc is missing", audit)
+    require(bool(audit.get("checked_at_paris")), "Audit checked_at_paris is missing", audit)
+    require(bool(audit.get("timezone_policy")), "Audit timezone policy is missing", audit)
+    require(bool((run.get("provenance_summary") or {}).get("report_date_utc")), "Run report_date_utc is missing", run.get("provenance_summary"))
+    require(bool((run.get("provenance_summary") or {}).get("report_date_paris")), "Run report_date_paris is missing", run.get("provenance_summary"))
 
     fundamentals = run.get("fundamental_inputs") or {}
     real_fields = set(fundamentals.get("real_fields") or [])
@@ -143,6 +159,10 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     for frame in frames:
         require(frame.get("run_id"), "Frame run_id missing", frame)
         require((frame.get("provenance") or {}).get("reference_spot"), "Frame reference spot missing", frame)
+        require((frame.get("provenance") or {}).get("report_date_utc"), "Frame report_date_utc missing", frame)
+        require((frame.get("provenance") or {}).get("report_date_paris"), "Frame report_date_paris missing", frame)
+        require((frame.get("provenance") or {}).get("reference_spot_timestamp_utc"), "Frame spot timestamp UTC missing", frame)
+        require((frame.get("provenance") or {}).get("reference_spot_timestamp_paris"), "Frame spot timestamp Paris missing", frame)
         require((frame.get("risk_metrics") or {}).get("var_95") is not None, "Frame VaR missing", frame)
         require((frame.get("risk_metrics") or {}).get("cvar_95") is not None, "Frame CVaR missing", frame)
         require((frame.get("confidence") or {}).get("score") is not None, "Frame confidence missing", frame)
@@ -150,18 +170,23 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     summary = {
         "status": "ok",
         "fetched_at": fetched_at,
+        "fetched_at_paris": fetched_at_paris,
         "render_api_version": render_version.get("api_version"),
         "live_api_version": backend_version,
         "git_commit": (run.get("version") or {}).get("git_commit"),
         "worker_version": cf_version.get("worker_version") or bridge.get("worker_version"),
         "source_policy": bridge.get("source_policy"),
         "audit_status": audit.get("status"),
+        "audit_checked_at_utc": audit.get("checked_at_utc"),
+        "audit_checked_at_paris": audit.get("checked_at_paris"),
         "audit_ready": audit.get("ready_for_gpt_live_analysis"),
         "audit_latest_outputs_auditable": audit.get("latest_outputs_auditable"),
         "audit_warnings": audit.get("warnings"),
         "horizons": horizons,
         "frame_count": len(frames),
         "archive_id": archive.get("archive_id"),
+        "archive_created_at_utc": archive.get("created_at_utc"),
+        "archive_created_at_paris": archive.get("created_at_paris"),
         "fundamental_status": fundamentals.get("status"),
         "fundamental_real_fields": sorted(real_fields),
         "fundamental_absent_fields": sorted(absent_fields),
@@ -182,6 +207,7 @@ def main() -> int:
         failure = {
             "status": "failed",
             "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "fetched_at_paris": paris_now_iso(),
             "error": str(exc),
         }
         if args.output:

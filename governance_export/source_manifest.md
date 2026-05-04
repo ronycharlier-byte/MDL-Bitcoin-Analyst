@@ -86,8 +86,11 @@ Every precise number shown by a GPT Custom answer must include:
 
 - source file;
 - report date;
+- report date in UTC and Europe/Paris if a timestamp is shown;
 - model_run_id;
+- archive_id when present;
 - BTC reference spot when relevant;
+- reference spot timestamp in UTC and Europe/Paris when present;
 - status: real, mock, absent, or inferred;
 - whether the figure is present in export or recalculated.
 
@@ -101,14 +104,16 @@ Live Action provenance requirements:
 
 - Operation: `runQuantBtcModel`.
 - Multi-frame operation: `runQuantBtcMultiFrame`.
-- Required source fields: `model_run_id`, `report_date`, `reference_spot`, `reference_spot_timestamp`, `reference_spot_source`.
+- Required source fields: full `model_run_id`, `report_date_utc`, `report_date_paris`, `reference_spot`, `reference_spot_timestamp_utc`, `reference_spot_timestamp_paris`, `reference_spot_source`.
+- Required run consistency fields: one `archive.archive_id` and one shared spot snapshot per analysis when present.
 - Fundamental provenance field: `fundamental_inputs` with `real_fields`, `absent_fields`, `sources`, `timestamp`, `status`, and compact point-in-time values.
 - Expected market source for realtime price: `bitget_btcusdt_spot_ticker_realtime`.
 - Expected status mix unless extra data are supplied: prices real; simulations inferred; fundamentals partial_real_absent or absent.
 - Default live frames: 7, 30, 90, 180 and 365 days.
 - Multi-frame runs expose `shared_spot_snapshot` so all frames can be compared from one reference price.
+- Multi-frame answers must not combine two different `archive_id` values or two different shared spot snapshots unless explicitly framed as a comparison.
 - Version fields may include `api_version`, `model_version`, `schema_version` and `git_commit`.
-- Short cached responses may include a `cache` object with `created_at`, `expires_at`, and `ttl_seconds`.
+- Short cached responses may include a `cache` object with `created_at_utc`, `created_at_paris`, `expires_at_utc`, `expires_at_paris`, and `ttl_seconds`.
 
 No-sleep Cloudflare Worker requirements:
 

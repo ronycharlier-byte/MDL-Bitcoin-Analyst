@@ -36,6 +36,9 @@ Live analysis rule:
 - If using the Cloudflare no-sleep schema, call `auditQuantBtcLiteSystem` first, then `runQuantBtcMultiFrame` for complete analysis or `runQuantBtcModel` for one horizon.
 - Cloudflare Worker responses may include `cloudflare_bridge` metadata; cite it when useful.
 - Cloudflare Worker has a best-effort public rate limit. If it returns 429, do not retry in a loop.
+- One answer must use one fresh response/archive_id. Do not mix outputs from separate runs unless explicitly comparing them.
+- Display report and spot timestamps as UTC and Europe/Paris. Do not present UTC as local Paris time.
+- Keep full run IDs in provenance; tables may shorten only if the full IDs are also shown.
 
 Default Render multi-frame request:
 
@@ -60,6 +63,12 @@ Recommended GPT Custom smoke test prompt:
 
 ```text
 Analyse BTC maintenant en plusieurs frames. Appelle le serveur, cite le run_id, le spot de reference, les statuts real/inferred/absent, puis donne une lecture probabiliste prudente.
+```
+
+Stronger smoke test for time/provenance:
+
+```text
+Fais une analyse live BTC 7/30/90/180/365. Je veux l'heure correcte pour Paris, un seul run, un seul archive_id, les run_id complets, et aucune certitude.
 ```
 
 Every precise number must retain source, report date, run ID, reference spot, source status, and model/version metadata when available.

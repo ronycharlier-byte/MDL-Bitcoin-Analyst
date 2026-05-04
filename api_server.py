@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -34,10 +35,16 @@ DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
-API_VERSION = "1.6.0"
+API_VERSION = "1.7.0"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.6.0"
+SCHEMA_VERSION = "gpt_action_schema_v1.7.0"
 SOURCE_POLICY = "bitget_required_no_exchange_fallback"
+USER_DISPLAY_TIMEZONE = "Europe/Paris"
+PARIS_TZ = ZoneInfo(USER_DISPLAY_TIMEZONE)
+TIMEZONE_POLICY = (
+    "Source timestamps are UTC. User-facing GPT answers must show both UTC and Europe/Paris "
+    "when a report date or spot timestamp is cited."
+)
 REQUIRED_AUDIT_REAL_FIELDS = [
     "etf_flows",
     "funding_rate",
@@ -112,7 +119,7 @@ FAST_MODEL_REGISTRY = {
 
 app = FastAPI(
     title="Quant BTC Model API",
-    version="1.0.0",
+    version=API_VERSION,
     description=(
         "Probabilistic Bitcoin quantitative model API. Outputs are scenarios, "
         "probabilities, distributions and risk metrics, never deterministic predictions."
@@ -280,6 +287,7 @@ def summarize_fundamental_inputs(fundamentals: pd.DataFrame | None) -> dict[str,
     elif values:
         status = "real"
 
+    latest_timestamp = str(latest.get("timestamp")) if latest.get("timestamp") is not None else None
     return {
         "status": status,
         "real_fields": sorted(values),
@@ -287,7 +295,9 @@ def summarize_fundamental_inputs(fundamentals: pd.DataFrame | None) -> dict[str,
         "values": values,
         "field_status": field_status,
         "sources": sources,
-        "timestamp": str(latest.get("timestamp")) if latest.get("timestamp") is not None else None,
+        "timestamp": latest_timestamp,
+        "timestamp_utc": timestamp_utc_iso(latest_timestamp),
+        "timestamp_paris": timestamp_paris_iso(latest_timestamp),
         "statut": str(latest.get("statut") or "missing"),
         "note": "Point-in-time fundamental snapshot, not a complete historical series.",
     }
@@ -378,6 +388,51 @@ def pydantic_payload(model: BaseModel) -> dict[str, Any]:
     return model.dict()
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def utc_iso(value: datetime | None = None) -> str:
+    return (value or utc_now()).astimezone(timezone.utc).isoformat()
+
+
+def paris_iso(value: datetime | None = None) -> str:
+    return (value or utc_now()).astimezone(PARIS_TZ).isoformat()
+
+
+def parse_utc_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                parsed = pd.to_datetime(text, utc=True).to_pydatetime()
+            except Exception:
+                return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def timestamp_utc_iso(value: Any) -> str | None:
+    parsed = parse_utc_timestamp(value)
+    return parsed.isoformat() if parsed else None
+
+
+def timestamp_paris_iso(value: Any) -> str | None:
+    parsed = parse_utc_timestamp(value)
+    return parsed.astimezone(PARIS_TZ).isoformat() if parsed else None
+
+
 def cache_key_for(endpoint: str, payload: dict[str, Any]) -> str:
     canonical = json.dumps(
         {
@@ -411,7 +466,11 @@ def cache_get(cache_key: str) -> dict[str, Any] | None:
             "hit": True,
             "cache_key": cache_key[:12],
             "created_at": datetime.fromtimestamp(float(row[1]), tz=timezone.utc).isoformat(),
+            "created_at_utc": datetime.fromtimestamp(float(row[1]), tz=timezone.utc).isoformat(),
+            "created_at_paris": paris_iso(datetime.fromtimestamp(float(row[1]), tz=timezone.utc)),
             "expires_at": datetime.fromtimestamp(float(row[2]), tz=timezone.utc).isoformat(),
+            "expires_at_utc": datetime.fromtimestamp(float(row[2]), tz=timezone.utc).isoformat(),
+            "expires_at_paris": paris_iso(datetime.fromtimestamp(float(row[2]), tz=timezone.utc)),
             "ttl_seconds": CACHE_TTL_SECONDS,
         }
         return payload
@@ -429,7 +488,11 @@ def cache_set(cache_key: str, payload: dict[str, Any]) -> None:
         "hit": False,
         "cache_key": cache_key[:12],
         "created_at": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+        "created_at_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+        "created_at_paris": paris_iso(datetime.fromtimestamp(now, tz=timezone.utc)),
         "expires_at": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+        "expires_at_utc": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+        "expires_at_paris": paris_iso(datetime.fromtimestamp(expires_at, tz=timezone.utc)),
         "ttl_seconds": CACHE_TTL_SECONDS,
     }
     try:
@@ -478,6 +541,9 @@ def _response_report_date(payload: dict[str, Any]) -> str | None:
     provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
     if provenance.get("report_date"):
         return str(provenance["report_date"])
+    summary = payload.get("provenance_summary") if isinstance(payload.get("provenance_summary"), dict) else {}
+    if summary.get("report_date"):
+        return str(summary["report_date"])
     frames = payload.get("frames") if isinstance(payload.get("frames"), list) else []
     for frame in frames:
         frame_provenance = frame.get("provenance") if isinstance(frame.get("provenance"), dict) else {}
@@ -497,12 +563,14 @@ def _archive_markdown(payload: dict[str, Any], archive: dict[str, Any]) -> str:
             "",
             f"- Archive ID: `{archive['archive_id']}`",
             f"- Endpoint: {archive['endpoint']}",
-            f"- Created at: {archive['created_at']}",
+            f"- Created at UTC: {archive['created_at']}",
+            f"- Created at Europe/Paris: {archive.get('created_at_paris') or 'unknown'}",
             f"- Asset: {archive.get('asset') or 'unknown'}",
             f"- Model: {archive.get('model') or 'unknown'}",
             f"- Horizons: {archive.get('horizons')}",
             f"- Run IDs: {archive.get('run_ids')}",
-            f"- Report date: {archive.get('report_date') or 'unknown'}",
+            f"- Report date UTC: {archive.get('report_date') or 'unknown'}",
+            f"- Report date Europe/Paris: {archive.get('report_date_paris') or 'unknown'}",
             f"- Reference spot: {archive.get('reference_spot') or 'unknown'}",
             f"- API version: {version.get('api_version') or API_VERSION}",
             f"- Git commit: {version.get('git_commit') or GIT_COMMIT}",
@@ -518,7 +586,7 @@ def _archive_markdown(payload: dict[str, Any], archive: dict[str, Any]) -> str:
 
 
 def attach_archive(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
-    created = datetime.now(timezone.utc)
+    created = utc_now()
     safe_endpoint = endpoint.strip("/").replace("/", "_") or "root"
     asset = str(payload.get("asset") or "unknown").upper()
     archive_id = f"{created.strftime('%Y%m%dT%H%M%SZ')}_{safe_endpoint}_{asset}_{uuid.uuid4().hex[:8]}"
@@ -530,12 +598,17 @@ def attach_archive(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         "archive_id": archive_id,
         "endpoint": endpoint,
         "created_at": created.isoformat(),
+        "created_at_utc": created.isoformat(),
+        "created_at_paris": paris_iso(created),
         "asset": asset,
         "model": payload.get("model"),
         "horizons": _response_horizons(payload),
         "run_ids": _response_run_ids(payload),
         "report_date": _response_report_date(payload),
+        "report_date_utc": _response_report_date(payload),
+        "report_date_paris": timestamp_paris_iso(_response_report_date(payload)),
         "reference_spot": _response_reference_spot(payload),
+        "timezone_policy": TIMEZONE_POLICY,
         "sqlite_db": str(API_RUNTIME_DB),
         "sqlite_table": "run_archive",
         "json_path": str(archive_json_path),
@@ -608,6 +681,8 @@ def latest_runtime_archive() -> dict[str, Any]:
             "horizons": json.loads(row[4] or "[]"),
             "run_ids": json.loads(row[5] or "[]"),
             "report_date": row[6],
+            "report_date_utc": row[6],
+            "report_date_paris": timestamp_paris_iso(row[6]),
             "reference_spot": row[7],
             "api_version": row[8],
             "git_commit": row[9],
@@ -615,6 +690,9 @@ def latest_runtime_archive() -> dict[str, Any]:
             "json_path": row[11],
             "markdown_path": row[12],
             "created_at": datetime.fromtimestamp(created_at, tz=timezone.utc).isoformat(),
+            "created_at_utc": datetime.fromtimestamp(created_at, tz=timezone.utc).isoformat(),
+            "created_at_paris": paris_iso(datetime.fromtimestamp(created_at, tz=timezone.utc)),
+            "timezone_policy": TIMEZONE_POLICY,
             "age_seconds": max(0, int(time.time() - created_at)),
         }
     except Exception as exc:
@@ -634,6 +712,8 @@ def latest_external_archive() -> dict[str, Any]:
             "path": str(path),
             "archive_id": payload.get("archive_id"),
             "created_at": payload.get("created_at"),
+            "created_at_utc": payload.get("created_at"),
+            "created_at_paris": timestamp_paris_iso(payload.get("created_at")),
             "api_version": payload.get("api_version"),
             "git_commit": payload.get("git_commit"),
             "horizons": payload.get("horizons"),
@@ -665,11 +745,16 @@ def audit_payload() -> dict[str, Any]:
     if runtime_archive.get("age_seconds") is not None and int(runtime_archive.get("age_seconds") or 0) > 21600:
         warnings.append("Latest runtime archive is older than 6 hours.")
 
+    checked_at = utc_now()
     return {
         "status": "ok" if not blockers else "blocked",
         "service": "quant-btc-model",
         "audit_kind": "preflight_governance_audit",
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": checked_at.isoformat(),
+        "checked_at_utc": checked_at.isoformat(),
+        "checked_at_paris": paris_iso(checked_at),
+        "user_display_timezone": USER_DISPLAY_TIMEZONE,
+        "timezone_policy": TIMEZONE_POLICY,
         "ready_for_gpt_live_analysis": not blockers,
         "can_attempt_live_run": True,
         "latest_outputs_auditable": runtime_archive.get("status") == "stored",
@@ -679,7 +764,9 @@ def audit_payload() -> dict[str, Any]:
             "Call this /audit endpoint before analysis.",
             "If ready_for_gpt_live_analysis is true, call /multi-run or Cloudflare /run for the fresh multi-frame run.",
             "Never reuse numbers from /audit as model forecasts; /audit is health/provenance only.",
+            "One analysis must use one fresh run/archive_id. Do not mix numbers from separate run responses unless the user asks for a comparison.",
             "For every precise model number, cite model_run_id, report_date, reference_spot, source and status.",
+            "Show every report date and spot timestamp in UTC and Europe/Paris user time.",
         ],
         "source_policy": SOURCE_POLICY,
         "default_frames": DEFAULT_MULTIFRAME_HORIZONS,
@@ -833,6 +920,8 @@ def version_payload() -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "git_commit": GIT_COMMIT,
         "execution_environment": os.getenv("RENDER_SERVICE_NAME", "local_or_custom"),
+        "user_display_timezone": USER_DISPLAY_TIMEZONE,
+        "timezone_policy": TIMEZONE_POLICY,
         "max_api_simulations": MAX_API_SIMULATIONS,
         "default_api_simulations": DEFAULT_API_SIMULATIONS,
         "default_multiframe_simulations": DEFAULT_MULTIFRAME_SIMULATIONS,
@@ -857,9 +946,12 @@ def fetch_realtime_spot_snapshot(asset: str) -> dict[str, Any] | None:
         ticker = data[0]
         price = float(ticker["lastPr"])
         timestamp_ms = int(ticker.get("ts") or payload.get("requestTime"))
+        timestamp_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(timestamp_ms / 1000))
         return {
             "price": price,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(timestamp_ms / 1000)),
+            "timestamp": timestamp_utc,
+            "timestamp_utc": timestamp_utc,
+            "timestamp_paris": timestamp_paris_iso(timestamp_utc),
             "source": "bitget_btcusdt_spot_ticker_realtime_snapshot",
         }
     except Exception:
@@ -894,11 +986,13 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
     simulate = FAST_MODEL_REGISTRY[model_name]
     frames: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    batch_started_at = utc_now()
 
     for horizon in horizons:
+        frame_report_date = utc_now()
         run_id = (
             f"{payload.asset.upper()}_{model_name}_{horizon}d_fast_"
-            f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
+            f"{batch_started_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
         )
         kwargs = {
             "returns": returns,
@@ -931,14 +1025,19 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
                     "model": model_name,
                     "provenance": {
                         "source": "fast_runtime_multi_frame",
-                        "report_date": datetime.now(timezone.utc).isoformat(),
+                        "report_date": frame_report_date.isoformat(),
+                        "report_date_utc": frame_report_date.isoformat(),
+                        "report_date_paris": paris_iso(frame_report_date),
                         "model_run_id": run_id,
                         "reference_spot": reference_spot,
                         "reference_spot_timestamp": reference_timestamp,
+                        "reference_spot_timestamp_utc": timestamp_utc_iso(reference_timestamp),
+                        "reference_spot_timestamp_paris": timestamp_paris_iso(reference_timestamp),
                         "reference_spot_source": reference_source,
                         "market_source": ", ".join(sorted(set(price_frame["source"].dropna().astype(str)))),
                         "calculation_origin": "fast_in_memory_runtime",
                         "fresh_run": True,
+                        "timezone_policy": TIMEZONE_POLICY,
                     },
                     "data_status": {
                         "market_prices": "real" if "real" in set(price_frame["statut"].astype(str)) else "mock_or_missing",
@@ -968,7 +1067,11 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
         "errors": errors,
         "reference_spot": reference_spot,
         "reference_timestamp": reference_timestamp,
+        "reference_timestamp_utc": timestamp_utc_iso(reference_timestamp),
+        "reference_timestamp_paris": timestamp_paris_iso(reference_timestamp),
         "reference_source": reference_source,
+        "batch_started_at": batch_started_at.isoformat(),
+        "batch_started_at_paris": paris_iso(batch_started_at),
     }
 
 
@@ -979,6 +1082,8 @@ def build_run_response(payload: RunRequest) -> RunResponse:
     distribution = summary.get("distribution", {})
     risk = summary.get("risk_metrics", {})
     run_id = summary.get("run_id", "")
+    report_date = extract_report_date(report)
+    reference_spot_timestamp = extract_report_bullet(report, "Reference spot timestamp")
     return RunResponse(
         run_id=run_id,
         asset=summary.get("asset", payload.asset.upper()),
@@ -987,15 +1092,20 @@ def build_run_response(payload: RunRequest) -> RunResponse:
         model=summary.get("model", payload.model),
         provenance={
             "source": "runtime_generated_report",
-            "report_date": extract_report_date(report),
+            "report_date": report_date,
+            "report_date_utc": timestamp_utc_iso(report_date),
+            "report_date_paris": timestamp_paris_iso(report_date),
             "model_run_id": run_id,
             "reference_spot": extract_reference_spot(report),
-            "reference_spot_timestamp": extract_report_bullet(report, "Reference spot timestamp"),
+            "reference_spot_timestamp": reference_spot_timestamp,
+            "reference_spot_timestamp_utc": timestamp_utc_iso(reference_spot_timestamp),
+            "reference_spot_timestamp_paris": timestamp_paris_iso(reference_spot_timestamp),
             "reference_spot_source": extract_report_bullet(report, "Reference spot source"),
             "market_source": extract_bullet_value(report, "Market sources")
             or "bitget_btcusdt_spot_candles unless local CSV overrides it",
             "calculation_origin": "runtime_run",
             "fresh_run": True,
+            "timezone_policy": TIMEZONE_POLICY,
         },
         data_status={
             "market_prices": extract_bullet_value(report, "Market prices status") or "real_or_mock_per_report",
@@ -1022,13 +1132,17 @@ def build_run_response(payload: RunRequest) -> RunResponse:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
+    checked_at = utc_now()
     return {
         "status": "ok",
         "service": "quant-btc-model",
         "mode": "probabilistic",
         "api_version": API_VERSION,
         "git_commit": GIT_COMMIT,
+        "timestamp_utc": checked_at.isoformat(),
+        "timestamp_paris": paris_iso(checked_at),
+        "timezone_policy": TIMEZONE_POLICY,
     }
 
 
@@ -1039,6 +1153,7 @@ def version() -> dict[str, Any]:
 
 @app.get("/status")
 def status() -> dict[str, Any]:
+    checked_at = utc_now()
     return {
         "status": "ok",
         "service": "quant-btc-model",
@@ -1052,6 +1167,9 @@ def status() -> dict[str, Any]:
             "audit": "/audit",
         },
         "default_frames": DEFAULT_MULTIFRAME_HORIZONS,
+        "timestamp_utc": checked_at.isoformat(),
+        "timestamp_paris": paris_iso(checked_at),
+        "timezone_policy": TIMEZONE_POLICY,
         "data_sources": {
             "btc_spot": "Bitget BTCUSDT spot ticker and candles",
             "etf_flows": "Farside Investors Bitcoin ETF Flow total net flow in USD millions when available",
@@ -1136,6 +1254,7 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
         for result in results
         if result.get("provenance", {}).get("reference_spot_timestamp")
     ]
+    response_report_date = utc_now()
     fundamental_statuses = {
         result.get("data_status", {}).get("fundamental_variables")
         for result in results
@@ -1158,12 +1277,24 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
         "provenance_summary": {
             "source": "live runQuantBtcMultiFrame response",
             "operation": "runQuantBtcMultiFrame",
+            "report_date": response_report_date.isoformat(),
+            "report_date_utc": response_report_date.isoformat(),
+            "report_date_paris": paris_iso(response_report_date),
             "reference_spots": reference_spots,
             "reference_spot_timestamps": reference_timestamps,
+            "reference_spot_timestamps_utc": [timestamp_utc_iso(item) for item in reference_timestamps],
+            "reference_spot_timestamps_paris": [timestamp_paris_iso(item) for item in reference_timestamps],
             "reference_spot_source": "bitget_btcusdt_spot_ticker_realtime unless a frame reports otherwise",
             "shared_spot_snapshot": spot_snapshot,
+            "shared_spot_snapshot_timestamp_utc": timestamp_utc_iso((spot_snapshot or {}).get("timestamp")),
+            "shared_spot_snapshot_timestamp_paris": timestamp_paris_iso((spot_snapshot or {}).get("timestamp")),
             "runtime": "fast_in_memory_multi_frame",
             "fresh_run": True,
+            "timezone_policy": TIMEZONE_POLICY,
+            "analysis_consistency_policy": (
+                "Use this response as one analysis unit. Do not mix its numbers with another archive_id/run response "
+                "unless the user explicitly asks for a comparison."
+            ),
         },
         "fundamental_inputs": fast_result["fundamental_inputs"],
         "data_status": {
@@ -1190,5 +1321,6 @@ def latest() -> dict[str, Any]:
     return {
         "report_markdown": read_text(REPORT_PATH),
         "dashboard_markdown": read_text(DASHBOARD_PATH),
+        "timezone_policy": TIMEZONE_POLICY,
         "warning": "Latest local artifact only; call POST /run for a fresh run.",
     }

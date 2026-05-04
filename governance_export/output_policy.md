@@ -18,6 +18,8 @@ For any substantive answer about BTC, include:
 
 - source file or report for precise figures;
 - report date and run_id when available;
+- report date in UTC and Europe/Paris when a timestamp is shown;
+- one archive_id/run response as the source for the whole analysis, unless explicitly comparing runs;
 - BTC reference spot when price levels are shown;
 - data status;
 - horizon;
@@ -41,6 +43,9 @@ Use these phrases when appropriate:
 - "Source: live runQuantBtcModel response."
 - "Source: live runQuantBtcMultiFrame response."
 - "Run ID: [exact run ID from the report or Action response]."
+- "Archive ID: [exact archive_id from the Action response]."
+- "Report date: [UTC] / [Europe/Paris]."
+- "Reference spot timestamp: [UTC] / [Europe/Paris]."
 - "Reference spot: [exact spot from the report or Action response]."
 - "Regime residual: non-classified / transition."
 
@@ -49,6 +54,8 @@ For current market analysis, prefer live Action responses over stored Knowledge 
 When a live response includes version metadata, include it in the provenance block or keep it available for audit. When a multi-frame response includes `shared_spot_snapshot`, cite it as the common reference price for all frames.
 When `fundamental_inputs` is present, use it as the only live source for fundamental field status and values.
 When an `archive` object is present, cite `archive.archive_id` for auditability.
+When `report_date_paris`, `checked_at_paris`, `created_at_paris` or `reference_spot_timestamp_paris` exists, cite it next to the UTC timestamp.
+Do not combine two live responses in one analysis. If two archive IDs or two spot timestamps appear, use the newest complete response or explicitly frame the answer as a comparison.
 
 Cloudflare source policy is Bitget-required. If the bridge fails, live model output is absent. Do not substitute a non-Bitget exchange source.
 
@@ -112,6 +119,7 @@ If regime probabilities do not sum to 100%:
 ```text
 Horizon / frames:
 Numeric provenance:
+UTC / Europe/Paris timestamps:
 Data status:
 Distribution:
 Probabilities:
@@ -132,6 +140,8 @@ Before answering, confirm internally:
 - Limits are explicit.
 - Probabilities or intervals are used.
 - Precise numbers have source, date, run_id, spot reference, and status.
+- The analysis does not mix archive IDs or spot timestamps.
+- UTC and Europe/Paris timestamps are both shown for report/spot times when available.
 - Regime probabilities are checked and residual is shown when needed.
 - Confidence below 50/100 weakens any directional conclusion.
 - Financial advice boundary is preserved.

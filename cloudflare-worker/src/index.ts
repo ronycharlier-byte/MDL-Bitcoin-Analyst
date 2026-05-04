@@ -61,11 +61,13 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.10.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.10.0";
+const WORKER_VERSION = "1.11.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.11.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
+const USER_DISPLAY_TIMEZONE = "Europe/Paris";
+const TIMEZONE_POLICY = "Source timestamps are UTC. User-facing GPT answers must show both UTC and Europe/Paris when citing report dates or spot timestamps.";
 const rateLimitBuckets = new Map<string, number[]>();
 
 export default {
@@ -82,16 +84,22 @@ export default {
 
     try {
       if (url.pathname === "/health" && request.method === "GET") {
+        const now = new Date();
         return json({
           status: "ok",
           service: "quant-btc-model-lite-worker",
           worker_version: WORKER_VERSION,
           mode: "render_bitget_bridge_probabilistic",
-          timestamp: new Date().toISOString()
+          timestamp: now.toISOString(),
+          timestamp_utc: now.toISOString(),
+          timestamp_paris: parisIso(now),
+          user_display_timezone: USER_DISPLAY_TIMEZONE,
+          timezone_policy: TIMEZONE_POLICY
         });
       }
 
       if (url.pathname === "/version" && request.method === "GET") {
+        const now = new Date();
         return json({
           status: "ok",
           service: "quant-btc-model-lite-worker",
@@ -106,11 +114,17 @@ export default {
           default_horizons: parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS),
           rate_limit_runs_per_minute: getRateLimit(env).limit,
           rate_limit_window_seconds: getRateLimit(env).windowSeconds,
-          timestamp: new Date().toISOString()
+          user_display_timezone: USER_DISPLAY_TIMEZONE,
+          timezone_policy: TIMEZONE_POLICY,
+          analysis_consistency_policy: "One answer must use one fresh run/archive_id unless the user asks for a comparison.",
+          timestamp: now.toISOString(),
+          timestamp_utc: now.toISOString(),
+          timestamp_paris: parisIso(now)
         });
       }
 
       if (url.pathname === "/status" && request.method === "GET") {
+        const now = new Date();
         return json({
           status: "ok",
           service: "quant-btc-model-lite-worker",
@@ -153,15 +167,21 @@ export default {
             render_full_engine: "Render remains the Bitget-backed Python/numpy engine behind this Worker.",
             recommended_gpt_flow: "Call auditQuantBtcLiteSystem, then runQuantBtcMultiFrame for complete analysis or runQuantBtcModel for one explicit horizon."
           },
+          user_display_timezone: USER_DISPLAY_TIMEZONE,
+          timezone_policy: TIMEZONE_POLICY,
+          analysis_consistency_policy: "Do not mix numeric outputs from different archive_id values in one analysis unless explicitly comparing runs.",
           limitations: [
             "Cloudflare routes GPT analysis to the Render Bitget full engine; direct Worker quant-lite code remains a backup implementation only.",
             "If the Render bridge is unavailable, live Bitget model output is absent rather than replaced by another exchange.",
             "Liquidations are real only when the Bitget public WebSocket emits a BTCUSDT liquidation push during the configured observation window; otherwise the field is absent.",
             "Outputs are probabilistic scenarios, not deterministic predictions.",
             "Public endpoint has a best-effort per-IP in-isolate rate limit and simulation caps.",
-            "Every precise number must be cited with model_run_id, report_date, reference_spot and data status."
+            "Every precise number must be cited with full model_run_id, report_date UTC, report_date Europe/Paris, reference_spot and data status.",
+            "A user-facing answer must not truncate run_id values unless it also provides the full run_id in the provenance section."
           ],
-          timestamp: new Date().toISOString()
+          timestamp: now.toISOString(),
+          timestamp_utc: now.toISOString(),
+          timestamp_paris: parisIso(now)
         });
       }
 
@@ -363,6 +383,7 @@ async function parseRenderResponse(response: Response, path: string): Promise<Re
 }
 
 function withBridgeMetadata(result: Record<string, unknown>, path: string, env: Env): Record<string, unknown> {
+  const now = new Date();
   const bridge = {
     worker_version: WORKER_VERSION,
     schema_version: SCHEMA_VERSION,
@@ -371,7 +392,12 @@ function withBridgeMetadata(result: Record<string, unknown>, path: string, env: 
     operation_path: path,
     render_api_base: getRenderApiBase(env),
     source_policy: "bitget_required_no_exchange_fallback",
-    cloudflare_direct_bitget: "absent"
+    cloudflare_direct_bitget: "absent",
+    user_display_timezone: USER_DISPLAY_TIMEZONE,
+    timezone_policy: TIMEZONE_POLICY,
+    analysis_consistency_policy: "Use one fresh archive_id/run response per analysis; compare runs only when explicitly requested.",
+    bridge_timestamp_utc: now.toISOString(),
+    bridge_timestamp_paris: parisIso(now)
   };
   const existingDataStatus = objectValue(result.data_status);
   return {
@@ -549,12 +575,13 @@ async function runQuantLite(
     fundamentals.status
   );
   const runCompletedAt = new Date();
+  const referenceSpotTimestamp = new Date(sorted[sorted.length - 1].timestamp);
 
   const warnings = [
     "Probabilistic infrastructure only; not financial advice.",
     "Cloudflare Worker quant-lite is a lightweight runtime, not the full Python/numpy engine.",
     "Fundamental variables are absent in this Worker result unless supplied by a future connected store.",
-    "Precise numbers are valid only for this response and must be cited with model_run_id, report_date, reference_spot and status.",
+    "Precise numbers are valid only for this response and must be cited with model_run_id, report_date_utc, report_date_paris, reference_spot and status.",
     "VaR/CVaR are expressed as simulated returns, so negative values represent losses."
   ];
   if (requestedSimulations > simulations) {
@@ -576,17 +603,28 @@ async function runQuantLite(
     model_version: MODEL_VERSION,
     model_run_id: modelRunId,
     report_date: runCompletedAt.toISOString(),
+    report_date_utc: runCompletedAt.toISOString(),
+    report_date_paris: parisIso(runCompletedAt),
     provenance: {
       source_report: "runtime_response",
       report_date: runCompletedAt.toISOString(),
+      report_date_utc: runCompletedAt.toISOString(),
+      report_date_paris: parisIso(runCompletedAt),
       run_started_at: runStartedAt.toISOString(),
+      run_started_at_utc: runStartedAt.toISOString(),
+      run_started_at_paris: parisIso(runStartedAt),
       run_completed_at: runCompletedAt.toISOString(),
+      run_completed_at_utc: runCompletedAt.toISOString(),
+      run_completed_at_paris: parisIso(runCompletedAt),
       model_run_id: modelRunId,
       model_version: MODEL_VERSION,
       reference_spot: spot,
       reference_spot_source: market.source,
-      reference_spot_timestamp: new Date(sorted[sorted.length - 1].timestamp).toISOString(),
+      reference_spot_timestamp: referenceSpotTimestamp.toISOString(),
+      reference_spot_timestamp_utc: referenceSpotTimestamp.toISOString(),
+      reference_spot_timestamp_paris: parisIso(referenceSpotTimestamp),
       calculation_origin: "cloudflare_worker_quant_lite_runtime",
+      timezone_policy: TIMEZONE_POLICY,
       status: "mixed"
     },
     data_status: {
@@ -692,16 +730,26 @@ async function runQuantLiteMultiFrame(input: MultiRunRequest, env: Env): Promise
     model_version: MODEL_VERSION,
     model_run_id: groupRunId,
     report_date: runCompletedAt.toISOString(),
+    report_date_utc: runCompletedAt.toISOString(),
+    report_date_paris: parisIso(runCompletedAt),
     runtime: "cloudflare_worker_quant_lite_multi_frame",
     provenance_summary: {
       source_report: "runtime_response",
       report_date: runCompletedAt.toISOString(),
+      report_date_utc: runCompletedAt.toISOString(),
+      report_date_paris: parisIso(runCompletedAt),
       run_started_at: runStartedAt.toISOString(),
+      run_started_at_utc: runStartedAt.toISOString(),
+      run_started_at_paris: parisIso(runStartedAt),
       run_completed_at: runCompletedAt.toISOString(),
+      run_completed_at_utc: runCompletedAt.toISOString(),
+      run_completed_at_paris: parisIso(runCompletedAt),
       model_run_id: groupRunId,
       model_version: MODEL_VERSION,
       shared_spot_snapshot: sharedSpotSnapshot,
       calculation_origin: "cloudflare_worker_quant_lite_multi_frame_runtime",
+      timezone_policy: TIMEZONE_POLICY,
+      analysis_consistency_policy: "Use this multi-frame response as one analysis unit; do not mix with another run unless explicitly comparing.",
       status: "mixed"
     },
     data_status: {
@@ -726,7 +774,8 @@ async function runQuantLiteMultiFrame(input: MultiRunRequest, env: Env): Promise
       no_hidden_extrapolation: true,
       required_citation_fields: [
         "model_run_id",
-        "report_date",
+        "report_date_utc",
+        "report_date_paris",
         "provenance_summary.shared_spot_snapshot.price",
         "provenance_summary.shared_spot_snapshot.source",
         "data_status"
@@ -999,9 +1048,12 @@ function stringField(value: unknown, key: string): string | null {
 function getMarketSpotSnapshot(market: MarketCandles) {
   const sorted = [...market.candles].sort((a, b) => a.timestamp - b.timestamp);
   const latest = sorted[sorted.length - 1];
+  const timestamp = latest ? new Date(latest.timestamp) : null;
   return {
     price: latest?.close || null,
-    timestamp: latest ? new Date(latest.timestamp).toISOString() : null,
+    timestamp: timestamp ? timestamp.toISOString() : null,
+    timestamp_utc: timestamp ? timestamp.toISOString() : null,
+    timestamp_paris: timestamp ? parisIso(timestamp) : null,
     source: market.source,
     status: "real"
   };
@@ -1016,6 +1068,8 @@ function summarizeFrameResult(frame: Record<string, unknown>) {
     horizon: numberField(frame, "horizon"),
     model_run_id: stringField(frame, "model_run_id"),
     report_date: stringField(frame, "report_date"),
+    report_date_utc: stringField(frame, "report_date_utc"),
+    report_date_paris: stringField(frame, "report_date_paris"),
     reference_spot: numberField(objectValue(frame.provenance), "reference_spot"),
     p10_return: numberField(distribution, "p10_return"),
     median_return: numberField(distribution, "median_return"),
@@ -1319,6 +1373,33 @@ function randomRunSuffix(): string {
   const bytes = new Uint8Array(4);
   crypto.getRandomValues(bytes);
   return Array.from(bytes).map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function parisIso(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: USER_DISPLAY_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const item = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+  const year = Number(item("year"));
+  const month = Number(item("month"));
+  const day = Number(item("day"));
+  const hour = Number(item("hour"));
+  const minute = Number(item("minute"));
+  const second = Number(item("second"));
+  const parisAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offsetMinutes = Math.round((parisAsUtc - date.getTime()) / 60000);
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absolute = Math.abs(offsetMinutes);
+  const offsetHours = String(Math.floor(absolute / 60)).padStart(2, "0");
+  const offsetRemainder = String(absolute % 60).padStart(2, "0");
+  return `${item("year")}-${item("month")}-${item("day")}T${item("hour")}:${item("minute")}:${item("second")}${sign}${offsetHours}:${offsetRemainder}`;
 }
 
 function json(payload: unknown, status = 200): Response {

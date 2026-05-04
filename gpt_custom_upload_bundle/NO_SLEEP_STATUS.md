@@ -29,7 +29,9 @@ Status:
 - TypeScript check passes.
 - GPT Action schema generated and copied into `gpt_custom_upload_bundle/`.
 - `/health`, `/version`, `/status`, `/audit`, `/latest`, `/run`, and `/multi-run` tested successfully.
-- Worker version: `1.2.0`.
+- Worker version: `1.11.0`.
+- Backend API target version: `1.7.0`.
+- User-facing timestamp policy: cite UTC and Europe/Paris for report, archive, cache, audit, and spot timestamps.
 
 Public endpoint:
 

@@ -6,27 +6,39 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from quality_monitor import compact_frame, evaluate
+
+PARIS_TZ = ZoneInfo("Europe/Paris")
 
 
 def safe_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_")
 
 
+def paris_iso(value: datetime) -> str:
+    return value.astimezone(PARIS_TZ).isoformat()
+
+
 def build_archive_summary(monitor_summary: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
     fundamentals = run.get("fundamental_inputs") or {}
     archive = run.get("archive") or {}
     version = run.get("version") or {}
+    created_at = datetime.now(timezone.utc)
     return {
         "schema": "quant_btc_external_archive_v1",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": created_at.isoformat(),
+        "created_at_utc": created_at.isoformat(),
+        "created_at_paris": paris_iso(created_at),
         "source": "Cloudflare Action endpoint routed to Render",
         "runtime_archive": {
             "archive_id": archive.get("archive_id"),
             "status": archive.get("status"),
             "endpoint": archive.get("endpoint"),
             "sqlite_table": archive.get("sqlite_table"),
+            "created_at_utc": archive.get("created_at_utc"),
+            "created_at_paris": archive.get("created_at_paris"),
         },
         "version": {
             "api_version": version.get("api_version"),
@@ -53,6 +65,7 @@ def build_archive_summary(monitor_summary: dict[str, Any], run: dict[str, Any]) 
         "quality_monitor": {
             "status": monitor_summary.get("status"),
             "fetched_at": monitor_summary.get("fetched_at"),
+            "fetched_at_paris": monitor_summary.get("fetched_at_paris"),
             "frame_count": monitor_summary.get("frame_count"),
             "archive_id": monitor_summary.get("archive_id"),
         },
@@ -68,7 +81,8 @@ def build_markdown(summary: dict[str, Any]) -> str:
         [
             "# Quant BTC External Run Archive",
             "",
-            f"- Created at: {summary.get('created_at')}",
+            f"- Created at UTC: {summary.get('created_at_utc')}",
+            f"- Created at Europe/Paris: {summary.get('created_at_paris')}",
             f"- Runtime archive ID: `{(summary.get('runtime_archive') or {}).get('archive_id')}`",
             f"- API version: {version.get('api_version')}",
             f"- Git commit: {version.get('git_commit')}",
