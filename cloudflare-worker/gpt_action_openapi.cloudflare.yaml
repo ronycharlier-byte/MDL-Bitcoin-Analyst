@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model Bitget Bridge Worker
-  version: 1.8.0
+  version: 1.8.1
   description: Always-awake Cloudflare Worker facade for the Render Bitget-backed
     probabilistic BTC model. Outputs are probabilistic and must never be presented
     as certainty.
@@ -15,22 +15,6 @@ paths:
       responses:
         '200':
           description: Service health JSON.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  service:
-                    type: string
-                  worker_version:
-                    type: string
-                  mode:
-                    type: string
-                  timestamp:
-                    type: string
-                additionalProperties: true
   /version:
     get:
       operationId: getQuantBtcLiteVersion
@@ -38,24 +22,6 @@ paths:
       responses:
         '200':
           description: Version metadata JSON.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  worker_version:
-                    type: string
-                  schema_version:
-                    type: string
-                  model_version:
-                    type: string
-                  bridge_target:
-                    type: string
-                  timestamp:
-                    type: string
-                additionalProperties: true
   /status:
     get:
       operationId: getQuantBtcLiteStatus
@@ -63,25 +29,6 @@ paths:
       responses:
         '200':
           description: Runtime status, sources and limitations JSON.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  worker_version:
-                    type: string
-                  data_sources:
-                    type: object
-                    additionalProperties: true
-                  limitations:
-                    type: array
-                    items:
-                      type: string
-                  timestamp:
-                    type: string
-                additionalProperties: true
   /run:
     get:
       operationId: runQuantBtcModel
@@ -100,99 +47,10 @@ paths:
         '200':
           description: Probabilistic Bitget-backed JSON result with provenance, statuses,
             distribution, regime residual, risk metrics, confidence and warnings.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  run_id:
-                    type: string
-                  asset:
-                    type: string
-                  horizon:
-                    type: integer
-                  horizons:
-                    type: array
-                    items:
-                      type: integer
-                  simulations:
-                    type: integer
-                  model:
-                    type: string
-                  provenance:
-                    type: object
-                    additionalProperties: true
-                  provenance_summary:
-                    type: object
-                    additionalProperties: true
-                  data_status:
-                    type: object
-                    additionalProperties: true
-                  distribution:
-                    type: object
-                    additionalProperties: true
-                  regime_distribution:
-                    type: object
-                    additionalProperties: true
-                  risk_metrics:
-                    type: object
-                    additionalProperties: true
-                  confidence:
-                    type: object
-                    additionalProperties: true
-                  cloudflare_bridge:
-                    type: object
-                    additionalProperties: true
-                  frame_summaries:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
-                  frames:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
-                  warning:
-                    type: string
-                additionalProperties: true
         '500':
           description: Bitget bridge run failed JSON.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                  message:
-                    type: string
-                  data_status:
-                    type: object
-                    additionalProperties: true
-                  warning:
-                    type: string
-                additionalProperties: true
         '429':
           description: Public endpoint rate limit reached JSON.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                  message:
-                    type: string
-                  rate_limit:
-                    type: object
-                    additionalProperties: true
-                  data_status:
-                    type: object
-                    additionalProperties: true
-                  warning:
-                    type: string
-                additionalProperties: true
   /latest:
     get:
       operationId: latestQuantBtcReport
@@ -201,21 +59,3 @@ paths:
         '200':
           description: Stateless Worker note. Call /run for a fresh probabilistic
             result.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  report_markdown:
-                    type: string
-                  dashboard_markdown:
-                    type: string
-                  warning:
-                    type: string
-                  data_status:
-                    type: object
-                    additionalProperties: true
-                  cloudflare_bridge:
-                    type: object
-                    additionalProperties: true
-                additionalProperties: true
