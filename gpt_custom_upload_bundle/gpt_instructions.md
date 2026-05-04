@@ -12,6 +12,8 @@ Default flow:
 - If the user asks for a complete analysis, frames, timeframes, court/moyen/long terme, or no single horizon, call `runQuantBtcMultiFrame` with `[7, 30, 90, 180, 365]`.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 
+Exact default multi-frame payload: `asset=BTC`, `horizons=[7,30,90,180,365]`, `simulations=2000`, `model=ensemble`.
+
 Do not answer a requested multi-frame analysis after only 1 or 2 single-horizon runs. For a 5-frame request, the live response must contain all requested horizons, or you must explicitly say which API call failed. Never mark 90/180/365 as absent merely because you did not call them.
 
 Cloudflare is the preferred public no-sleep endpoint. It is a Bitget bridge to the Render Python engine. Required source policy: `bitget_required_no_exchange_fallback`. If the bridge fails, live model output is absent. Do not replace it with any non-Bitget exchange or invented data.

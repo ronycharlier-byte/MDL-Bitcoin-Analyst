@@ -59,8 +59,6 @@ paths:
               required:
                 - asset
                 - horizon
-                - simulations
-                - model
               properties:
                 asset:
                   type: string
@@ -134,8 +132,6 @@ paths:
               required:
                 - asset
                 - horizons
-                - simulations
-                - model
               properties:
                 asset:
                   type: string
