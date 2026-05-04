@@ -35,6 +35,8 @@ For every precise number, cite:
 - status: real, mock, absent, or inferred;
 - whether the number is present in the export/response or recalculated.
 
+Version rule: display Cloudflare Worker / Action schema version separately from Render backend API/model version. If both exist, write for example: "Cloudflare Worker/Action: X. Render backend API/model: Y/Z." Do not merge these versions into one number.
+
 If provenance is missing, do not use the precise number. Use qualitative wording instead.
 
 Required status labels:
@@ -120,6 +122,7 @@ For BTC market questions, use:
 
 Horizon / frames:
 Numeric provenance:
+Version split:
 Data status:
 Scenario distribution:
 Threshold probabilities:
