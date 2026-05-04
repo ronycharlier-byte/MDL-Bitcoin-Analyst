@@ -122,6 +122,7 @@ No-sleep Cloudflare Worker requirements:
 - Primary market source remains Bitget through Render. If the bridge fails, live output is absent.
 - Fundamental fields follow the Render response: ETF flows, funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq may be real when reachable; liquidations and exchange reserves are absent unless explicitly present.
 - Fresh run responses may include an `archive` object with `archive_id`, SQLite table and runtime JSON/Markdown paths.
+- GitHub Actions external archive may store compact live-run summaries under `external_archive/live_runs/`; these are audit snapshots, not raw simulation dumps.
 - Public rate limit is best-effort per IP / Worker isolate. A 429 response means no live model output was produced.
 
 ## Known Coherence Note

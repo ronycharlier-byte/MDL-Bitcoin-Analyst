@@ -5,52 +5,36 @@ on:
     - cron: "*/10 * * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: quant-btc-api-monitor
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
-      - name: Check Render API status
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error https://quant-btc-model-api.onrender.com/health
-          echo
-          curl --fail --silent --show-error https://quant-btc-model-api.onrender.com/version
-          echo
-          curl --fail --silent --show-error https://quant-btc-model-api.onrender.com/status
-          echo
-      - name: Check Cloudflare Bitget bridge
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run strict quality monitor
         env:
           CF_BASE: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
+          RENDER_BASE: https://quant-btc-model-api.onrender.com
+          MIN_API_VERSION: "1.4.0"
+          REQUIRED_REAL_FIELDS: etf_flows,funding_rate,open_interest,hash_rate,stablecoins_supply,dxy,us_rates,nasdaq
+          ALLOWED_ABSENT_FIELDS: liquidations,exchange_reserves
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error "$CF_BASE/health" > /tmp/cf-health.json
-          curl --fail --silent --show-error "$CF_BASE/version" > /tmp/cf-version.json
-          curl --fail --silent --show-error "$CF_BASE/status" > /tmp/cf-status.json
-          curl --fail --silent --show-error "$CF_BASE/run?asset=BTC" > /tmp/cf-run.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
+          python scripts/quality_monitor.py --output quality-monitor-summary.json
 
-          health = json.loads(Path("/tmp/cf-health.json").read_text())
-          version = json.loads(Path("/tmp/cf-version.json").read_text())
-          status = json.loads(Path("/tmp/cf-status.json").read_text())
-          run = json.loads(Path("/tmp/cf-run.json").read_text())
-
-          assert health.get("status") == "ok", health
-          assert str(version.get("worker_version", "")).strip(), version
-          assert status.get("data_sources", {}).get("primary_market_source") == "bitget_via_render_full_engine", status
-
-          horizons = run.get("horizons") or []
-          assert horizons == [7, 30, 90, 180, 365], horizons
-          assert len(run.get("frames") or []) == 5, run.keys()
-          assert run.get("data_status", {}).get("non_bitget_market_fallback") == "absent", run.get("data_status")
-          assert run.get("data_status", {}).get("bitget_required") == "real", run.get("data_status")
-          source = run.get("provenance_summary", {}).get("shared_spot_snapshot", {}).get("source")
-          assert source == "bitget_btcusdt_spot_ticker_realtime_snapshot", source
-
-          bridge = run.get("cloudflare_bridge", {})
-          print("Cloudflare worker:", bridge.get("worker_version"))
-          print("Action schema:", bridge.get("schema_version"))
-          print("Backend API:", (run.get("version") or {}).get("api_version"))
-          print("Frame count:", len(run.get("frames") or []))
-          PY
+      - name: Upload monitor summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-monitor-summary
+          path: quality-monitor-summary.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,46 @@
+name: Archive Quant BTC Live Run
+
+on:
+  schedule:
+    - cron: "7 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quant-btc-live-run-archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create compact external archive
+        env:
+          CF_BASE: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
+          RENDER_BASE: https://quant-btc-model-api.onrender.com
+          MIN_API_VERSION: "1.4.0"
+          REQUIRED_REAL_FIELDS: etf_flows,funding_rate,open_interest,hash_rate,stablecoins_supply,dxy,us_rates,nasdaq
+          ALLOWED_ABSENT_FIELDS: liquidations,exchange_reserves
+        run: |
+          set -euo pipefail
+          python scripts/archive_live_run.py --output-dir external_archive/live_runs
+
+      - name: Commit archive snapshot
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- external_archive/live_runs; then
+            echo "No archive changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add external_archive/live_runs
+          git commit -m "Archive live Quant BTC run $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push

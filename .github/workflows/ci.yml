@@ -15,7 +15,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Compile Python
-        run: python -m compileall src api_server.py
+        run: python -m compileall src scripts api_server.py
       - name: API contract smoke test
         run: |
           python - <<'PY'

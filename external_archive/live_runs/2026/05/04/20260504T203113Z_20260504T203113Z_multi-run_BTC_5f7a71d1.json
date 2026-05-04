@@ -1,0 +1,231 @@
+{
+  "schema": "quant_btc_external_archive_v1",
+  "created_at": "2026-05-04T20:31:13.702299+00:00",
+  "source": "Cloudflare Action endpoint routed to Render",
+  "runtime_archive": {
+    "archive_id": "20260504T203113Z_multi-run_BTC_5f7a71d1",
+    "status": "stored",
+    "endpoint": "/multi-run",
+    "sqlite_table": "run_archive"
+  },
+  "version": {
+    "api_version": "1.4.0",
+    "schema_version": "gpt_action_schema_v1.4.0",
+    "model_version": "quant_btc_model_v1",
+    "git_commit": "bb98a554f09b",
+    "worker_version": "1.8.0"
+  },
+  "source_policy": "bitget_required_no_exchange_fallback",
+  "asset": "BTC",
+  "model": "ensemble",
+  "horizons": [
+    7,
+    30,
+    90,
+    180,
+    365
+  ],
+  "data_status": {
+    "market_prices": "real",
+    "simulation_outputs": "inferred",
+    "risk_metrics": "inferred",
+    "fundamental_variables": "partial_real_absent",
+    "bitget_required": "real",
+    "cloudflare_direct_bitget": "absent",
+    "non_bitget_market_fallback": "absent"
+  },
+  "fundamental_inputs": {
+    "status": "partial_real_absent",
+    "real_fields": [
+      "dxy",
+      "etf_flows",
+      "funding_rate",
+      "hash_rate",
+      "nasdaq",
+      "open_interest",
+      "stablecoins_supply",
+      "us_rates"
+    ],
+    "absent_fields": [
+      "exchange_reserves",
+      "liquidations"
+    ],
+    "values": {
+      "etf_flows": 629.8,
+      "funding_rate": -9.4e-05,
+      "open_interest": 30552.1968,
+      "hash_rate": 936923644.3419911,
+      "stablecoins_supply": 319884609948.3427,
+      "dxy": 98.34,
+      "us_rates": 4.45,
+      "nasdaq": 27651.818
+    },
+    "sources": [
+      "bitget_current_fund_rate",
+      "bitget_open_interest",
+      "blockchain_info_hash_rate_chart",
+      "defillama_stablecoins_total_pegged_usd",
+      "farside_bitcoin_etf_flow_total_usd_m",
+      "stooq_dx_f_quote",
+      "stooq_ndx_quote",
+      "treasury_daily_10y_yield_curve"
+    ],
+    "timestamp": "2026-05-04T20:30:48Z",
+    "note": "Point-in-time fundamental snapshot, not a complete historical series."
+  },
+  "provenance_summary": {
+    "source": "live runQuantBtcMultiFrame response",
+    "operation": "runQuantBtcMultiFrame",
+    "reference_spots": [
+      "$80,022.49",
+      "$80,022.49",
+      "$80,022.49",
+      "$80,022.49",
+      "$80,022.49"
+    ],
+    "reference_spot_timestamps": [
+      "2026-05-04T20:30:48Z",
+      "2026-05-04T20:30:48Z",
+      "2026-05-04T20:30:48Z",
+      "2026-05-04T20:30:48Z",
+      "2026-05-04T20:30:48Z"
+    ],
+    "reference_spot_source": "bitget_btcusdt_spot_ticker_realtime unless a frame reports otherwise",
+    "shared_spot_snapshot": {
+      "price": 80022.49,
+      "timestamp": "2026-05-04T20:30:48Z",
+      "source": "bitget_btcusdt_spot_ticker_realtime_snapshot"
+    },
+    "runtime": "fast_in_memory_multi_frame",
+    "fresh_run": true
+  },
+  "quality_monitor": {
+    "status": "ok",
+    "fetched_at": "2026-05-04T20:30:48.403660+00:00",
+    "frame_count": 5,
+    "archive_id": "20260504T203113Z_multi-run_BTC_5f7a71d1"
+  },
+  "frames": [
+    {
+      "horizon": 7,
+      "run_id": "BTC_ensemble_7d_fast_20260504T203110Z_4b171ab3",
+      "report_date": "2026-05-04T20:31:10.392609+00:00",
+      "reference_spot": "$80,022.49",
+      "reference_spot_timestamp": "2026-05-04T20:30:48Z",
+      "p10_return": -0.0765702283698016,
+      "median_return": 0.0065056509150762665,
+      "p90_return": 0.09167581420745215,
+      "prob_up": 0.5445,
+      "var_95": 0.10001619538074694,
+      "cvar_95": 0.13100750816401818,
+      "max_drawdown": -0.052848528147308144,
+      "confidence_score": 66,
+      "regime_distribution": {
+        "bull": 0.004,
+        "bear": 0.002,
+        "range": 0.8725,
+        "classified_total": 0.8785000000000001,
+        "non_classified_transition": 0.12149999999999994,
+        "is_complete": false,
+        "note": "Regime split is incomplete; include non_classified_transition."
+      }
+    },
+    {
+      "horizon": 30,
+      "run_id": "BTC_ensemble_30d_fast_20260504T203110Z_7de9a36b",
+      "report_date": "2026-05-04T20:31:10.691657+00:00",
+      "reference_spot": "$80,022.49",
+      "reference_spot_timestamp": "2026-05-04T20:30:48Z",
+      "p10_return": -0.1451509009738552,
+      "median_return": 0.018291750551495678,
+      "p90_return": 0.20880002789147054,
+      "prob_up": 0.552,
+      "var_95": 0.1807715394478726,
+      "cvar_95": 0.2324934981043147,
+      "max_drawdown": -0.12499092764098173,
+      "confidence_score": 62,
+      "regime_distribution": {
+        "bull": 0.1085,
+        "bear": 0.0365,
+        "range": 0.535,
+        "classified_total": 0.68,
+        "non_classified_transition": 0.31999999999999995,
+        "is_complete": false,
+        "note": "Regime split is incomplete; include non_classified_transition."
+      }
+    },
+    {
+      "horizon": 90,
+      "run_id": "BTC_ensemble_90d_fast_20260504T203110Z_ad1d900a",
+      "report_date": "2026-05-04T20:31:11.285214+00:00",
+      "reference_spot": "$80,022.49",
+      "reference_spot_timestamp": "2026-05-04T20:30:48Z",
+      "p10_return": -0.21331413177252248,
+      "median_return": 0.05527706550249134,
+      "p90_return": 0.4358876543157062,
+      "prob_up": 0.605,
+      "var_95": 0.28088747374883877,
+      "cvar_95": 0.3535995927074697,
+      "max_drawdown": -0.20659778475850507,
+      "confidence_score": 55,
+      "regime_distribution": {
+        "bull": 0.2825,
+        "bear": 0.114,
+        "range": 0.33,
+        "classified_total": 0.7264999999999999,
+        "non_classified_transition": 0.2735000000000001,
+        "is_complete": false,
+        "note": "Regime split is incomplete; include non_classified_transition."
+      }
+    },
+    {
+      "horizon": 180,
+      "run_id": "BTC_ensemble_180d_fast_20260504T203111Z_3e052df2",
+      "report_date": "2026-05-04T20:31:11.990707+00:00",
+      "reference_spot": "$80,022.49",
+      "reference_spot_timestamp": "2026-05-04T20:30:48Z",
+      "p10_return": -0.2752039338328629,
+      "median_return": 0.12209783152953979,
+      "p90_return": 0.7782539034342407,
+      "prob_up": 0.6145,
+      "var_95": 0.3666549339862344,
+      "cvar_95": 0.45143740953037537,
+      "max_drawdown": -0.2890450511748004,
+      "confidence_score": 45,
+      "regime_distribution": {
+        "bull": 0.4245,
+        "bear": 0.169,
+        "range": 0.203,
+        "classified_total": 0.7965,
+        "non_classified_transition": 0.20350000000000001,
+        "is_complete": false,
+        "note": "Regime split is incomplete; include non_classified_transition."
+      }
+    },
+    {
+      "horizon": 365,
+      "run_id": "BTC_ensemble_365d_fast_20260504T203111Z_d1154d5b",
+      "report_date": "2026-05-04T20:31:13.285880+00:00",
+      "reference_spot": "$80,022.49",
+      "reference_spot_timestamp": "2026-05-04T20:30:48Z",
+      "p10_return": -0.35146287447337204,
+      "median_return": 0.2785327852630396,
+      "p90_return": 1.5912669731447298,
+      "prob_up": 0.68,
+      "var_95": 0.4415626073192275,
+      "cvar_95": 0.5431136371748035,
+      "max_drawdown": -0.36751105117364524,
+      "confidence_score": 32,
+      "regime_distribution": {
+        "bull": 0.548,
+        "bear": 0.1995,
+        "range": 0.1215,
+        "classified_total": 0.869,
+        "non_classified_transition": 0.131,
+        "is_complete": false,
+        "note": "Regime split is incomplete; include non_classified_transition."
+      }
+    }
+  ],
+  "policy": "Probabilistic output only. No deterministic prediction and no financial advice."
+}
