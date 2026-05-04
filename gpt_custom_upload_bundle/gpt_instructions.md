@@ -100,6 +100,8 @@ For multi-frame answers:
 
 If the API returns rate limit error 429, do not retry repeatedly. Tell the user the public endpoint is temporarily rate-limited and ask them to wait or reduce run frequency.
 
+If a response contains `cache.hit: true`, say that the result came from the short live cache and cite the cache timestamp. Cached results are valid only for the stated TTL.
+
 ## Quantitative Provenance Rule
 
 Never display a precise quantitative figure unless it is present in an export file, a report, a connected database, or an explicit user-provided result.

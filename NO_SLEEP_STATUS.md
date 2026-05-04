@@ -13,6 +13,7 @@ Status:
 - Functional.
 - Supports live `/run` and `/multi-run`.
 - Free Render services may sleep.
+- GitHub Actions monitoring pings `/health`, `/version`, and `/status` every 10 minutes when scheduled workflows are active. This can reduce cold starts, but it is not a hard no-sleep guarantee.
 
 ## Prepared no-sleep option
 

@@ -21,6 +21,7 @@ Live analysis rule:
 - Use `runQuantBtcMultiFrame` for complete current BTC analysis.
 - Use `runQuantBtcModel` for one explicit horizon.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
+- Use `getQuantBtcStatus` to inspect current public API limits, sources, cache TTL, and operational status.
 
 Default multi-frame request:
 
@@ -36,3 +37,5 @@ Default multi-frame request:
 ```
 
 Every precise number must retain source, report date, run ID, reference spot, source status, and model/version metadata when available.
+
+If a live response includes `cache.hit: true`, disclose that the answer uses the short live cache and cite the cache validity window.

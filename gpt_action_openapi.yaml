@@ -21,6 +21,13 @@ paths:
       responses:
         "200":
           description: Version metadata including api_version, model_version, schema_version, git_commit, runtime limits and default frames.
+  /status:
+    get:
+      operationId: getQuantBtcStatus
+      summary: Return public API status, sources, limits and runtime controls
+      responses:
+        "200":
+          description: Public status metadata including data sources, runtime controls, limitations, default frames and version.
   /run:
     post:
       operationId: runQuantBtcModel
@@ -85,7 +92,7 @@ paths:
     post:
       operationId: runQuantBtcMultiFrame
       summary: Run fresh BTC model across multiple timeframes
-      description: Runs fresh fast in-memory probabilistic calculations for several horizons in one server call. Use this for multi-frame analysis such as 7, 30, 90, 180 and 365 days. The API captures one shared Bitget BTCUSDT spot ticker snapshot and applies it to every frame so horizon comparisons use the same reference price.
+      description: Runs fresh fast in-memory probabilistic calculations for several horizons in one server call. Use this for multi-frame analysis such as 7, 30, 90, 180 and 365 days. The API captures one shared Bitget BTCUSDT spot ticker snapshot and applies it to every frame so horizon comparisons use the same reference price. Identical requests may be served from a short cache.
       requestBody:
         required: true
         content:

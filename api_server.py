@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -22,15 +24,17 @@ if str(SRC_DIR) not in sys.path:
 SUMMARY_DIR = ROOT / "data" / "simulations"
 REPORT_PATH = ROOT / "reports" / "latest_report.md"
 DASHBOARD_PATH = ROOT / "reports" / "dashboard_summary.md"
+API_RUNTIME_DB = ROOT / "data" / "api_runtime.db"
 MAX_API_SIMULATIONS = int(os.getenv("MAX_API_SIMULATIONS", "250000"))
 DEFAULT_API_SIMULATIONS = min(int(os.getenv("DEFAULT_API_SIMULATIONS", "5000")), MAX_API_SIMULATIONS)
 DEFAULT_MULTIFRAME_SIMULATIONS = min(int(os.getenv("DEFAULT_MULTIFRAME_SIMULATIONS", "2000")), MAX_API_SIMULATIONS)
 DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
-API_VERSION = "1.2.0"
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
+API_VERSION = "1.3.0"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.2.0"
+SCHEMA_VERSION = "gpt_action_schema_v1.3.0"
 
 
 def resolve_git_commit() -> str:
@@ -101,6 +105,37 @@ app = FastAPI(
 )
 
 
+def init_runtime_db() -> None:
+    API_RUNTIME_DB.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(API_RUNTIME_DB) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rate_limit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_key TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS response_cache (
+                cache_key TEXT PRIMARY KEY,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                response_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rate_limit_client_time ON rate_limit_events (client_key, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_response_cache_expires ON response_cache (expires_at)")
+        conn.commit()
+
+
+init_runtime_db()
+
+
 class RunRequest(BaseModel):
     asset: str = Field(default="BTC", pattern="^[A-Za-z0-9_-]{2,12}$")
     horizon: int = Field(default=365, ge=1, le=3650)
@@ -151,6 +186,7 @@ class RunResponse(BaseModel):
     confidence: dict[str, Any]
     position_sizing: dict[str, Any]
     version: dict[str, Any]
+    cache: dict[str, Any] | None = None
     report_markdown: str
     dashboard_markdown: str
     warning: str
@@ -195,19 +231,120 @@ def require_rate_limit(request: Request) -> None:
     if RATE_LIMIT_RUNS_PER_MINUTE <= 0:
         return
     key = client_key(request)
-    now = time.monotonic()
+    now = time.time()
     window = max(1, RATE_LIMIT_WINDOW_SECONDS)
-    bucket = [item for item in _RATE_LIMIT_BUCKETS.get(key, []) if now - item < window]
-    if len(bucket) >= RATE_LIMIT_RUNS_PER_MINUTE:
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                f"Rate limit exceeded. Maximum {RATE_LIMIT_RUNS_PER_MINUTE} run requests "
-                f"per {window} seconds."
-            ),
-        )
-    bucket.append(now)
-    _RATE_LIMIT_BUCKETS[key] = bucket
+    endpoint = request.url.path
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            conn.execute("DELETE FROM rate_limit_events WHERE created_at < ?", (now - window,))
+            count = conn.execute(
+                "SELECT COUNT(*) FROM rate_limit_events WHERE client_key = ? AND created_at >= ?",
+                (key, now - window),
+            ).fetchone()[0]
+            if count >= RATE_LIMIT_RUNS_PER_MINUTE:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"Rate limit exceeded. Maximum {RATE_LIMIT_RUNS_PER_MINUTE} run requests "
+                        f"per {window} seconds."
+                    ),
+                )
+            conn.execute(
+                "INSERT INTO rate_limit_events (client_key, endpoint, created_at) VALUES (?, ?, ?)",
+                (key, endpoint, now),
+            )
+            conn.commit()
+    except HTTPException:
+        raise
+    except Exception:
+        # Fallback for read-only or transient SQLite errors.
+        monotonic_now = time.monotonic()
+        bucket = [item for item in _RATE_LIMIT_BUCKETS.get(key, []) if monotonic_now - item < window]
+        if len(bucket) >= RATE_LIMIT_RUNS_PER_MINUTE:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Rate limit exceeded. Maximum {RATE_LIMIT_RUNS_PER_MINUTE} run requests "
+                    f"per {window} seconds."
+                ),
+            )
+        bucket.append(monotonic_now)
+        _RATE_LIMIT_BUCKETS[key] = bucket
+
+
+def pydantic_payload(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def cache_key_for(endpoint: str, payload: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        {
+            "endpoint": endpoint,
+            "payload": payload,
+            "api_version": API_VERSION,
+            "model_version": MODEL_VERSION,
+            "git_commit": GIT_COMMIT,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def cache_get(cache_key: str) -> dict[str, Any] | None:
+    if CACHE_TTL_SECONDS <= 0:
+        return None
+    now = time.time()
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            row = conn.execute(
+                "SELECT response_json, created_at, expires_at FROM response_cache WHERE cache_key = ? AND expires_at > ?",
+                (cache_key, now),
+            ).fetchone()
+        if not row:
+            return None
+        payload = json.loads(row[0])
+        payload["cache"] = {
+            "hit": True,
+            "cache_key": cache_key[:12],
+            "created_at": datetime.fromtimestamp(float(row[1]), tz=timezone.utc).isoformat(),
+            "expires_at": datetime.fromtimestamp(float(row[2]), tz=timezone.utc).isoformat(),
+            "ttl_seconds": CACHE_TTL_SECONDS,
+        }
+        return payload
+    except Exception:
+        return None
+
+
+def cache_set(cache_key: str, payload: dict[str, Any]) -> None:
+    if CACHE_TTL_SECONDS <= 0:
+        return
+    now = time.time()
+    expires_at = now + CACHE_TTL_SECONDS
+    stored = dict(payload)
+    stored["cache"] = {
+        "hit": False,
+        "cache_key": cache_key[:12],
+        "created_at": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+        "expires_at": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+        "ttl_seconds": CACHE_TTL_SECONDS,
+    }
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            conn.execute("DELETE FROM response_cache WHERE expires_at <= ?", (now,))
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO response_cache (cache_key, created_at, expires_at, response_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (cache_key, now, expires_at, json.dumps(stored, ensure_ascii=True, default=str)),
+            )
+            conn.commit()
+    except Exception:
+        return
 
 
 def read_text(path: Path) -> str:
@@ -339,6 +476,8 @@ def version_payload() -> dict[str, Any]:
         "default_multiframe_simulations": DEFAULT_MULTIFRAME_SIMULATIONS,
         "default_multiframe_horizons": DEFAULT_MULTIFRAME_HORIZONS,
         "rate_limit_runs_per_minute": RATE_LIMIT_RUNS_PER_MINUTE,
+        "rate_limit_window_seconds": RATE_LIMIT_WINDOW_SECONDS,
+        "cache_ttl_seconds": CACHE_TTL_SECONDS,
     }
 
 
@@ -534,14 +673,69 @@ def version() -> dict[str, Any]:
     return version_payload()
 
 
+@app.get("/status")
+def status() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "quant-btc-model",
+        "production_endpoint": "https://quant-btc-model-api.onrender.com",
+        "privacy_policy": "https://raw.githubusercontent.com/ronycharlier-byte/MDL-Bitcoin-Analyst/main/PRIVACY_POLICY.md",
+        "actions": {
+            "single_horizon": "/run",
+            "multi_frame": "/multi-run",
+            "latest_artifact": "/latest",
+            "version": "/version",
+        },
+        "default_frames": DEFAULT_MULTIFRAME_HORIZONS,
+        "data_sources": {
+            "btc_spot": "Bitget BTCUSDT spot ticker and candles",
+            "funding_rate": "Bitget current funding rate when available",
+            "open_interest": "Bitget open interest when available",
+            "dxy": "Stooq DX.F quote when available",
+            "nasdaq": "Stooq ^NDX quote when available",
+            "absent_without_connector": [
+                "etf_flows",
+                "liquidations",
+                "hash_rate",
+                "exchange_reserves",
+                "stablecoins_supply",
+                "us_rates",
+            ],
+        },
+        "runtime_controls": {
+            "cache_ttl_seconds": CACHE_TTL_SECONDS,
+            "rate_limit_runs_per_minute": RATE_LIMIT_RUNS_PER_MINUTE,
+            "rate_limit_window_seconds": RATE_LIMIT_WINDOW_SECONDS,
+        },
+        "limits": [
+            "Outputs are probabilistic, not deterministic predictions.",
+            "This is not financial advice.",
+            "Fundamental coverage is partial unless user-supplied audited data are connected.",
+            "Render free hosting may sleep; Cloudflare no-sleep quant-lite deployment requires Wrangler login.",
+        ],
+        "version": version_payload(),
+    }
+
+
 @app.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key), Depends(require_rate_limit)])
 def run_model(payload: RunRequest) -> RunResponse:
-    return build_run_response(payload)
+    key = cache_key_for("/run", pydantic_payload(payload))
+    cached = cache_get(key)
+    if cached:
+        return cached
+    response = build_run_response(payload)
+    response_payload = response.model_dump() if hasattr(response, "model_dump") else response.dict()
+    cache_set(key, response_payload)
+    return response_payload
 
 
 @app.post("/multi-run", dependencies=[Depends(require_api_key), Depends(require_rate_limit)])
 def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
     horizons = normalized_horizons(payload.horizons)
+    key = cache_key_for("/multi-run", {**pydantic_payload(payload), "horizons": horizons})
+    cached = cache_get(key)
+    if cached:
+        return cached
     spot_snapshot = None if payload.no_online else fetch_realtime_spot_snapshot(payload.asset)
     fast_result = fast_multi_frame_results(payload, horizons, spot_snapshot)
     results = fast_result["frames"]
@@ -578,7 +772,7 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
         if result.get("data_status", {}).get("market_prices")
     }
 
-    return {
+    response_payload = {
         "status": "ok" if not errors else "partial",
         "asset": payload.asset.upper(),
         "model": payload.model,
@@ -610,6 +804,8 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
             "not as deterministic price paths or financial advice."
         ),
     }
+    cache_set(key, response_payload)
+    return response_payload
 
 
 @app.get("/latest", dependencies=[Depends(require_api_key)])

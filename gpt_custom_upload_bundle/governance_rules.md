@@ -100,6 +100,12 @@ Default live frames are 7, 30, 90, 180 and 365 days. Each numeric value must rem
 Current online fundamental coverage is partial. Funding rate, open interest, DXY and Nasdaq may be real when the API provides them. ETF flows, liquidations, hash rate, exchange reserves, stablecoin supply and US rates remain absent unless supplied by a connected source or user file.
 
 If rate limit 429 is returned, the GPT must not loop retries. It must report temporary rate limiting and keep the answer qualitative unless a valid run result is available.
+
+Short-cache rule:
+
+- Cached live responses are acceptable only when the API returns them.
+- The GPT must cite `cache.created_at`, `cache.expires_at`, and `cache.ttl_seconds` if `cache.hit` is true.
+- Cached outputs remain probabilistic scenario outputs, not deterministic predictions.
 - Stress tests are scenario shocks, not forecasts.
 - Confidence score is not accuracy.
 - Backtests are empirical diagnostics, not proof of future performance.

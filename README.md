@@ -104,12 +104,22 @@ Live online fundamentals are partial:
 - `etf_flows`, `liquidations`, `hash_rate`, `exchange_reserves`, `stablecoins_supply`, and `us_rates`: left `NULL` unless supplied by an audited file or future connector.
 
 The public API includes a lightweight in-memory rate limit and version metadata:
+The public API includes a short SQLite-backed cache, a SQLite-backed rate limit with in-memory fallback, and version metadata:
 
+- `GET /status`
 - `GET /version`
 - `api_version`
 - `model_version`
 - `schema_version`
 - `git_commit`
+
+GitHub Actions monitoring:
+
+```text
+.github/workflows/monitor-api.yml
+```
+
+This pings `/health`, `/version`, and `/status` every 10 minutes when GitHub scheduled workflows are active. It helps detect outages and may reduce Render cold starts, but it is not a hard no-sleep guarantee.
 
 GPT Custom upload bundle:
 

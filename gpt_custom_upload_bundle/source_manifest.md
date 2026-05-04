@@ -107,6 +107,7 @@ Live Action provenance requirements:
 - Default live frames: 7, 30, 90, 180 and 365 days.
 - Multi-frame runs expose `shared_spot_snapshot` so all frames can be compared from one reference price.
 - Version fields may include `api_version`, `model_version`, `schema_version` and `git_commit`.
+- Short cached responses may include a `cache` object with `created_at`, `expires_at`, and `ttl_seconds`.
 
 ## Known Coherence Note
 

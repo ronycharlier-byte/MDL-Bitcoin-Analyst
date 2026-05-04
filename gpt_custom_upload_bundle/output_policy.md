@@ -47,6 +47,8 @@ For current market analysis, prefer the live `runQuantBtcModel` response over st
 
 When a live response includes version metadata, include it in the provenance block or keep it available for audit. When a multi-frame response includes `shared_spot_snapshot`, cite it as the common reference price for all frames.
 
+If `cache.hit` is true, disclose that the answer uses the short live cache and include the cache validity window.
+
 ## Authorized Formulations
 
 Use:
