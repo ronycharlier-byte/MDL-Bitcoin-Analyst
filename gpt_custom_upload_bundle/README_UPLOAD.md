@@ -4,6 +4,7 @@ Upload one Action schema depending on the backend you want:
 
 - `gpt_action_openapi.yaml`: full Render Python API with `/run` and `/multi-run`.
 - `gpt_action_openapi.cloudflare.deployed.yaml`: no-sleep Cloudflare Worker bridge to the Bitget-backed Render API.
+- `gpt_action_openapi.cloudflare.deployed.json`: same Cloudflare schema in JSON format; use it if GPT rejects the YAML parser format.
 
 Upload the Markdown files in this folder into GPT Custom Knowledge:
 
