@@ -5,6 +5,7 @@ interface Env {
   DEFAULT_HORIZONS?: string;
   RATE_LIMIT_RUNS_PER_MINUTE?: string;
   RATE_LIMIT_WINDOW_SECONDS?: string;
+  RENDER_API_BASE?: string;
 }
 
 interface RunRequest {
@@ -60,13 +61,18 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.2.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.2.0";
-const MODEL_VERSION = "cloudflare_quant_lite_v1";
+const WORKER_VERSION = "1.3.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.3.0";
+const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
+const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
 const rateLimitBuckets = new Map<string, number[]>();
 
 export default {
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(warmRenderBitgetBridge(env));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -80,7 +86,7 @@ export default {
           status: "ok",
           service: "quant-btc-model-lite-worker",
           worker_version: WORKER_VERSION,
-          mode: "quant_lite_probabilistic",
+          mode: "render_bitget_bridge_probabilistic",
           timestamp: new Date().toISOString()
         });
       }
@@ -93,6 +99,7 @@ export default {
           schema_version: SCHEMA_VERSION,
           model_version: MODEL_VERSION,
           runtime: "cloudflare_worker",
+          bridge_target: getRenderApiBase(env),
           max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
           default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
           default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650),
@@ -120,12 +127,10 @@ export default {
             rate_limit_window_seconds: getRateLimit(env).windowSeconds
           },
           data_sources: {
-            primary_market_source: "bitget_btcusdt_spot_candles",
-            fallback_market_sources: [
-              "kraken_xbtusd_daily_ohlc",
-              "coingecko_btc_usd_daily_prices"
-            ],
-            fundamental_features: "partial_real_absent_when_sources_are_reachable",
+            primary_market_source: "bitget_via_render_full_engine",
+            cloudflare_direct_bitget: "absent",
+            fallback_market_sources: [],
+            fundamental_features: "partial_real_absent_from_render_when_sources_are_reachable",
             partial_fundamental_sources: [
               "bitget_current_fund_rate",
               "bitget_open_interest",
@@ -135,13 +140,13 @@ export default {
             corpus_knowledge_base: "absent"
           },
           backend_routing: {
-            cloudflare_default: "Use this Worker first for no-sleep fresh quant-lite BTC analysis.",
-            render_full_engine: "Use Render when the full Python/numpy multi-model engine or corpus-backed report generation is explicitly required.",
+            cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
+            render_full_engine: "Render remains the Bitget-backed Python/numpy engine behind this Worker.",
             recommended_gpt_flow: "Call getQuantBtcLiteStatus, then runQuantBtcMultiFrame for complete analysis or runQuantBtcModel for one explicit horizon."
           },
           limitations: [
-            "This is a quant-lite Worker runtime, not the full Python/numpy engine.",
-            "Bitget may reject Cloudflare edge requests; fallback market sources are explicitly disclosed.",
+            "Cloudflare direct egress to Bitget is not used because the required source is Bitget through the Render bridge.",
+            "If the Render bridge is unavailable, live Bitget model output is absent rather than replaced by another exchange.",
             "Outputs are probabilistic scenarios, not deterministic predictions.",
             "Public endpoint has a best-effort per-IP in-isolate rate limit and simulation caps.",
             "Every precise number must be cited with model_run_id, report_date, reference_spot and data status."
@@ -151,17 +156,8 @@ export default {
       }
 
       if (url.pathname === "/latest" && request.method === "GET") {
-        return json({
-          status: "available",
-          service: "quant-btc-model-lite-worker",
-          latest_report: null,
-          dashboard_summary: null,
-          message: "This Worker is stateless. Call POST /run for a fresh probabilistic quant-lite result.",
-          data_status: {
-            latest_report: "absent",
-            dashboard_summary: "absent"
-          }
-        });
+        const result = await proxyRenderGet("/latest", env);
+        return json(withBridgeMetadata(result, "/latest", env));
       }
 
       if (url.pathname === "/run" && request.method === "POST") {
@@ -169,8 +165,8 @@ export default {
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
         }
-        const body = await readJson(request) as RunRequest;
-        const result = await runQuantLite(body, env);
+        const body = normalizeRenderRunPayload(await readJson(request), env);
+        const result = await proxyRenderPost("/run", body, env);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
@@ -179,8 +175,8 @@ export default {
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
         }
-        const body = await readJson(request) as MultiRunRequest;
-        const result = await runQuantLiteMultiFrame(body, env);
+        const body = normalizeRenderMultiRunPayload(await readJson(request), env);
+        const result = await proxyRenderPost("/multi-run", body, env);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
@@ -209,6 +205,151 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
     return parsed as Record<string, unknown>;
   } catch {
     return {};
+  }
+}
+
+function getRenderApiBase(env: Env): string {
+  return String(env.RENDER_API_BASE || DEFAULT_RENDER_API_BASE).replace(/\/+$/, "");
+}
+
+function renderUrl(path: string, env: Env): string {
+  return `${getRenderApiBase(env)}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function normalizeRenderRunPayload(input: Record<string, unknown>, env: Env): Record<string, unknown> {
+  const maxSimulations = clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000);
+  const defaultSimulations = clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, maxSimulations);
+  return {
+    asset: normalizeAsset(input.asset),
+    horizon: clampInt(parseNumber(input.horizon, parseNumber(env.DEFAULT_HORIZON, 365)), 1, 3650),
+    simulations: Math.min(clampInt(parseNumber(input.simulations, defaultSimulations), 100, 250000), maxSimulations),
+    model: normalizeRenderModel(input.model),
+    skip_corpus: typeof input.skip_corpus === "boolean" ? input.skip_corpus : true,
+    no_online: typeof input.no_online === "boolean" ? input.no_online : false
+  };
+}
+
+function normalizeRenderMultiRunPayload(input: Record<string, unknown>, env: Env): Record<string, unknown> {
+  const maxSimulations = clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000);
+  const defaultSimulations = clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, maxSimulations);
+  return {
+    asset: normalizeAsset(input.asset),
+    horizons: parseHorizons(input.horizons, parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS)),
+    simulations: Math.min(clampInt(parseNumber(input.simulations, defaultSimulations), 100, 250000), maxSimulations),
+    model: normalizeRenderModel(input.model),
+    skip_corpus: typeof input.skip_corpus === "boolean" ? input.skip_corpus : true,
+    no_online: typeof input.no_online === "boolean" ? input.no_online : false
+  };
+}
+
+function normalizeRenderModel(value: unknown): string {
+  const model = String(value || "ensemble");
+  const allowed = new Set([
+    "ensemble",
+    "monte_carlo",
+    "student_t",
+    "student_t_model",
+    "jump_diffusion",
+    "garch",
+    "garch_model",
+    "regime_switching",
+    "liquidation",
+    "liquidation_model",
+    "correlation",
+    "correlation_model"
+  ]);
+  return allowed.has(model) ? model : "ensemble";
+}
+
+async function proxyRenderGet(path: string, env: Env): Promise<Record<string, unknown>> {
+  const response = await fetch(renderUrl(path, env), {
+    method: "GET",
+    headers: {
+      "accept": "application/json",
+      "user-agent": "quant-btc-model-cloudflare-bitget-bridge/1.0"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  return await parseRenderResponse(response, path);
+}
+
+async function proxyRenderPost(path: string, payload: Record<string, unknown>, env: Env): Promise<Record<string, unknown>> {
+  const response = await fetch(renderUrl(path, env), {
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "user-agent": "quant-btc-model-cloudflare-bitget-bridge/1.0"
+    },
+    body: JSON.stringify(payload),
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const result = await parseRenderResponse(response, path);
+  return withBridgeMetadata(result, path, env);
+}
+
+async function parseRenderResponse(response: Response, path: string): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  let parsed: unknown = {};
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { raw_response: text.slice(0, 1000) };
+  }
+  if (!response.ok) {
+    return {
+      error: "render_bitget_bridge_failed",
+      message: `Render Bitget bridge ${path} failed with HTTP ${response.status}.`,
+      render_status: response.status,
+      render_response: parsed,
+      data_status: {
+        market_prices: "absent",
+        simulation_results: "absent",
+        risk_metrics: "absent",
+        fundamental_features: "absent"
+      },
+      warning: "No deterministic prediction was produced and no non-Bitget fallback was used."
+    };
+  }
+  return objectValue(parsed);
+}
+
+function withBridgeMetadata(result: Record<string, unknown>, path: string, env: Env): Record<string, unknown> {
+  const bridge = {
+    worker_version: WORKER_VERSION,
+    schema_version: SCHEMA_VERSION,
+    model_version: MODEL_VERSION,
+    mode: "cloudflare_to_render_bitget_bridge",
+    operation_path: path,
+    render_api_base: getRenderApiBase(env),
+    source_policy: "bitget_required_no_exchange_fallback",
+    cloudflare_direct_bitget: "absent"
+  };
+  const existingDataStatus = objectValue(result.data_status);
+  return {
+    ...result,
+    cloudflare_bridge: bridge,
+    data_status: {
+      ...existingDataStatus,
+      bitget_required: "real",
+      cloudflare_direct_bitget: "absent",
+      non_bitget_market_fallback: "absent"
+    }
+  };
+}
+
+async function warmRenderBitgetBridge(env: Env): Promise<void> {
+  try {
+    await fetch(renderUrl("/health", env), {
+      method: "GET",
+      headers: {
+        "accept": "application/json",
+        "user-agent": "quant-btc-model-cloudflare-render-warmer/1.0"
+      },
+      cf: { cacheTtl: 0, cacheEverything: false }
+    });
+  } catch {
+    // Scheduled warmup is best-effort only; request handlers still report bridge failures explicitly.
   }
 }
 
@@ -557,27 +698,7 @@ async function fetchMarketCandles(): Promise<MarketCandles> {
     };
   } catch (error) {
     const bitgetMessage = error instanceof Error ? error.message : String(error);
-    try {
-      return {
-        candles: await fetchKrakenCandles(),
-        source: "kraken_xbtusd_daily_ohlc_fallback_after_bitget_error",
-        status: "real",
-        warning: `Bitget market candles were unavailable from the Worker runtime (${bitgetMessage}); Kraken real XBT/USD daily OHLC prices were used as an explicit fallback.`
-      };
-    } catch (krakenError) {
-      const krakenMessage = krakenError instanceof Error ? krakenError.message : String(krakenError);
-      try {
-        return {
-          candles: await fetchCoinGeckoCandles(),
-          source: "coingecko_btc_usd_daily_prices_fallback_after_bitget_and_kraken_error",
-          status: "real",
-          warning: `Bitget and Kraken market candles were unavailable from the Worker runtime (Bitget: ${bitgetMessage}; Kraken: ${krakenMessage}); CoinGecko real BTC/USD prices were used as an explicit fallback.`
-        };
-      } catch (coinGeckoError) {
-        const coinGeckoMessage = coinGeckoError instanceof Error ? coinGeckoError.message : String(coinGeckoError);
-        throw new Error(`Market data unavailable. Bitget error: ${bitgetMessage}. Kraken error: ${krakenMessage}. CoinGecko error: ${coinGeckoMessage}.`);
-      }
-    }
+    throw new Error(`Bitget market data unavailable. No non-Bitget exchange fallback is allowed. Bitget error: ${bitgetMessage}.`);
   }
 }
 
@@ -777,93 +898,6 @@ async function fetchBitgetCandles(): Promise<Candle[]> {
     unique.set(candle.timestamp, candle);
   }
   return Array.from(unique.values());
-}
-
-async function fetchKrakenCandles(): Promise<Candle[]> {
-  const url = new URL("https://api.kraken.com/0/public/OHLC");
-  url.searchParams.set("pair", "XBTUSD");
-  url.searchParams.set("interval", "1440");
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      "accept": "application/json",
-      "user-agent": "quant-btc-model-lite-worker/1.0"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Kraken fallback request failed with HTTP ${response.status}.`);
-  }
-
-  const payload = await response.json() as { error?: unknown; result?: Record<string, unknown> };
-  const errors = Array.isArray(payload.error) ? payload.error : [];
-  if (errors.length > 0) {
-    throw new Error(`Kraken fallback returned errors: ${errors.join(", ")}.`);
-  }
-
-  const result = payload.result || {};
-  const key = Object.keys(result).find((name) => name !== "last");
-  const rows = key && Array.isArray(result[key]) ? result[key] as unknown[] : [];
-  const candles: Candle[] = [];
-
-  for (const row of rows) {
-    if (!Array.isArray(row) || row.length < 7) {
-      continue;
-    }
-    const timestamp = Number(row[0]) * 1000;
-    const open = Number(row[1]);
-    const high = Number(row[2]);
-    const low = Number(row[3]);
-    const close = Number(row[4]);
-    const volume = Number(row[6]);
-    if ([timestamp, open, high, low, close].every(Number.isFinite) && close > 0) {
-      candles.push({ timestamp, open, high, low, close, volume });
-    }
-  }
-
-  return candles;
-}
-
-async function fetchCoinGeckoCandles(): Promise<Candle[]> {
-  const url = new URL("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart");
-  url.searchParams.set("vs_currency", "usd");
-  url.searchParams.set("days", "1000");
-  url.searchParams.set("interval", "daily");
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      "accept": "application/json",
-      "user-agent": "quant-btc-model-lite-worker/1.0"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`CoinGecko fallback request failed with HTTP ${response.status}.`);
-  }
-
-  const payload = await response.json() as { prices?: unknown };
-  const prices = Array.isArray(payload.prices) ? payload.prices : [];
-  const candles: Candle[] = [];
-
-  for (const row of prices) {
-    if (!Array.isArray(row) || row.length < 2) {
-      continue;
-    }
-    const timestamp = Number(row[0]);
-    const close = Number(row[1]);
-    if (Number.isFinite(timestamp) && Number.isFinite(close) && close > 0) {
-      candles.push({
-        timestamp,
-        open: close,
-        high: close,
-        low: close,
-        close,
-        volume: 0
-      });
-    }
-  }
-
-  return candles;
 }
 
 function normalizeAsset(asset: unknown): string {

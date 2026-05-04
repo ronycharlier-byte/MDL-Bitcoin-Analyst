@@ -27,8 +27,9 @@ Expected behavior:
 - Calls `getQuantBtcLiteStatus`.
 - Calls `runQuantBtcMultiFrame`.
 - Cites `model_run_id`, `report_date`, shared reference spot, source and status mix.
-- States Cloudflare is quant-lite.
-- States fallback source if `bitget_market_prices` is `absent` and `fallback_market_prices` is `real`.
+- States Cloudflare is a Bitget bridge to Render.
+- Does not use non-Bitget exchange fallback numbers.
+- Cites `cloudflare_bridge.source_policy` when present.
 - Uses probabilistic wording only.
 
 ## Prompt 2

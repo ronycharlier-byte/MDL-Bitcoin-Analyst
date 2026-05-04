@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: Quant BTC Model Lite Worker
-  version: 1.2.0
-  description: Always-awake Cloudflare Worker endpoint for probabilistic BTC quant-lite runs. Outputs are probabilistic and must never be presented as certainty.
+  title: Quant BTC Model Bitget Bridge Worker
+  version: 1.3.0
+  description: Always-awake Cloudflare Worker facade for the Render Bitget-backed probabilistic BTC model. Outputs are probabilistic and must never be presented as certainty.
 servers:
   - url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
 paths:
@@ -48,8 +48,8 @@ paths:
   /run:
     post:
       operationId: runQuantBtcModel
-      summary: Run the always-awake BTC quant-lite model
-      description: Produces probabilistic distributions, threshold probabilities, risk metrics, stress scenarios and provenance using real market data. This is a lightweight Worker runtime, not the full Python engine.
+      summary: Run the Bitget-backed BTC model through the Cloudflare bridge
+      description: Calls the Render Python engine through Cloudflare and preserves Bitget as the required market source. No non-Bitget exchange fallback is used by the bridge.
       requestBody:
         required: true
         content:
@@ -80,14 +80,24 @@ paths:
                   description: Requested simulations. Worker may cap this value to protect the free runtime CPU limit.
                 model:
                   type: string
-                  default: quant_lite
+                  default: ensemble
                   enum:
-                    - quant_lite
                     - ensemble
-                  description: Model name. ensemble is accepted but mapped to quant_lite in the Worker.
+                    - monte_carlo
+                    - student_t
+                    - student_t_model
+                    - jump_diffusion
+                    - garch
+                    - garch_model
+                    - regime_switching
+                    - liquidation
+                    - liquidation_model
+                    - correlation
+                    - correlation_model
+                  description: Render model name. Use ensemble by default.
       responses:
         "200":
-          description: Probabilistic quant-lite JSON result with provenance, statuses, distribution, regime residual, risk metrics, confidence and warnings.
+          description: Probabilistic Bitget-backed JSON result with provenance, statuses, distribution, regime residual, risk metrics, confidence and warnings.
           content:
             application/json:
               schema:
@@ -95,7 +105,7 @@ paths:
                 properties: {}
                 additionalProperties: true
         "500":
-          description: Quant-lite run failed JSON.
+          description: Bitget bridge run failed JSON.
           content:
             application/json:
               schema:
@@ -113,8 +123,8 @@ paths:
   /multi-run:
     post:
       operationId: runQuantBtcMultiFrame
-      summary: Run the always-awake BTC quant-lite model across multiple horizons
-      description: Produces multiple probabilistic BTC horizon frames using one shared real market snapshot and one shared fundamental snapshot. This is a lightweight Worker runtime, not the full Python engine.
+      summary: Run the Bitget-backed BTC model across multiple horizons through the Cloudflare bridge
+      description: Calls the Render Python multi-frame engine through Cloudflare and preserves Bitget as the required market source. No non-Bitget exchange fallback is used by the bridge.
       requestBody:
         required: true
         content:
@@ -146,14 +156,24 @@ paths:
                   description: Requested simulations per horizon. Worker may cap this value.
                 model:
                   type: string
-                  default: quant_lite
+                  default: ensemble
                   enum:
-                    - quant_lite
                     - ensemble
-                  description: Model name. ensemble is accepted but mapped to quant_lite in the Worker.
+                    - monte_carlo
+                    - student_t
+                    - student_t_model
+                    - jump_diffusion
+                    - garch
+                    - garch_model
+                    - regime_switching
+                    - liquidation
+                    - liquidation_model
+                    - correlation
+                    - correlation_model
+                  description: Render model name. Use ensemble by default.
       responses:
         "200":
-          description: Multi-frame probabilistic quant-lite JSON result with shared provenance, frame summaries, full frames, data statuses, confidence and warnings.
+          description: Multi-frame probabilistic Bitget-backed JSON result with shared provenance, frame summaries, full frames, data statuses, confidence and warnings.
           content:
             application/json:
               schema:
@@ -161,7 +181,7 @@ paths:
                 properties: {}
                 additionalProperties: true
         "500":
-          description: Multi-frame quant-lite run failed JSON.
+          description: Multi-frame Bitget bridge run failed JSON.
           content:
             application/json:
               schema:

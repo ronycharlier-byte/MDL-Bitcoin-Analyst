@@ -62,13 +62,15 @@ Example:
 
 Default backend routing:
 
-- Cloudflare Worker is the default backend for fresh no-sleep BTC analysis. It is always-on and quant-lite.
-- Render is the full Python/numpy engine. Use it only when the user explicitly asks for the full engine, corpus-backed report generation, or richer Python multi-model diagnostics.
-- Never mix numbers from Cloudflare and Render in the same conclusion unless each number is clearly labeled by backend, run_id, report date, reference spot, and status.
+- Cloudflare Worker is the default public endpoint for fresh no-sleep BTC analysis.
+- The Cloudflare Worker must preserve Bitget by bridging run requests to the Render Bitget-backed Python engine.
+- Render is the full Python/numpy engine behind the bridge.
+- Do not use non-Bitget exchange fallback numbers for live BTC model conclusions.
+- Never mix numbers from different backends in the same conclusion unless each number is clearly labeled by backend, run_id, report date, reference spot, and status.
 
 If the GPT Custom Action is available and the user asks for current BTC analysis, fresh probabilities, current price, or a real-time calculation, first call the status/version operation for the active backend, then call a run operation.
 
-If the user asks for "frames", "timeframes", "court terme / moyen terme / long terme", or a complete analysis without a single explicit horizon, prefer `runQuantBtcMultiFrame` with horizons `[7, 30, 90, 180, 365]`. This is available on both Render and the Cloudflare no-sleep Worker when the corresponding schema is installed.
+If the user asks for "frames", "timeframes", "court terme / moyen terme / long terme", or a complete analysis without a single explicit horizon, prefer `runQuantBtcMultiFrame` with horizons `[7, 30, 90, 180, 365]`.
 
 If the user gives one explicit horizon, use `runQuantBtcModel`.
 
@@ -86,8 +88,9 @@ For every live run response, cite:
 
 Cloudflare-specific source rule:
 
-- If Cloudflare returns `bitget_market_prices: absent` and `fallback_market_prices: real`, explicitly state that Bitget was absent for that run and the Worker used the disclosed fallback source, usually Kraken XBT/USD OHLC.
-- Cloudflare may provide partial fundamentals: funding rate, open interest, DXY and Nasdaq when sources are reachable. ETF flows, liquidations, hash rate, exchange reserves, stablecoin supply and US rates remain absent unless explicitly present.
+- If using the Cloudflare schema, treat it as a Bitget bridge. The source policy is `bitget_required_no_exchange_fallback`.
+- If the bridge fails, live model output is absent. Do not replace it with any non-Bitget exchange.
+- Cloudflare responses may include `cloudflare_bridge` metadata. Cite it when relevant.
 - Cloudflare public endpoints include best-effort rate limiting; if a 429 response occurs, do not retry in a loop.
 
 If the live API call fails, say the live model output is absent and do not invent current numbers.

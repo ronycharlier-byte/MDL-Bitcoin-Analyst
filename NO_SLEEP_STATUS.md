@@ -55,14 +55,13 @@ Wrangler is authenticated on this machine for the Cloudflare account used during
 
 Live data note:
 
-- Bitget remains the primary market source.
-- Bitget currently returns HTTP 403 from the Cloudflare Worker runtime.
-- The Worker therefore falls back to real Kraken XBT/USD daily OHLC data and discloses this in `data_status.market_source` and `warnings`.
-- If Bitget becomes reachable from Cloudflare later, the Worker will use Bitget automatically.
-- Funding rate, open interest, DXY and Nasdaq are attempted as partial live fundamentals.
-- ETF flows, liquidations, hash rate, exchange reserves, stablecoin supply and US rates remain absent unless a future connected source is added.
+- Bitget is mandatory for live model conclusions.
+- Cloudflare direct egress to Bitget is not used.
+- The Worker bridges `/run`, `/multi-run`, and `/latest` to the Render Bitget-backed API.
+- No non-Bitget exchange fallback is used for live model conclusions. If the bridge fails, live output is absent.
+- Cloudflare Cron warms the Render bridge every 5 minutes.
 - Public run endpoints have a best-effort per-IP rate limit and simulation caps for safety.
 
 Important limitation:
 
-The Cloudflare Worker is `quant-lite`, not the full Python/numpy model. The full model currently runs on Render or another Python/Docker host.
+The Cloudflare Worker is a public no-sleep facade. The full Bitget-backed Python/numpy model runs on Render behind the bridge.

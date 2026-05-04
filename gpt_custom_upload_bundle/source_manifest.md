@@ -113,13 +113,13 @@ No-sleep Cloudflare Worker requirements:
 
 - Endpoint: `https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev`.
 - Schema file: `gpt_action_openapi.cloudflare.deployed.yaml`.
-- Runtime: quant-lite Cloudflare Worker, not the full Python/numpy engine.
+- Runtime: Cloudflare Worker bridge to the Render Bitget-backed Python engine.
+- Source policy: Bitget required, no non-Bitget exchange fallback for live model conclusions.
 - Operations: `health`, `getQuantBtcLiteVersion`, `getQuantBtcLiteStatus`, `runQuantBtcModel`, `runQuantBtcMultiFrame`, `latestQuantBtcReport`.
 - Default fresh analysis route: `getQuantBtcLiteStatus` then `runQuantBtcMultiFrame` with 7, 30, 90, 180 and 365 day horizons.
-- Required status fields: `data_status.market_source`, `data_status.bitget_market_prices`, `data_status.fallback_market_prices`.
-- Primary market source remains Bitget, but the Worker may fall back to Kraken real XBT/USD OHLC if Bitget rejects Cloudflare edge requests.
-- If fallback is used, the answer must explicitly state that Bitget data are absent for that run and fallback market prices are real.
-- Fundamental fields are partial: funding rate, open interest, DXY and Nasdaq may be real when reachable; ETF flows, liquidations, hash rate, exchange reserves, stablecoins supply and US rates are absent unless explicitly present.
+- Required bridge fields when present: `cloudflare_bridge.mode`, `cloudflare_bridge.source_policy`, `cloudflare_bridge.render_api_base`.
+- Primary market source remains Bitget through Render. If the bridge fails, live output is absent.
+- Fundamental fields follow the Render response: funding rate, open interest, DXY and Nasdaq may be real when reachable; ETF flows, liquidations, hash rate, exchange reserves, stablecoins supply and US rates are absent unless explicitly present.
 - Public rate limit is best-effort per IP / Worker isolate. A 429 response means no live model output was produced.
 
 ## Known Coherence Note

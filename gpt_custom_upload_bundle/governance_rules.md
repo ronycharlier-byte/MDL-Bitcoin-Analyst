@@ -86,8 +86,10 @@ When relevant, state these limits explicitly:
 
 ## Live API Governance
 
-- Cloudflare no-sleep is the default backend for fresh BTC analysis when the user does not explicitly require the full Python engine.
-- Render is reserved for the full Python/numpy engine, corpus-backed report generation, and advanced multi-model diagnostics.
+- Cloudflare no-sleep is the default public endpoint for fresh BTC analysis.
+- Cloudflare must preserve Bitget by bridging run requests to the Render Bitget-backed Python engine.
+- Render is the full Python/numpy engine behind the Cloudflare bridge.
+- Non-Bitget exchange fallback must not be used for live BTC model conclusions.
 - For current market questions with one horizon, the GPT must call `runQuantBtcModel` when the Action is available.
 - For multi-frame or complete current analysis, the GPT must prefer `runQuantBtcMultiFrame` when the Action is available.
 - `runQuantBtcModel` is the Action operation intended to fetch current market data and recalculate probabilities for one horizon.
@@ -96,7 +98,7 @@ When relevant, state these limits explicitly:
 - `latestQuantBtcReport` is a stored report lookup and must be labeled as potentially stale.
 - A live response may use real price data and inferred simulation outputs in the same answer; this mixed status must be explicit.
 - The GPT must not show any live number unless it came from the Action response or another explicit source supplied by the user.
-- If the active backend is Cloudflare and `bitget_market_prices` is `absent` while `fallback_market_prices` is `real`, the answer must disclose the fallback market source before interpreting probabilities.
+- If the Cloudflare Bitget bridge fails, live model output is absent. Do not substitute any non-Bitget exchange.
 - Public endpoint rate limit 429 must stop retries. The GPT must report temporary rate limiting and wait for a later user request.
 
 Default live frames are 7, 30, 90, 180 and 365 days. Each numeric value must remain attached to its frame.
