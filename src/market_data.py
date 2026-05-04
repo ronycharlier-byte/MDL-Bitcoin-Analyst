@@ -160,6 +160,75 @@ def fetch_bitget_prices(asset: str, logger, days: int = 1095) -> pd.DataFrame | 
         return None
 
 
+def fetch_bitget_spot_quote(asset: str, logger) -> pd.DataFrame | None:
+    if asset.upper() != "BTC":
+        return None
+    url = "https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "quant-btc-model/1.0"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if payload.get("code") != "00000":
+            logger.warning("bitget_spot_fetch_failed | code=%s | msg=%s", payload.get("code"), payload.get("msg"))
+            return None
+        data = payload.get("data") or []
+        if not data:
+            logger.warning("bitget_spot_fetch_empty | symbol=BTCUSDT")
+            return None
+        ticker = data[0]
+        timestamp_ms = int(ticker.get("ts") or payload.get("requestTime"))
+        last_price = float(ticker.get("lastPr"))
+        if not np.isfinite(last_price) or last_price <= 0:
+            logger.warning("bitget_spot_invalid_last_price | value=%s", ticker.get("lastPr"))
+            return None
+        row = {
+            "timestamp": datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc),
+            "open": ticker.get("open"),
+            "high": ticker.get("high24h"),
+            "low": ticker.get("low24h"),
+            "close": last_price,
+            "volume": ticker.get("baseVolume") or ticker.get("quoteVolume"),
+        }
+        frame = _standardize_price_frame(
+            pd.DataFrame([row]),
+            asset,
+            "bitget_btcusdt_spot_ticker_realtime",
+            STATUS_REAL,
+        )
+        logger.info(
+            "market_spot_loaded | source=bitget_spot_ticker | price=%s | timestamp=%s",
+            last_price,
+            frame["timestamp"].iloc[-1],
+        )
+        return frame
+    except Exception as exc:
+        logger.warning("bitget_spot_fetch_failed | error=%s", exc)
+        return None
+
+
+def append_realtime_spot(price_frame: pd.DataFrame, asset: str, logger, allow_online: bool = True) -> pd.DataFrame:
+    if not allow_online:
+        return price_frame
+    spot_frame = fetch_bitget_spot_quote(asset, logger)
+    if spot_frame is None or spot_frame.empty:
+        logger.warning("realtime_spot_absent | keeping_latest_available_close")
+        return price_frame
+    if price_frame is None or price_frame.empty:
+        return spot_frame
+
+    combined = pd.concat([price_frame, spot_frame], ignore_index=True)
+    combined["timestamp_sort"] = pd.to_datetime(combined["timestamp"], errors="coerce", utc=True)
+    combined = combined.dropna(subset=["timestamp_sort"]).sort_values("timestamp_sort")
+    combined = combined.drop_duplicates(subset=["timestamp", "asset"], keep="last")
+    combined = combined.drop(columns=["timestamp_sort"])
+    logger.info(
+        "realtime_spot_appended | source=%s | latest_close=%s",
+        spot_frame["source"].iloc[-1],
+        spot_frame["close"].iloc[-1],
+    )
+    return combined
+
+
 def generate_mock_prices(asset: str, logger, days: int = 1095, seed: int = 42) -> pd.DataFrame:
     log_mock(logger, "market_prices", "no local real CSV and online fetch unavailable")
     rng = np.random.default_rng(seed)
@@ -195,6 +264,7 @@ def load_market_prices(asset: str, logger, days: int = 1095, allow_online: bool 
         frame = fetch_coingecko_prices(asset, logger, days=days)
     if frame is None or frame.empty:
         frame = generate_mock_prices(asset, logger, days=days)
+    frame = append_realtime_spot(frame, asset, logger, allow_online=allow_online)
 
     for column in ["open", "high", "low", "close", "volume"]:
         if frame[column].isna().all():

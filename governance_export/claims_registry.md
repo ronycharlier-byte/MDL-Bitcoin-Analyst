@@ -21,7 +21,7 @@ All extracted corpus claims have reliability `unknown` unless independently veri
 | ID | Claim | Category | Reliability | Status |
 |---|---|---|---|---|
 | G-001 | The BTC engine must output probabilities, distributions, and risk measures, not certainty. | model_governance | high | inferred from system rules |
-| G-002 | The latest market data source is Bitget BTCUSDT spot candles. | data_source | high | real |
+| G-002 | The stored latest market data source is Bitget BTCUSDT spot candles; live API runs also append the Bitget BTCUSDT spot ticker. | data_source | high | real |
 | G-003 | Fundamental features are absent in the latest export. | data_quality | high | absent |
 | G-004 | The latest confidence score is 42/100. | model_output | high | inferred |
 | G-005 | Stress tests are hypothetical shocks, not predictions. | risk | high | inferred |

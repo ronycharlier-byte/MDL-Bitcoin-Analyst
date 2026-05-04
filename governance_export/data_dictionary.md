@@ -40,7 +40,8 @@ Latest export status: real.
 | source | Data source identifier. | real |
 | statut | real, mock, or missing in SQLite; exported here as status vocabulary. | real |
 
-Latest market source: bitget_btcusdt_spot_candles.
+Latest stored market source: bitget_btcusdt_spot_candles.
+Live API runs append source: bitget_btcusdt_spot_ticker_realtime.
 
 ## Technical Features
 

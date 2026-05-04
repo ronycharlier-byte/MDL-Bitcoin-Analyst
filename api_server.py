@@ -16,6 +16,7 @@ SUMMARY_DIR = ROOT / "data" / "simulations"
 REPORT_PATH = ROOT / "reports" / "latest_report.md"
 DASHBOARD_PATH = ROOT / "reports" / "dashboard_summary.md"
 MAX_API_SIMULATIONS = int(os.getenv("MAX_API_SIMULATIONS", "250000"))
+DEFAULT_API_SIMULATIONS = min(int(os.getenv("DEFAULT_API_SIMULATIONS", "5000")), MAX_API_SIMULATIONS)
 
 
 app = FastAPI(
@@ -31,7 +32,7 @@ app = FastAPI(
 class RunRequest(BaseModel):
     asset: str = Field(default="BTC", pattern="^[A-Za-z0-9_-]{2,12}$")
     horizon: int = Field(default=365, ge=1, le=3650)
-    simulations: int = Field(default=200000, ge=100, le=MAX_API_SIMULATIONS)
+    simulations: int = Field(default=DEFAULT_API_SIMULATIONS, ge=100, le=MAX_API_SIMULATIONS)
     model: str = Field(
         default="ensemble",
         pattern=(
@@ -118,6 +119,14 @@ def extract_reference_spot(report_markdown: str) -> str | None:
             return line.replace("- Reference spot price: ", "", 1).strip()
         if line.startswith("- Latest spot used: "):
             return line.replace("- Latest spot used: ", "", 1).strip()
+    return None
+
+
+def extract_report_bullet(report_markdown: str, label: str) -> str | None:
+    prefix = f"- {label}: "
+    for line in report_markdown.splitlines():
+        if line.startswith(prefix):
+            return line.replace(prefix, "", 1).strip()
     return None
 
 
@@ -209,9 +218,12 @@ def run_model(payload: RunRequest) -> RunResponse:
             "report_date": extract_report_date(report),
             "model_run_id": run_id,
             "reference_spot": extract_reference_spot(report),
+            "reference_spot_timestamp": extract_report_bullet(report, "Reference spot timestamp"),
+            "reference_spot_source": extract_report_bullet(report, "Reference spot source"),
             "market_source": extract_bullet_value(report, "Market sources")
             or "bitget_btcusdt_spot_candles unless local CSV overrides it",
             "calculation_origin": "runtime_run",
+            "fresh_run": True,
         },
         data_status={
             "market_prices": extract_bullet_value(report, "Market prices status") or "real_or_mock_per_report",

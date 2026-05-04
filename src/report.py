@@ -114,7 +114,13 @@ def generate_reports(
 ) -> dict[str, Path]:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).isoformat()
-    spot = float(pd.to_numeric(price_frame["close"], errors="coerce").dropna().iloc[-1])
+    ordered_prices = price_frame.copy()
+    ordered_prices["_timestamp_sort"] = pd.to_datetime(ordered_prices["timestamp"], errors="coerce", utc=True)
+    ordered_prices = ordered_prices.dropna(subset=["_timestamp_sort"]).sort_values("_timestamp_sort")
+    spot_row = ordered_prices[pd.to_numeric(ordered_prices["close"], errors="coerce").notna()].iloc[-1]
+    spot = float(spot_row["close"])
+    spot_timestamp = str(spot_row["timestamp"])
+    spot_source = str(spot_row["source"])
     statuses = sorted(set(price_frame["statut"].dropna().astype(str)))
     data_tag = "MOCK" if STATUS_MOCK in statuses else ",".join(statuses)
     missing = _missing_data(price_frame, fundamentals)
@@ -171,6 +177,8 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 - Model run ID: `{run_id}`
 - Model version: source-code snapshot in `quant_btc_model/src`
 - Reference spot price: {_fmt_price(spot)}
+- Reference spot timestamp: {spot_timestamp}
+- Reference spot source: {spot_source}
 - Market prices status: {data_tag}
 - Simulation outputs status: inferred
 - Risk metrics status: inferred
@@ -181,6 +189,7 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 
 - Market rows: {len(price_frame)}
 - Latest spot used: {_fmt_price(spot)}
+- Latest spot timestamp: {spot_timestamp}
 - Market sources: {", ".join(sorted(set(price_frame["source"].dropna().astype(str))))}
 - Fundamental rows: {len(fundamentals)}
 - Technical feature rows: {len(technical_features)}

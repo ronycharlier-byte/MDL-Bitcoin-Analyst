@@ -18,7 +18,7 @@ paths:
     post:
       operationId: runQuantBtcModel
       summary: Run the probabilistic BTC model
-      description: Produces probabilities, distributions, risk metrics, stress tests and provenance. Never returns deterministic advice.
+      description: Runs a fresh calculation at call time. The API reloads online BTC market data by default, appends the latest Bitget BTCUSDT spot ticker as the reference price, then produces probabilities, distributions, risk metrics, stress tests and provenance. Never returns deterministic advice.
       requestBody:
         required: true
         content:
@@ -42,9 +42,10 @@ paths:
                   maximum: 3650
                 simulations:
                   type: integer
-                  default: 200000
+                  default: 5000
                   minimum: 100
                   maximum: 250000
+                  description: Default is optimized for GPT Action latency. Increase only when the user explicitly asks for a deeper run.
                 model:
                   type: string
                   default: ensemble
@@ -63,9 +64,10 @@ paths:
                 no_online:
                   type: boolean
                   default: false
+                  description: Keep false for real-time runs. If true, the API will not fetch online candles or the live Bitget spot ticker.
       responses:
         "200":
-          description: Probabilistic model result with JSON body including run_id, provenance, statuses, report_markdown, dashboard_markdown, distribution, risk metrics and warning.
+          description: Fresh probabilistic model result with JSON body including run_id, report_date, reference_spot, reference_spot_timestamp, source statuses, report_markdown, dashboard_markdown, distribution, risk metrics and warning.
         "401":
           description: Missing or invalid API key.
         "500":
@@ -76,7 +78,7 @@ paths:
       summary: Return latest generated report artifacts
       responses:
         "200":
-          description: Latest report and dashboard markdown.
+          description: Latest stored report and dashboard markdown. This is not guaranteed to be fresh; call POST /run for real-time calculation.
 components:
   schemas:
     Placeholder:

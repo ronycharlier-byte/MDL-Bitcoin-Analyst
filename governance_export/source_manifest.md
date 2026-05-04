@@ -39,13 +39,13 @@ These exclusions are intentional to keep GPT Custom Knowledge focused and lightw
 
 | Item | Value | Status |
 |---|---|---|
-| Run ID | BTC_ensemble_20260504T103929Z_724e8807 | inferred |
-| Report timestamp | 2026-05-04T10:39:31.659477+00:00 | inferred |
+| Run ID | BTC_ensemble_20260504T122603Z_4f5be51e | inferred |
+| Report timestamp | 2026-05-04T12:26:03.918344+00:00 | inferred |
 | Asset | BTC | real |
 | Horizon | 365 days | inferred |
-| Simulations | 200000 | inferred |
+| Simulations | 5000 | inferred |
 | Model | ensemble | inferred |
-| Market source | bitget_btcusdt_spot_candles | real |
+| Market source | bitget_btcusdt_spot_candles; live runs also append bitget_btcusdt_spot_ticker_realtime | real |
 | Fundamental source | no_fundamental_source | absent |
 | Confidence score | 42/100 | inferred |
 
@@ -74,6 +74,7 @@ The raw manifest contains more copied files, including dependency metadata. For 
 ## Provenance Rules
 
 - Numeric model outputs come from latest_report.md.
+- Fresh numeric model outputs from the GPT Action must come from `runQuantBtcModel`, not `latestQuantBtcReport`.
 - High-level dashboard labels come from dashboard_summary.md.
 - Data field meanings come from data_dictionary.md.
 - Behavioral constraints come from gpt_instructions.md, governance_rules.md, and output_policy.md.
@@ -94,16 +95,23 @@ Latest numeric provenance:
 
 | Source file | Report date | Run ID | Reference spot | Status mix |
 |---|---|---|---:|---|
-| latest_report.md | 2026-05-04T10:39:31.659477+00:00 | BTC_ensemble_20260504T103929Z_724e8807 | $78,564.16 | prices real; simulations inferred; fundamentals absent |
+| latest_report.md | 2026-05-04T12:26:03.918344+00:00 | BTC_ensemble_20260504T122603Z_4f5be51e | $78,952.42 | prices real; simulations inferred; fundamentals absent |
+
+Live Action provenance requirements:
+
+- Operation: `runQuantBtcModel`.
+- Required source fields: `model_run_id`, `report_date`, `reference_spot`, `reference_spot_timestamp`, `reference_spot_source`.
+- Expected market source for realtime price: `bitget_btcusdt_spot_ticker_realtime`.
+- Expected status mix unless extra data are supplied: prices real; simulations inferred; fundamentals absent.
 
 ## Known Coherence Note
 
 Latest regime probabilities:
 
-- Bull: 54.75%.
-- Bear: 17.59%.
-- Range: 14.15%.
-- Sum: 86.50%.
-- Residual: 13.50% non-classified / transition.
+- Bull: 54.54%.
+- Bear: 19.22%.
+- Range: 13.16%.
+- Sum: 86.92%.
+- Residual: 13.08% non-classified / transition.
 
 The regime split is incomplete and must not be presented as a complete 100% partition unless the residual is included.

@@ -19,7 +19,7 @@ Do not rely on raw SQLite or hidden execution state. This export is intentionall
 
 Classify every important input or output:
 
-- real: loaded from an identified source, such as Bitget BTCUSDT spot candles.
+- real: loaded from an identified source, such as Bitget BTCUSDT spot candles or the Bitget BTCUSDT spot ticker.
 - mock: generated synthetic fallback.
 - absent: unavailable, NULL, or not included in the export.
 - inferred: computed from model logic, historical returns, simulations, stress tests, or derived features.
@@ -83,6 +83,14 @@ When relevant, state these limits explicitly:
 - Future BTC returns can depart sharply from historical calibration.
 - Regime shifts, liquidity shocks, exchange outages, regulatory decisions, ETF flow shocks, macro repricing, and liquidation cascades can invalidate assumptions.
 - Fundamental fields are absent in the latest export unless separately supplied.
+
+## Live API Governance
+
+- For current market questions, the GPT must call `runQuantBtcModel` when the Action is available.
+- `runQuantBtcModel` is the only Action operation intended to fetch current market data and recalculate probabilities.
+- `latestQuantBtcReport` is a stored report lookup and must be labeled as potentially stale.
+- A live response may use real price data and inferred simulation outputs in the same answer; this mixed status must be explicit.
+- The GPT must not show any live number unless it came from the Action response or another explicit source supplied by the user.
 - Stress tests are scenario shocks, not forecasts.
 - Confidence score is not accuracy.
 - Backtests are empirical diagnostics, not proof of future performance.

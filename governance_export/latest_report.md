@@ -1,10 +1,10 @@
 # Quant BTC Model - Latest Report
 
-Generated: 2026-05-04T10:39:31.659477+00:00
-Run ID: `BTC_ensemble_20260504T103929Z_724e8807`
+Generated: 2026-05-04T12:26:03.918344+00:00
+Run ID: `BTC_ensemble_20260504T122603Z_4f5be51e`
 Asset: BTC
 Horizon: 365 days
-Simulations: 200000
+Simulations: 5000
 Model: ensemble
 Data status: real
 
@@ -13,10 +13,12 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 ## Provenance des chiffres
 
 - Report source: reports/latest_report.md
-- Report date: 2026-05-04T10:39:31.659477+00:00
-- Model run ID: `BTC_ensemble_20260504T103929Z_724e8807`
+- Report date: 2026-05-04T12:26:03.918344+00:00
+- Model run ID: `BTC_ensemble_20260504T122603Z_4f5be51e`
 - Model version: source-code snapshot in `quant_btc_model/src`
-- Reference spot price: $78,564.16
+- Reference spot price: $78,952.42
+- Reference spot timestamp: 2026-05-04T12:26:00Z
+- Reference spot source: bitget_btcusdt_spot_ticker_realtime
 - Market prices status: real
 - Simulation outputs status: inferred
 - Risk metrics status: inferred
@@ -25,14 +27,15 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 
 ## Donnees utilisees
 
-- Market rows: 1090
-- Latest spot used: $78,564.16
-- Market sources: bitget_btcusdt_spot_candles
-- Fundamental rows: 1090
-- Technical feature rows: 1090
-- Corpus documents copied: 100
-- Corpus chunks: 165
-- Corpus claims: 39
+- Market rows: 1091
+- Latest spot used: $78,952.42
+- Latest spot timestamp: 2026-05-04T12:26:00Z
+- Market sources: bitget_btcusdt_spot_candles, bitget_btcusdt_spot_ticker_realtime
+- Fundamental rows: 1091
+- Technical feature rows: 1091
+- Corpus documents copied: 0
+- Corpus chunks: 0
+- Corpus claims: 0
 
 ## Donnees manquantes
 
@@ -67,74 +70,74 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 
 ## Distribution horizon 365 jours
 
-- P10 return: -32.33%
-- Median return: 27.41%
-- P90 return: 147.87%
-- P10 price: $53,165.70
-- Median price: $100,096.79
-- P90 price: $194,734.85
+- P10 return: -34.44%
+- Median return: 27.13%
+- P90 return: 144.89%
+- P10 price: $51,762.17
+- Median price: $100,370.89
+- P90 price: $193,349.17
 
 ## Probabilites seuils
 
-- P(return > 0): 68.47%
-- P(return <= -10%): 24.39%
-- P(return <= -30%): 11.33%
-- P(return >= +30%): 48.34%
+- P(return > 0): 66.58%
+- P(return <= -10%): 26.28%
+- P(return <= -30%): 12.58%
+- P(return >= +30%): 47.98%
 
 ## Repartition des regimes
 
-- Bull: 54.75%
-- Bear: 17.59%
-- Range: 14.15%
-- Non classe / transition: 13.50%
-- Controle de coherence: The bull/bear/range probabilities sum to 86.50%, leaving 13.50% as non-classified / transition. Do not present the bull/bear/range split as complete.
+- Bull: 54.54%
+- Bear: 19.22%
+- Range: 13.16%
+- Non classe / transition: 13.08%
+- Controle de coherence: The bull/bear/range probabilities sum to 86.92%, leaving 13.08% as non-classified / transition. Do not present the bull/bear/range split as complete.
 
 ## VaR / CVaR
 
-- VaR 95 du rendement simule, exprimee comme perte positive: 43.11%
-- VaR 99 du rendement simule, exprimee comme perte positive: 59.89%
-- CVaR 95 du rendement simule, exprimee comme perte moyenne de queue positive: 53.28%
-- CVaR 99 du rendement simule, exprimee comme perte moyenne de queue positive: 66.03%
+- VaR 95 du rendement simule, exprimee comme perte positive: 45.70%
+- VaR 99 du rendement simule, exprimee comme perte positive: 61.19%
+- CVaR 95 du rendement simule, exprimee comme perte moyenne de queue positive: 55.15%
+- CVaR 99 du rendement simule, exprimee comme perte moyenne de queue positive: 67.28%
 - Interpretation VaR 95: under model assumptions, the worst 5% simulated scenarios begin around this loss threshold or worse.
 - Interpretation CVaR 95: this estimates the average loss inside scenarios worse than VaR 95.
-- Skewness: 2.08
-- Kurtosis: 12.04
-- Expected max drawdown: -36.10%
-- Conditional volatility: 35.00%
+- Skewness: 2.27
+- Kurtosis: 15.36
+- Expected max drawdown: -36.57%
+- Conditional volatility: 34.02%
 
 ## Stress tests
 
 | Scenario | Instant shock | Shocked spot | Shocked median terminal |
 |---|---:|---:|---:|
-| crash_-30pct | -30.00% | $54,994.91 | $70,067.75 |
-| crash_-50pct | -50.00% | $39,282.08 | $50,048.39 |
-| etf_outflow_massif | -18.00% | $64,422.61 | $82,079.37 |
-| hausse_dxy | -8.00% | $72,279.03 | $92,089.04 |
-| hausse_taux_us | -10.00% | $70,707.74 | $90,087.11 |
-| chute_nasdaq | -12.00% | $69,136.46 | $88,085.17 |
-| cascade_liquidations | -28.00% | $56,566.20 | $72,069.69 |
+| crash_-30pct | -30.00% | $55,266.69 | $70,259.63 |
+| crash_-50pct | -50.00% | $39,476.21 | $50,185.45 |
+| etf_outflow_massif | -18.00% | $64,740.98 | $82,304.13 |
+| hausse_dxy | -8.00% | $72,636.23 | $92,341.22 |
+| hausse_taux_us | -10.00% | $71,057.18 | $90,333.80 |
+| chute_nasdaq | -12.00% | $69,478.13 | $88,326.39 |
+| cascade_liquidations | -28.00% | $56,845.74 | $72,267.04 |
 
 ## Position sizing
 
 - Risk budget: 2.00%
-- VaR based fraction: 4.64%
-- CVaR based fraction: 3.75%
+- VaR based fraction: 4.38%
+- CVaR based fraction: 3.63%
 - Kelly fraction: 25.00%
-- Drawdown limited fraction: 2.08%
+- Drawdown limited fraction: 1.98%
 
 ## Confidence score
 
 - Score: 42/100
-- Components: {'data_quality': 70.0, 'model_stability': 0.26, 'backtest': 63.64, 'uncertainty': 10.0}
+- Components: {'data_quality': 70.0, 'model_stability': 0.0, 'backtest': 63.6, 'uncertainty': 10.0}
 - Notes: Most fundamental features are NULL.; Wide P10-P90 interval.; High tail loss estimate.; Distribution uncertainty is high.
 
 ## Backtest
 
 | Horizon | Hit rate | Brier | Calibration error | MAE | Interval coverage | Obs |
 |---:|---:|---:|---:|---:|---:|---:|
-| 30 | 48.99% | 0.28 | 0.11 | 10.83% | 78.96% | 694 |
-| 90 | 53.47% | 0.32 | 0.26 | 26.43% | 64.35% | 634 |
-| 365 | 55.15% | 0.36 | 0.38 | 105.69% | 59.89% | 359 |
+| 30 | 48.92% | 0.28 | 0.11 | 10.84% | 78.85% | 695 |
+| 90 | 53.54% | 0.32 | 0.26 | 26.40% | 64.41% | 635 |
+| 365 | 55.00% | 0.36 | 0.38 | 105.67% | 59.72% | 360 |
 
 ## Limites explicites
 

@@ -71,6 +71,17 @@ GPT Action schema:
 cloudflare-worker/gpt_action_openapi.cloudflare.yaml
 ```
 
+## Realtime API behavior
+
+`POST /run` is the fresh calculation endpoint for GPT Actions. By default it:
+
+- reloads online BTC market history;
+- appends the latest Bitget BTCUSDT spot ticker as the reference price;
+- runs the selected probabilistic model;
+- returns provenance with `reference_spot`, `reference_spot_timestamp`, `reference_spot_source`, and `model_run_id`.
+
+`GET /latest` only returns stored local artifacts. Use it for context, not for a fresh market calculation.
+
 ## Data policy
 
 - No source file outside `quant_btc_model` is modified.
