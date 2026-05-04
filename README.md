@@ -4,6 +4,8 @@ Autonomous probabilistic quantitative engine for Bitcoin inside this corpus.
 
 The system produces probabilities, distributions, and risk measures. It never emits certainty or a deterministic price prediction.
 
+French product/GPT Custom README: [`README_FR.md`](README_FR.md).
+
 ## Created structure
 
 ```text
