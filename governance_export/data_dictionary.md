@@ -68,7 +68,7 @@ Latest export status: partial_real_absent.
 
 | Field | Meaning | Latest status |
 |---|---|---|
-| etf_flows | ETF net flows. | absent |
+| etf_flows | Latest published total Bitcoin ETF net flow in USD millions. | real in live API when Farside Investors provides it; absent otherwise |
 | funding_rate | Perpetual futures funding rate. | real in live API when Bitget provides it; absent otherwise |
 | open_interest | Derivatives open interest. | real in live API when Bitget provides it; absent otherwise |
 | liquidations | Liquidation volume. | absent |

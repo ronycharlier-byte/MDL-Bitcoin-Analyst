@@ -14,6 +14,8 @@ knowledge_base/corpus_chunks/*
 knowledge_base/metadata/*.jsonl
 knowledge_base/claims/*.jsonl
 logs/*
+reports/archive/*
+!reports/archive/README.md
 *.zip
 *.sqlite
 *.db

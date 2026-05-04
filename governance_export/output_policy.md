@@ -48,6 +48,7 @@ For current market analysis, prefer live Action responses over stored Knowledge 
 
 When a live response includes version metadata, include it in the provenance block or keep it available for audit. When a multi-frame response includes `shared_spot_snapshot`, cite it as the common reference price for all frames.
 When `fundamental_inputs` is present, use it as the only live source for fundamental field status and values.
+When an `archive` object is present, cite `archive.archive_id` for auditability.
 
 Cloudflare source policy is Bitget-required. If the bridge fails, live model output is absent. Do not substitute a non-Bitget exchange source.
 

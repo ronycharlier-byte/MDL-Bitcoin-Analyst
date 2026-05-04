@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import csv
+import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from html import unescape
 from pathlib import Path
 
 import numpy as np
@@ -464,6 +466,79 @@ def _fetch_defillama_stablecoins_supply(logger) -> tuple[float | None, str | Non
     return None, None
 
 
+def _parse_farside_number(value) -> float | None:
+    raw = str(value).strip()
+    if not raw or raw.lower() == "nan" or raw == "-":
+        return None
+    negative = raw.startswith("(") and raw.endswith(")")
+    cleaned = raw.strip("()").replace(",", "")
+    try:
+        number = float(cleaned)
+    except ValueError:
+        return None
+    return -number if negative else number
+
+
+def _strip_html_cell(value: str) -> str:
+    return " ".join(unescape(re.sub(r"<[^>]+>", "", value)).split())
+
+
+def _extract_farside_flow_rows(html: str) -> list[dict[str, str]]:
+    for table in re.findall(r"<table\b.*?</table>", html, flags=re.IGNORECASE | re.DOTALL):
+        parsed_rows: list[list[str]] = []
+        for row_html in re.findall(r"<tr\b.*?</tr>", table, flags=re.IGNORECASE | re.DOTALL):
+            cells = re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", row_html, flags=re.IGNORECASE | re.DOTALL)
+            if cells:
+                parsed_rows.append([_strip_html_cell(cell) for cell in cells])
+        if not parsed_rows:
+            continue
+        header = parsed_rows[0]
+        if "Date" not in header or "Total" not in header:
+            continue
+        rows: list[dict[str, str]] = []
+        for cells in parsed_rows[1:]:
+            padded = cells + [""] * max(0, len(header) - len(cells))
+            rows.append(dict(zip(header, padded[: len(header)])))
+        return rows
+    return []
+
+
+def _fetch_farside_etf_flows(logger) -> tuple[float | None, str | None]:
+    url = "https://farside.co.uk/bitcoin-etf-flow-all-data/"
+    source_name = "farside_bitcoin_etf_flow_total_usd_m"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "quant-btc-model/1.0"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+        rows = _extract_farside_flow_rows(html)
+        if not rows:
+            logger.warning("etf_flows_absent | source=%s | reason=no_flow_table", source_name)
+            return None, None
+        fund_columns = [column for column in rows[0] if str(column) not in {"Date", "Total"}]
+        for row in reversed(rows):
+            parsed_date = pd.to_datetime(row.get("Date"), format="%d %b %Y", errors="coerce", utc=True)
+            if pd.isna(parsed_date):
+                continue
+            fund_values = [_parse_farside_number(row.get(column)) for column in fund_columns]
+            # Skip placeholder rows where no fund has published a value yet.
+            if not any(value is not None for value in fund_values):
+                continue
+            total_value = _parse_farside_number(row.get("Total"))
+            if total_value is None:
+                continue
+            logger.info(
+                "fundamental_loaded | field=etf_flows | source=%s | value=%s | unit=USD_m | date=%s",
+                source_name,
+                total_value,
+                parsed_date.strftime("%Y-%m-%d"),
+            )
+            return total_value, source_name
+        logger.warning("etf_flows_absent | source=%s | reason=no_published_total", source_name)
+    except Exception as exc:
+        logger.warning("etf_flows_fetch_failed | source=%s | error=%s", source_name, exc)
+    return None, None
+
+
 def _fetch_fred_dgs10(logger) -> tuple[float | None, str | None]:
     url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
     source_name = "fred_dgs10_10y_treasury_rate"
@@ -541,6 +616,11 @@ def _fetch_treasury_10y_rate(logger) -> tuple[float | None, str | None]:
 def load_online_fundamental_snapshot(price_frame: pd.DataFrame, logger) -> tuple[dict[str, float], list[str]]:
     values: dict[str, float] = {}
     sources: list[str] = []
+
+    etf_flows, source = _fetch_farside_etf_flows(logger)
+    if etf_flows is not None:
+        values["etf_flows"] = etf_flows
+        sources.append(source or "farside_bitcoin_etf_flow_total_usd_m")
 
     funding_rate, source = _fetch_bitget_funding_rate(logger)
     if funding_rate is not None:

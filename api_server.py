@@ -26,6 +26,7 @@ SUMMARY_DIR = ROOT / "data" / "simulations"
 REPORT_PATH = ROOT / "reports" / "latest_report.md"
 DASHBOARD_PATH = ROOT / "reports" / "dashboard_summary.md"
 API_RUNTIME_DB = ROOT / "data" / "api_runtime.db"
+API_ARCHIVE_DIR = ROOT / "reports" / "archive"
 MAX_API_SIMULATIONS = int(os.getenv("MAX_API_SIMULATIONS", "250000"))
 DEFAULT_API_SIMULATIONS = min(int(os.getenv("DEFAULT_API_SIMULATIONS", "5000")), MAX_API_SIMULATIONS)
 DEFAULT_MULTIFRAME_SIMULATIONS = min(int(os.getenv("DEFAULT_MULTIFRAME_SIMULATIONS", "2000")), MAX_API_SIMULATIONS)
@@ -33,9 +34,9 @@ DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
-API_VERSION = "1.3.3"
+API_VERSION = "1.4.0"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.3.3"
+SCHEMA_VERSION = "gpt_action_schema_v1.4.0"
 
 
 def resolve_git_commit() -> str:
@@ -108,6 +109,7 @@ app = FastAPI(
 
 def init_runtime_db() -> None:
     API_RUNTIME_DB.parent.mkdir(parents=True, exist_ok=True)
+    API_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(API_RUNTIME_DB) as conn:
         conn.execute(
             """
@@ -129,8 +131,31 @@ def init_runtime_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS run_archive (
+                archive_id TEXT PRIMARY KEY,
+                endpoint TEXT NOT NULL,
+                asset TEXT,
+                model TEXT,
+                horizons_json TEXT,
+                run_ids_json TEXT,
+                report_date TEXT,
+                reference_spot TEXT,
+                api_version TEXT,
+                git_commit TEXT,
+                status TEXT,
+                archive_json_path TEXT,
+                archive_markdown_path TEXT,
+                response_json TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_rate_limit_client_time ON rate_limit_events (client_key, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_response_cache_expires ON response_cache (expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_run_archive_created_at ON run_archive (created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_run_archive_asset ON run_archive (asset, created_at)")
         conn.commit()
 
 
@@ -188,6 +213,7 @@ class RunResponse(BaseModel):
     confidence: dict[str, Any]
     position_sizing: dict[str, Any]
     version: dict[str, Any]
+    archive: dict[str, Any] | None = None
     cache: dict[str, Any] | None = None
     report_markdown: str
     dashboard_markdown: str
@@ -406,6 +432,142 @@ def cache_set(cache_key: str, payload: dict[str, Any]) -> None:
             conn.commit()
     except Exception:
         return
+
+
+def _response_horizons(payload: dict[str, Any]) -> list[int]:
+    if isinstance(payload.get("horizons"), list):
+        return [int(item) for item in payload["horizons"]]
+    if payload.get("horizon") is not None:
+        return [int(payload["horizon"])]
+    frames = payload.get("frames") if isinstance(payload.get("frames"), list) else []
+    return [int(frame["horizon"]) for frame in frames if frame.get("horizon") is not None]
+
+
+def _response_run_ids(payload: dict[str, Any]) -> list[str]:
+    if payload.get("run_id"):
+        return [str(payload["run_id"])]
+    frames = payload.get("frames") if isinstance(payload.get("frames"), list) else []
+    return [str(frame["run_id"]) for frame in frames if frame.get("run_id")]
+
+
+def _response_reference_spot(payload: dict[str, Any]) -> str | None:
+    provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+    if provenance.get("reference_spot"):
+        return str(provenance["reference_spot"])
+    summary = payload.get("provenance_summary") if isinstance(payload.get("provenance_summary"), dict) else {}
+    reference_spots = summary.get("reference_spots")
+    if isinstance(reference_spots, list) and reference_spots:
+        return str(reference_spots[0])
+    return None
+
+
+def _response_report_date(payload: dict[str, Any]) -> str | None:
+    provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+    if provenance.get("report_date"):
+        return str(provenance["report_date"])
+    frames = payload.get("frames") if isinstance(payload.get("frames"), list) else []
+    for frame in frames:
+        frame_provenance = frame.get("provenance") if isinstance(frame.get("provenance"), dict) else {}
+        if frame_provenance.get("report_date"):
+            return str(frame_provenance["report_date"])
+    return None
+
+
+def _archive_markdown(payload: dict[str, Any], archive: dict[str, Any]) -> str:
+    version = payload.get("version") if isinstance(payload.get("version"), dict) else {}
+    fundamentals = payload.get("fundamental_inputs") if isinstance(payload.get("fundamental_inputs"), dict) else {}
+    if not fundamentals and isinstance(payload.get("frames"), list) and payload["frames"]:
+        fundamentals = payload["frames"][0].get("fundamental_inputs") or {}
+    return "\n".join(
+        [
+            "# API Run Archive",
+            "",
+            f"- Archive ID: `{archive['archive_id']}`",
+            f"- Endpoint: {archive['endpoint']}",
+            f"- Created at: {archive['created_at']}",
+            f"- Asset: {archive.get('asset') or 'unknown'}",
+            f"- Model: {archive.get('model') or 'unknown'}",
+            f"- Horizons: {archive.get('horizons')}",
+            f"- Run IDs: {archive.get('run_ids')}",
+            f"- Report date: {archive.get('report_date') or 'unknown'}",
+            f"- Reference spot: {archive.get('reference_spot') or 'unknown'}",
+            f"- API version: {version.get('api_version') or API_VERSION}",
+            f"- Git commit: {version.get('git_commit') or GIT_COMMIT}",
+            f"- Data status: {payload.get('data_status')}",
+            f"- Fundamental status: {fundamentals.get('status') or 'unknown'}",
+            f"- Fundamental real fields: {fundamentals.get('real_fields') or []}",
+            f"- Fundamental absent fields: {fundamentals.get('absent_fields') or []}",
+            "",
+            "This archive stores the API response payload for auditability. It is probabilistic output only, not financial advice and not a deterministic prediction.",
+            "",
+        ]
+    )
+
+
+def attach_archive(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+    created = datetime.now(timezone.utc)
+    safe_endpoint = endpoint.strip("/").replace("/", "_") or "root"
+    asset = str(payload.get("asset") or "unknown").upper()
+    archive_id = f"{created.strftime('%Y%m%dT%H%M%SZ')}_{safe_endpoint}_{asset}_{uuid.uuid4().hex[:8]}"
+    archive_dir = API_ARCHIVE_DIR / created.strftime("%Y%m%d")
+    archive_json_path = archive_dir / f"{archive_id}.json"
+    archive_markdown_path = archive_dir / f"{archive_id}.md"
+    archive = {
+        "status": "stored",
+        "archive_id": archive_id,
+        "endpoint": endpoint,
+        "created_at": created.isoformat(),
+        "asset": asset,
+        "model": payload.get("model"),
+        "horizons": _response_horizons(payload),
+        "run_ids": _response_run_ids(payload),
+        "report_date": _response_report_date(payload),
+        "reference_spot": _response_reference_spot(payload),
+        "sqlite_db": str(API_RUNTIME_DB),
+        "sqlite_table": "run_archive",
+        "json_path": str(archive_json_path),
+        "markdown_path": str(archive_markdown_path),
+        "storage_note": "Runtime archive on the API host; persistence depends on the hosting filesystem.",
+    }
+    payload["archive"] = archive
+    try:
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        response_json = json.dumps(payload, ensure_ascii=True, indent=2, default=str)
+        archive_json_path.write_text(response_json, encoding="utf-8")
+        archive_markdown_path.write_text(_archive_markdown(payload, archive), encoding="utf-8")
+        version = payload.get("version") if isinstance(payload.get("version"), dict) else {}
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO run_archive (
+                    archive_id, endpoint, asset, model, horizons_json, run_ids_json,
+                    report_date, reference_spot, api_version, git_commit, status,
+                    archive_json_path, archive_markdown_path, response_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    archive_id,
+                    endpoint,
+                    asset,
+                    str(payload.get("model") or ""),
+                    json.dumps(archive["horizons"], ensure_ascii=True),
+                    json.dumps(archive["run_ids"], ensure_ascii=True),
+                    archive.get("report_date"),
+                    archive.get("reference_spot"),
+                    str(version.get("api_version") or API_VERSION),
+                    str(version.get("git_commit") or GIT_COMMIT),
+                    str(payload.get("status") or "ok"),
+                    str(archive_json_path),
+                    str(archive_markdown_path),
+                    response_json,
+                    created.timestamp(),
+                ),
+            )
+            conn.commit()
+    except Exception as exc:
+        archive.update({"status": "failed", "error": str(exc)})
+    return archive
 
 
 def read_text(path: Path) -> str:
@@ -752,6 +914,7 @@ def status() -> dict[str, Any]:
         "default_frames": DEFAULT_MULTIFRAME_HORIZONS,
         "data_sources": {
             "btc_spot": "Bitget BTCUSDT spot ticker and candles",
+            "etf_flows": "Farside Investors Bitcoin ETF Flow total net flow in USD millions when available",
             "funding_rate": "Bitget current funding rate when available",
             "open_interest": "Bitget open interest when available",
             "hash_rate": "Blockchain.com hash-rate chart when available",
@@ -760,7 +923,6 @@ def status() -> dict[str, Any]:
             "nasdaq": "Stooq ^NDX quote when available",
             "stablecoins_supply": "DeFiLlama stablecoins peggedUSD total when available",
             "absent_without_connector": [
-                "etf_flows",
                 "liquidations",
                 "exchange_reserves",
             ],
@@ -788,6 +950,7 @@ def run_model(payload: RunRequest) -> RunResponse:
         return cached
     response = build_run_response(payload)
     response_payload = response.model_dump() if hasattr(response, "model_dump") else response.dict()
+    attach_archive("/run", response_payload)
     cache_set(key, response_payload)
     return response_payload
 
@@ -868,6 +1031,7 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
             "not as deterministic price paths or financial advice."
         ),
     }
+    attach_archive("/multi-run", response_payload)
     cache_set(key, response_payload)
     return response_payload
 

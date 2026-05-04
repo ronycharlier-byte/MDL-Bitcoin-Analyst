@@ -37,61 +37,61 @@ Probabilistic quantitative infrastructure for Bitcoin scenario analysis, risk es
 
 ## Latest Export Snapshot
 
-- Generated report timestamp: 2026-05-04T19:45:12.996236+00:00.
-- Run ID: BTC_ensemble_20260504T194512Z_1a995520.
+- Generated report timestamp: 2026-05-04T20:16:00.068494+00:00.
+- Run ID: BTC_ensemble_20260504T201559Z_4bf56cd8.
 - Asset: BTC.
-- Horizon: 30 days.
-- Simulations: 2000.
+- Horizon: 7 days.
+- Simulations: 100.
 - Model: ensemble.
 - Market data status: real.
 - Market data source: Bitget BTCUSDT spot candles; live API runs also append the Bitget BTCUSDT spot ticker as the reference spot.
-- Fundamental data status: partial; live API runs may include real point-in-time funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq when sources respond.
-- Confidence score: 71/100.
+- Fundamental data status: partial; live API runs may include real point-in-time ETF flows, funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq when sources respond.
+- Confidence score: 76/100.
 
 ## Numeric Provenance Requirement
 
 Every precise figure from this model card must be cited with:
 
 - source: model_card.md or latest_report.md;
-- report timestamp: 2026-05-04T19:45:12.996236+00:00;
-- run ID: BTC_ensemble_20260504T194512Z_1a995520;
-- reference spot: $79,970.88 when price levels or returns are discussed;
+- report timestamp: 2026-05-04T20:16:00.068494+00:00;
+- run ID: BTC_ensemble_20260504T201559Z_4bf56cd8;
+- reference spot: $80,118.03 when price levels or returns are discussed;
 - status: real for market source and any returned live fundamentals, absent for missing fundamentals, inferred for simulations/risk/backtests.
 
 Do not reproduce precise figures from memory without provenance.
 
 ## Latest Distribution Snapshot
 
-- P10 return: -14.35%.
-- Median return: 1.55%.
-- P90 return: 20.93%.
-- P10 price: $68,493.40.
-- Median price: $81,208.07.
-- P90 price: $96,710.18.
+- P10 return: -6.64%.
+- Median return: 0.59%.
+- P90 return: 10.29%.
+- P10 price: $74,799.27.
+- Median price: $80,587.40.
+- P90 price: $88,362.58.
 
 These values are inferred from simulations and are not deterministic predictions.
 
 ## Latest Risk Snapshot
 
-- VaR 95 of simulated return, expressed as positive loss: 18.78%.
-- VaR 99 of simulated return, expressed as positive loss: 26.16%.
-- CVaR 95, average tail loss beyond VaR 95: 23.31%.
-- CVaR 99, average tail loss beyond VaR 99: 30.03%.
-- Expected max drawdown: -12.21%.
-- Conditional volatility: 34.96%.
+- VaR 95 of simulated return, expressed as positive loss: 8.44%.
+- VaR 99 of simulated return, expressed as positive loss: 11.60%.
+- CVaR 95, average tail loss beyond VaR 95: 10.91%.
+- CVaR 99, average tail loss beyond VaR 99: 14.49%.
+- Expected max drawdown: -5.27%.
+- Conditional volatility: 35.18%.
 
 ## Latest Regime Split
 
-- Bull: 11.05%.
-- Bear: 3.75%.
-- Range: 54.75%.
-- Non-classified / transition: 30.45%.
+- Bull: 2.00%.
+- Bear: 0.00%.
+- Range: 85.00%.
+- Non-classified / transition: 13.00%.
 
-Bull, bear, and range sum to 69.55%, not 100%. The split is incomplete and should be interpreted with caution.
+Bull, bear, and range sum to 87.00%, not 100%. The split is incomplete and should be interpreted with caution.
 
 ## Confidence Interpretation
 
-The confidence score is 71/100. This is moderate and constrained by:
+The confidence score is 76/100. This is moderate and constrained by:
 
 - partial or absent fundamental features;
 - wide P10-P90 interval;
@@ -100,7 +100,7 @@ The confidence score is 71/100. This is moderate and constrained by:
 
 Confidence is not a probability of being correct.
 
-Any directional conclusion must remain probabilistic and tied to the 30-day horizon.
+Any directional conclusion must remain probabilistic and tied to the 7-day horizon.
 
 ## Validation Snapshot
 
