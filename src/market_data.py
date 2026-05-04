@@ -498,6 +498,46 @@ def _fetch_fred_dgs10(logger) -> tuple[float | None, str | None]:
     return None, None
 
 
+def _fetch_treasury_10y_rate(logger) -> tuple[float | None, str | None]:
+    source_name = "treasury_daily_10y_yield_curve"
+    current_year = datetime.now(timezone.utc).year
+    for year in (current_year, current_year - 1):
+        url = (
+            "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
+            f"daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve"
+            f"&field_tdr_date_value={year}&page&_format=csv"
+        )
+        try:
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "quant-btc-model/1.0",
+                    "Accept": "text/csv",
+                    "Accept-Encoding": "identity",
+                    "Connection": "close",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=20) as response:
+                text = response.read().decode("utf-8", errors="ignore").strip()
+            rows = list(csv.DictReader(text.splitlines()))
+            for row in rows:
+                raw_value = (row.get("10 Yr") or "").strip()
+                if not raw_value:
+                    continue
+                value = float(raw_value)
+                logger.info(
+                    "fundamental_loaded | field=us_rates | source=%s | value=%s | date=%s",
+                    source_name,
+                    value,
+                    row.get("Date"),
+                )
+                return value, source_name
+            logger.warning("us_rates_absent | source=%s | year=%s | reason=no_numeric_10y", source_name, year)
+        except Exception as exc:
+            logger.warning("us_rates_fetch_failed | source=%s | year=%s | error=%s", source_name, year, exc)
+    return None, None
+
+
 def load_online_fundamental_snapshot(price_frame: pd.DataFrame, logger) -> tuple[dict[str, float], list[str]]:
     values: dict[str, float] = {}
     sources: list[str] = []
@@ -528,9 +568,11 @@ def load_online_fundamental_snapshot(price_frame: pd.DataFrame, logger) -> tuple
         sources.append(source or "stooq_dx_f_quote")
 
     us_rates, source = _fetch_fred_dgs10(logger)
+    if us_rates is None:
+        us_rates, source = _fetch_treasury_10y_rate(logger)
     if us_rates is not None:
         values["us_rates"] = us_rates
-        sources.append(source or "fred_dgs10_10y_treasury_rate")
+        sources.append(source or "official_10y_treasury_rate")
 
     nasdaq, source = _fetch_stooq_quote("%5Endx", "nasdaq", "stooq_ndx_quote", logger)
     if nasdaq is not None:

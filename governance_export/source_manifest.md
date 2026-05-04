@@ -46,7 +46,7 @@ These exclusions are intentional to keep GPT Custom Knowledge focused and lightw
 | Simulations | 2000 | inferred |
 | Model | ensemble | inferred |
 | Market source | bitget_btcusdt_spot_candles; live runs also append bitget_btcusdt_spot_ticker_realtime | real |
-| Fundamental source | bitget_current_fund_rate; bitget_open_interest; blockchain_info_hash_rate_chart; defillama_stablecoins_total_pegged_usd; stooq_dx_f_quote; fred_dgs10_10y_treasury_rate; stooq_ndx_quote; other fields absent | partial_real_absent |
+| Fundamental source | bitget_current_fund_rate; bitget_open_interest; blockchain_info_hash_rate_chart; defillama_stablecoins_total_pegged_usd; stooq_dx_f_quote; fred_dgs10_10y_treasury_rate or treasury_daily_10y_yield_curve; stooq_ndx_quote; other fields absent | partial_real_absent |
 | Confidence score | 71/100 | inferred |
 
 ## Corpus Pipeline Source Summary

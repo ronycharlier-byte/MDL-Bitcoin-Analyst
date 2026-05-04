@@ -76,7 +76,7 @@ Latest export status: partial_real_absent.
 | exchange_reserves | BTC reserves held on exchanges. | absent |
 | stablecoins_supply | Stablecoin supply/liquidity proxy. | real in live API when DeFiLlama provides it; absent otherwise |
 | dxy | US Dollar Index. | real in live API when Stooq provides it; absent otherwise |
-| us_rates | US 10Y Treasury rate proxy. | real in live API when FRED DGS10 provides it; absent otherwise |
+| us_rates | US 10Y Treasury rate proxy. | real in live API when FRED DGS10 or U.S. Treasury provides it; absent otherwise |
 | nasdaq | Nasdaq or risk-asset proxy. | real in live API when Stooq provides it; absent otherwise |
 
 GPT rule: do not invent or estimate absent fundamental fields unless clearly labelled as a hypothetical assumption. Treat partial online fundamentals as point-in-time snapshots, not complete historical series.
