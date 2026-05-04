@@ -1,17 +1,19 @@
 ﻿openapi: 3.1.0
 info:
   title: Quant BTC Model Bitget Bridge Worker
-  version: 1.6.0
-  description: Always-awake Cloudflare Worker facade for the Render Bitget-backed probabilistic BTC model. Outputs are probabilistic and must never be presented as certainty.
+  version: 1.7.0
+  description: Always-awake Cloudflare Worker facade for the Render Bitget-backed
+    probabilistic BTC model. Outputs are probabilistic and must never be presented
+    as certainty.
 servers:
-  - url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
+- url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
 paths:
   /health:
     get:
       operationId: health
       summary: Health check
       responses:
-        "200":
+        '200':
           description: Service health JSON.
           content:
             application/json:
@@ -34,7 +36,7 @@ paths:
       operationId: getQuantBtcLiteVersion
       summary: Return Cloudflare Worker version metadata
       responses:
-        "200":
+        '200':
           description: Version metadata JSON.
           content:
             application/json:
@@ -59,7 +61,7 @@ paths:
       operationId: getQuantBtcLiteStatus
       summary: Return Cloudflare Worker runtime status
       responses:
-        "200":
+        '200':
           description: Runtime status, sources and limitations JSON.
           content:
             application/json:
@@ -81,70 +83,69 @@ paths:
                     type: string
                 additionalProperties: true
   /run:
-    post:
+    get:
       operationId: runQuantBtcModel
       summary: Run the Bitget-backed BTC model through the Cloudflare bridge
-      description: Primary analysis operation. Default behavior with asset only is multi-frame [7,30,90,180,365]. Send horizon only for a single explicit horizon. No non-Bitget exchange fallback is used by the bridge.
-      requestBody:
+      description: Primary analysis operation. Default with asset only is multi-frame
+        [7,30,90,180,365]. Use query parameters; no requestBody is required.
+      parameters:
+      - name: asset
+        in: query
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - asset
-                - horizons
-                - simulations
-                - model
-              properties:
-                asset:
-                  type: string
-                  default: BTC
-                  description: Asset symbol. BTC is supported.
-                horizons:
-                  type: array
-                  default:
-                    - 7
-                    - 30
-                    - 90
-                    - 180
-                    - 365
-                  description: Use this for complete current BTC analysis. Send [7,30,90,180,365] for multi-frame output.
-                  items:
-                    type: integer
-                    minimum: 1
-                    maximum: 3650
-                horizon:
-                  type: integer
-                  minimum: 1
-                  maximum: 3650
-                  description: Optional single horizon in days. Do not send for complete analysis.
-                simulations:
-                  type: integer
-                  default: 2000
-                  minimum: 100
-                  maximum: 5000
-                  description: Requested simulations. Worker may cap this value to protect the free runtime CPU limit.
-                model:
-                  type: string
-                  default: ensemble
-                  enum:
-                    - ensemble
-                    - monte_carlo
-                    - student_t
-                    - student_t_model
-                    - jump_diffusion
-                    - garch
-                    - garch_model
-                    - regime_switching
-                    - liquidation
-                    - liquidation_model
-                    - correlation
-                    - correlation_model
-                  description: Render model name. Use ensemble by default.
+        description: Asset symbol. BTC is supported.
+        schema:
+          type: string
+          default: BTC
+      - name: horizons
+        in: query
+        required: false
+        description: Comma-separated horizons for complete multi-frame analysis. Use
+          7,30,90,180,365.
+        schema:
+          type: string
+          default: 7,30,90,180,365
+      - name: simulations
+        in: query
+        required: false
+        description: Requested simulations. Worker may cap this value.
+        schema:
+          type: integer
+          default: 2000
+          minimum: 100
+          maximum: 5000
+      - name: model
+        in: query
+        required: false
+        description: Render model name. Use ensemble by default.
+        schema:
+          type: string
+          default: ensemble
+          enum:
+          - ensemble
+          - monte_carlo
+          - student_t
+          - student_t_model
+          - jump_diffusion
+          - garch
+          - garch_model
+          - regime_switching
+          - liquidation
+          - liquidation_model
+          - correlation
+          - correlation_model
+      - name: horizon
+        in: query
+        required: false
+        description: Optional single horizon. Leave absent for complete multi-frame
+          analysis.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 3650
       responses:
-        "200":
-          description: Probabilistic Bitget-backed JSON result with provenance, statuses, distribution, regime residual, risk metrics, confidence and warnings.
+        '200':
+          description: Probabilistic Bitget-backed JSON result with provenance, statuses,
+            distribution, regime residual, risk metrics, confidence and warnings.
           content:
             application/json:
               schema:
@@ -201,7 +202,7 @@ paths:
                   warning:
                     type: string
                 additionalProperties: true
-        "500":
+        '500':
           description: Bitget bridge run failed JSON.
           content:
             application/json:
@@ -218,7 +219,7 @@ paths:
                   warning:
                     type: string
                 additionalProperties: true
-        "429":
+        '429':
           description: Public endpoint rate limit reached JSON.
           content:
             application/json:
@@ -239,57 +240,71 @@ paths:
                     type: string
                 additionalProperties: true
   /multiRun:
-    post:
+    get:
       operationId: runQuantBtcMultiFrame
-      summary: Run the Bitget-backed BTC model across multiple horizons through the Cloudflare bridge
-      description: Calls the Render Python multi-frame engine through Cloudflare and preserves Bitget as the required market source. No non-Bitget exchange fallback is used by the bridge.
-      requestBody:
+      summary: Run the Bitget-backed BTC model across multiple horizons through the
+        Cloudflare bridge
+      description: Multi-frame alias. Prefer runQuantBtcModel if this operation is
+        not visible in GPT Actions.
+      parameters:
+      - name: asset
+        in: query
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - asset
-                - horizons
-              properties:
-                asset:
-                  type: string
-                  default: BTC
-                  description: Asset symbol. BTC is supported.
-                horizons:
-                  type: array
-                  description: Horizon frames in days.
-                  items:
-                    type: integer
-                    minimum: 1
-                    maximum: 3650
-                simulations:
-                  type: integer
-                  default: 2000
-                  minimum: 100
-                  maximum: 5000
-                  description: Requested simulations per horizon. Worker may cap this value.
-                model:
-                  type: string
-                  default: ensemble
-                  enum:
-                    - ensemble
-                    - monte_carlo
-                    - student_t
-                    - student_t_model
-                    - jump_diffusion
-                    - garch
-                    - garch_model
-                    - regime_switching
-                    - liquidation
-                    - liquidation_model
-                    - correlation
-                    - correlation_model
-                  description: Render model name. Use ensemble by default.
+        description: Asset symbol. BTC is supported.
+        schema:
+          type: string
+          default: BTC
+      - name: horizons
+        in: query
+        required: false
+        description: Comma-separated horizons for complete multi-frame analysis. Use
+          7,30,90,180,365.
+        schema:
+          type: string
+          default: 7,30,90,180,365
+      - name: simulations
+        in: query
+        required: false
+        description: Requested simulations. Worker may cap this value.
+        schema:
+          type: integer
+          default: 2000
+          minimum: 100
+          maximum: 5000
+      - name: model
+        in: query
+        required: false
+        description: Render model name. Use ensemble by default.
+        schema:
+          type: string
+          default: ensemble
+          enum:
+          - ensemble
+          - monte_carlo
+          - student_t
+          - student_t_model
+          - jump_diffusion
+          - garch
+          - garch_model
+          - regime_switching
+          - liquidation
+          - liquidation_model
+          - correlation
+          - correlation_model
+      - name: horizon
+        in: query
+        required: false
+        description: Optional single horizon. Leave absent for complete multi-frame
+          analysis.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 3650
       responses:
-        "200":
-          description: Multi-frame probabilistic Bitget-backed JSON result with shared provenance, frame summaries, full frames, data statuses, confidence and warnings.
+        '200':
+          description: Multi-frame probabilistic Bitget-backed JSON result with shared
+            provenance, frame summaries, full frames, data statuses, confidence and
+            warnings.
           content:
             application/json:
               schema:
@@ -327,7 +342,7 @@ paths:
                     type: object
                     additionalProperties: true
                 additionalProperties: true
-        "500":
+        '500':
           description: Multi-frame Bitget bridge run failed JSON.
           content:
             application/json:
@@ -344,7 +359,7 @@ paths:
                   warning:
                     type: string
                 additionalProperties: true
-        "429":
+        '429':
           description: Public endpoint rate limit reached JSON.
           content:
             application/json:
@@ -369,8 +384,9 @@ paths:
       operationId: latestQuantBtcReport
       summary: Return latest report status
       responses:
-        "200":
-          description: Stateless Worker note. Call /run for a fresh probabilistic result.
+        '200':
+          description: Stateless Worker note. Call /run for a fresh probabilistic
+            result.
           content:
             application/json:
               schema:

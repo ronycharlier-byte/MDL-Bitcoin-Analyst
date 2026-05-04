@@ -61,8 +61,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.6.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.6.0";
+const WORKER_VERSION = "1.7.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.7.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -160,12 +160,12 @@ export default {
         return json(withBridgeMetadata(result, "/latest", env));
       }
 
-      if (url.pathname === "/run" && request.method === "POST") {
+      if (url.pathname === "/run" && (request.method === "POST" || request.method === "GET")) {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
         }
-        const input = await readJson(request);
+        const input = await readInput(request, url);
         if (shouldRouteRunAsMultiFrame(input)) {
           const body = normalizeRenderMultiRunPayload(input, env);
           const result = await proxyRenderPost("/multi-run", body, env);
@@ -176,12 +176,12 @@ export default {
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
-      if ((url.pathname === "/multi-run" || url.pathname === "/multiRun") && request.method === "POST") {
+      if ((url.pathname === "/multi-run" || url.pathname === "/multiRun") && (request.method === "POST" || request.method === "GET")) {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
         }
-        const body = normalizeRenderMultiRunPayload(await readJson(request), env);
+        const body = normalizeRenderMultiRunPayload(await readInput(request, url), env);
         const result = await proxyRenderPost("/multi-run", body, env);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
@@ -212,6 +212,23 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
   } catch {
     return {};
   }
+}
+
+async function readInput(request: Request, url: URL): Promise<Record<string, unknown>> {
+  if (request.method !== "GET") {
+    return await readJson(request);
+  }
+  const input: Record<string, unknown> = {};
+  for (const [key, value] of url.searchParams.entries()) {
+    if (key === "horizons") {
+      input.horizons = value.split(",").map((item) => Number(item.trim())).filter(Number.isFinite);
+    } else if (key === "horizon" || key === "simulations") {
+      input[key] = Number(value);
+    } else {
+      input[key] = value;
+    }
+  }
+  return input;
 }
 
 function getRenderApiBase(env: Env): string {
