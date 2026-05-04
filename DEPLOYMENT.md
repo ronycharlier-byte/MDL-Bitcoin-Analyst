@@ -35,12 +35,44 @@ This repo includes `render.yaml`.
 3. Set `QUANT_API_KEY`.
 4. Deploy.
 
+Render free services can sleep. Use Render only for the full Python/Docker engine when sleeping is acceptable or when the service is on a paid no-sleep plan.
+
+## Cloudflare Worker no-sleep option
+
+Use this for the GPT Custom endpoint when the backend must not sleep and must stay free.
+
+Important scope:
+
+- Cloudflare Worker runs `quant-lite`, not the full Python/numpy engine.
+- It fetches real BTCUSDT spot candles from Bitget.
+- Simulation outputs, risk metrics and stress tests are `inferred`.
+- Fundamental variables and the corpus knowledge base are `absent` unless a future Cloudflare storage binding is added.
+- It caps simulations to protect the free Worker CPU limit.
+
+Deploy:
+
+```powershell
+cd cloudflare-worker
+npm install
+npx wrangler login
+npm run deploy
+```
+
+After deployment:
+
+1. Copy the generated `workers.dev` URL.
+2. Replace `YOUR_WORKERS_SUBDOMAIN` in `cloudflare-worker/gpt_action_openapi.cloudflare.yaml`.
+3. Upload that schema into GPT Custom Actions.
+4. Keep the governance export files in the GPT Knowledge.
+
 ## GPT Custom Action
 
 1. Deploy the API.
 2. Copy the deployed URL into `gpt_action_openapi.yaml`.
 3. Upload the schema into GPT Custom Actions.
-4. Configure API key auth with the same `QUANT_API_KEY`.
+4. For Render with `QUANT_API_KEY`, configure API key auth with the same value.
+
+For a public no-sleep GPT Action, prefer `cloudflare-worker/gpt_action_openapi.cloudflare.yaml`.
 
 ## Other Docker Platforms
 

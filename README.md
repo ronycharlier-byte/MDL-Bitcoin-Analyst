@@ -46,6 +46,31 @@ python src/main.py --asset BTC --horizon 365 --simulations 200000 --model ensemb
 python src/main.py --asset BTC --horizon 365 --simulations 200000 --model ensemble --skip-corpus
 ```
 
+## Always-awake GPT endpoint
+
+The full Python API can run on Render/Fly/Railway/Cloud Run, but free Render services may sleep. For a free endpoint that does not sleep, this repo includes a Cloudflare Worker:
+
+```powershell
+cd cloudflare-worker
+npm install
+npx wrangler login
+npm run deploy
+```
+
+Worker scope:
+
+- `quant-lite` TypeScript model, not the full Python/numpy engine.
+- Real market prices from Bitget BTCUSDT spot candles.
+- Simulation outputs, risk metrics and stress tests tagged as inferred.
+- Fundamentals, corpus KB and full backtest artifacts tagged as absent.
+- Simulation count capped for the free Worker runtime.
+
+GPT Action schema:
+
+```text
+cloudflare-worker/gpt_action_openapi.cloudflare.yaml
+```
+
 ## Data policy
 
 - No source file outside `quant_btc_model` is modified.

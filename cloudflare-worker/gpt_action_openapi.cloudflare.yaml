@@ -1,0 +1,75 @@
+openapi: 3.1.0
+info:
+  title: Quant BTC Model Lite Worker
+  version: 1.0.0
+  description: Always-awake Cloudflare Worker endpoint for probabilistic BTC quant-lite runs. Outputs are probabilistic and must never be presented as certainty.
+servers:
+  - url: https://quant-btc-model-lite.YOUR_WORKERS_SUBDOMAIN.workers.dev
+    description: Replace with the deployed Cloudflare Workers URL.
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Health check
+      responses:
+        "200":
+          description: Service health.
+  /run:
+    post:
+      operationId: runQuantBtcModel
+      summary: Run the always-awake BTC quant-lite model
+      description: Produces probabilistic distributions, threshold probabilities, risk metrics, stress scenarios and provenance using recent Bitget BTCUSDT spot candles. This is a lightweight Worker runtime, not the full Python engine.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - asset
+                - horizon
+                - simulations
+                - model
+              properties:
+                asset:
+                  type: string
+                  default: BTC
+                  description: Asset symbol. BTC is supported.
+                horizon:
+                  type: integer
+                  default: 365
+                  minimum: 1
+                  maximum: 3650
+                simulations:
+                  type: integer
+                  default: 2000
+                  minimum: 100
+                  maximum: 5000
+                  description: Requested simulations. Worker may cap this value to protect the free runtime CPU limit.
+                model:
+                  type: string
+                  default: quant_lite
+                  enum:
+                    - quant_lite
+                    - ensemble
+      responses:
+        "200":
+          description: Probabilistic quant-lite JSON result with provenance, statuses, distribution, regime residual, risk metrics, confidence and warnings.
+        "400":
+          description: Invalid request.
+        "500":
+          description: Quant-lite run failed.
+  /latest:
+    get:
+      operationId: latestQuantBtcReport
+      summary: Return latest report status
+      responses:
+        "200":
+          description: Stateless Worker note. Call /run for a fresh probabilistic result.
+components:
+  schemas:
+    Placeholder:
+      type: object
+      properties:
+        ok:
+          type: boolean

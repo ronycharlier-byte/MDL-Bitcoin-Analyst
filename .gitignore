@@ -17,3 +17,6 @@ logs/*
 *.zip
 *.sqlite
 *.db
+cloudflare-worker/node_modules/
+cloudflare-worker/.wrangler/
+cloudflare-worker/dist/
