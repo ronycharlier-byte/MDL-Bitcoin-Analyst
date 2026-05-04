@@ -1,0 +1,24 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: quant-btc-model-api
+spec:
+  template:
+    spec:
+      timeoutSeconds: 300
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/quant-btc-model-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PORT
+              value: "8000"
+            - name: MAX_API_SIMULATIONS
+              value: "250000"
+            - name: RUN_TIMEOUT_SECONDS
+              value: "280"
+            - name: QUANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: quant-api-key
+                  key: latest

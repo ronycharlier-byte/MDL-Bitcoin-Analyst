@@ -1,0 +1,108 @@
+openapi: 3.1.0
+info:
+  title: Quant BTC Model API
+  version: 1.0.0
+  description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions.
+servers:
+  - url: https://YOUR-RENDER-SERVICE.onrender.com
+    description: Replace with your deployed Render service URL.
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Health check
+      responses:
+        "200":
+          description: Service health.
+          content:
+            application/json:
+              schema:
+                type: object
+  /run:
+    post:
+      operationId: runQuantBtcModel
+      summary: Run the probabilistic BTC model.
+      description: Produces probabilities, distributions, risk metrics, stress tests and provenance. Never returns deterministic advice.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                asset:
+                  type: string
+                  default: BTC
+                horizon:
+                  type: integer
+                  default: 365
+                  minimum: 1
+                  maximum: 3650
+                simulations:
+                  type: integer
+                  default: 200000
+                  minimum: 100
+                  maximum: 250000
+                model:
+                  type: string
+                  default: ensemble
+                  enum:
+                    - ensemble
+                    - monte_carlo
+                    - student_t
+                    - jump_diffusion
+                    - garch
+                    - regime_switching
+                    - liquidation
+                    - correlation
+                skip_corpus:
+                  type: boolean
+                  default: true
+                no_online:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Probabilistic model result with provenance.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  provenance:
+                    type: object
+                  data_status:
+                    type: object
+                  distribution:
+                    type: object
+                  regime_distribution:
+                    type: object
+                  risk_metrics:
+                    type: object
+                  confidence:
+                    type: object
+                  warning:
+                    type: string
+        "401":
+          description: Missing or invalid API key.
+        "500":
+          description: Model run failed.
+  /latest:
+    get:
+      operationId: latestQuantBtcReport
+      summary: Return latest generated report artifacts.
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Latest report and dashboard markdown.
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key

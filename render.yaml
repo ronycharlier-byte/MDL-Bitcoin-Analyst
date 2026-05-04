@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: quant-btc-model-api
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: MAX_API_SIMULATIONS
+        value: "250000"
+      - key: RUN_TIMEOUT_SECONDS
+        value: "280"
+      - key: QUANT_API_KEY
+        sync: false
