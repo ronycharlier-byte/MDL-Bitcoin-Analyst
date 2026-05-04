@@ -82,7 +82,7 @@ When relevant, state these limits explicitly:
 
 - Future BTC returns can depart sharply from historical calibration.
 - Regime shifts, liquidity shocks, exchange outages, regulatory decisions, ETF flow shocks, macro repricing, and liquidation cascades can invalidate assumptions.
-- Fundamental fields are absent in the latest export unless separately supplied.
+- Fundamental coverage is partial. Missing fields remain absent unless separately supplied or explicitly returned by the live API.
 
 ## Live API Governance
 
@@ -103,7 +103,7 @@ When relevant, state these limits explicitly:
 
 Default live frames are 7, 30, 90, 180 and 365 days. Each numeric value must remain attached to its frame.
 
-Current online fundamental coverage is partial. Funding rate, open interest, DXY and Nasdaq may be real when the API provides them. ETF flows, liquidations, hash rate, exchange reserves, stablecoin supply and US rates remain absent unless supplied by a connected source or user file.
+Current online fundamental coverage is partial. Funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq may be real when the API provides them. ETF flows, liquidations and exchange reserves remain absent unless supplied by a connected source or user file.
 
 If rate limit 429 is returned, the GPT must not loop retries. It must report temporary rate limiting and keep the answer qualitative unless a valid run result is available.
 

@@ -39,23 +39,23 @@ These exclusions are intentional to keep GPT Custom Knowledge focused and lightw
 
 | Item | Value | Status |
 |---|---|---|
-| Run ID | BTC_ensemble_20260504T131721Z_26e52ae0 | inferred |
-| Report timestamp | 2026-05-04T13:17:22.171207+00:00 | inferred |
+| Run ID | BTC_ensemble_20260504T194512Z_1a995520 | inferred |
+| Report timestamp | 2026-05-04T19:45:12.996236+00:00 | inferred |
 | Asset | BTC | real |
-| Horizon | 365 days | inferred |
-| Simulations | 5000 | inferred |
+| Horizon | 30 days | inferred |
+| Simulations | 2000 | inferred |
 | Model | ensemble | inferred |
 | Market source | bitget_btcusdt_spot_candles; live runs also append bitget_btcusdt_spot_ticker_realtime | real |
-| Fundamental source | bitget_current_fund_rate; bitget_open_interest; stooq_dx_f_quote; stooq_ndx_quote; other fields absent | partial_real_absent |
-| Confidence score | 42/100 | inferred |
+| Fundamental source | bitget_current_fund_rate; bitget_open_interest; blockchain_info_hash_rate_chart; defillama_stablecoins_total_pegged_usd; stooq_dx_f_quote; fred_dgs10_10y_treasury_rate; stooq_ndx_quote; other fields absent | partial_real_absent |
+| Confidence score | 71/100 | inferred |
 
 ## Corpus Pipeline Source Summary
 
 | Item | Count / Value |
 |---|---:|
 | Copied documents | 100 |
-| Chunks | 165 |
-| Claims | 39 |
+| Chunks | 168 |
+| Claims | 61 |
 | Reliability default | unknown |
 | Originals modified | false |
 
@@ -95,7 +95,7 @@ Latest numeric provenance:
 
 | Source file | Report date | Run ID | Reference spot | Status mix |
 |---|---|---|---:|---|
-| latest_report.md | 2026-05-04T13:17:22.171207+00:00 | BTC_ensemble_20260504T131721Z_26e52ae0 | $78,912.63 | prices real; simulations inferred; fundamentals partial_real_absent |
+| latest_report.md | 2026-05-04T19:45:12.996236+00:00 | BTC_ensemble_20260504T194512Z_1a995520 | $79,970.88 | prices real; simulations inferred; fundamentals partial_real_absent |
 
 Live Action provenance requirements:
 
@@ -119,7 +119,7 @@ No-sleep Cloudflare Worker requirements:
 - Default fresh analysis route: `getQuantBtcLiteStatus` then `runQuantBtcMultiFrame` with 7, 30, 90, 180 and 365 day horizons.
 - Required bridge fields when present: `cloudflare_bridge.mode`, `cloudflare_bridge.source_policy`, `cloudflare_bridge.render_api_base`.
 - Primary market source remains Bitget through Render. If the bridge fails, live output is absent.
-- Fundamental fields follow the Render response: funding rate, open interest, DXY and Nasdaq may be real when reachable; ETF flows, liquidations, hash rate, exchange reserves, stablecoins supply and US rates are absent unless explicitly present.
+- Fundamental fields follow the Render response: funding rate, open interest, hash rate, stablecoin supply, DXY, US rates and Nasdaq may be real when reachable; ETF flows, liquidations and exchange reserves are absent unless explicitly present.
 - Public rate limit is best-effort per IP / Worker isolate. A 429 response means no live model output was produced.
 
 ## Known Coherence Note

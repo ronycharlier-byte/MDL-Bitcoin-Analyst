@@ -389,7 +389,15 @@ def _fetch_bitget_open_interest(logger) -> tuple[float | None, str | None]:
 def _fetch_stooq_quote(symbol: str, field_name: str, source_name: str, logger) -> tuple[float | None, str | None]:
     url = f"https://stooq.com/q/l/?s={symbol}&i=d"
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "quant-btc-model/1.0"})
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "quant-btc-model/1.0",
+                "Accept": "text/csv",
+                "Accept-Encoding": "identity",
+                "Connection": "close",
+            },
+        )
         with urllib.request.urlopen(request, timeout=10) as response:
             text = response.read().decode("utf-8", errors="ignore").strip()
         rows = list(csv.reader(text.splitlines()))
@@ -407,6 +415,89 @@ def _fetch_stooq_quote(symbol: str, field_name: str, source_name: str, logger) -
     return None, None
 
 
+def _fetch_blockchain_hash_rate(logger) -> tuple[float | None, str | None]:
+    url = "https://api.blockchain.info/charts/hash-rate?timespan=30days&format=json"
+    source_name = "blockchain_info_hash_rate_chart"
+    try:
+        payload = _request_json(url, timeout=10)
+        values = (payload or {}).get("values") or []
+        for row in reversed(values):
+            value = row.get("y")
+            if value is not None:
+                numeric_value = float(value)
+                logger.info("fundamental_loaded | field=hash_rate | source=%s | value=%s", source_name, numeric_value)
+                return numeric_value, source_name
+        logger.warning("hash_rate_absent | source=%s | reason=no_numeric_value", source_name)
+    except Exception as exc:
+        logger.warning("hash_rate_fetch_failed | source=%s | error=%s", source_name, exc)
+    return None, None
+
+
+def _fetch_defillama_stablecoins_supply(logger) -> tuple[float | None, str | None]:
+    url = "https://stablecoins.llama.fi/stablecoins?includePrices=true"
+    source_name = "defillama_stablecoins_total_pegged_usd"
+    try:
+        payload = _request_json(url, timeout=15)
+        assets = (payload or {}).get("peggedAssets") or []
+        total = 0.0
+        count = 0
+        for asset in assets:
+            value = (asset.get("circulating") or {}).get("peggedUSD")
+            if value is None:
+                continue
+            try:
+                total += float(value)
+                count += 1
+            except (TypeError, ValueError):
+                continue
+        if count and total > 0:
+            logger.info(
+                "fundamental_loaded | field=stablecoins_supply | source=%s | value=%s | assets=%s",
+                source_name,
+                total,
+                count,
+            )
+            return total, source_name
+        logger.warning("stablecoins_supply_absent | source=%s | reason=no_numeric_supply", source_name)
+    except Exception as exc:
+        logger.warning("stablecoins_supply_fetch_failed | source=%s | error=%s", source_name, exc)
+    return None, None
+
+
+def _fetch_fred_dgs10(logger) -> tuple[float | None, str | None]:
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
+    source_name = "fred_dgs10_10y_treasury_rate"
+    try:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "quant-btc-model/1.0",
+                "Accept": "text/csv",
+                "Accept-Encoding": "identity",
+                "Connection": "close",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            text = response.read().decode("utf-8", errors="ignore").strip()
+        rows = list(csv.DictReader(text.splitlines()))
+        for row in reversed(rows):
+            raw_value = (row.get("DGS10") or "").strip()
+            if not raw_value or raw_value == ".":
+                continue
+            value = float(raw_value)
+            logger.info(
+                "fundamental_loaded | field=us_rates | source=%s | value=%s | date=%s",
+                source_name,
+                value,
+                row.get("observation_date"),
+            )
+            return value, source_name
+        logger.warning("us_rates_absent | source=%s | reason=no_numeric_dgs10", source_name)
+    except Exception as exc:
+        logger.warning("us_rates_fetch_failed | source=%s | error=%s", source_name, exc)
+    return None, None
+
+
 def load_online_fundamental_snapshot(price_frame: pd.DataFrame, logger) -> tuple[dict[str, float], list[str]]:
     values: dict[str, float] = {}
     sources: list[str] = []
@@ -421,10 +512,25 @@ def load_online_fundamental_snapshot(price_frame: pd.DataFrame, logger) -> tuple
         values["open_interest"] = open_interest
         sources.append(source or "bitget_open_interest")
 
+    hash_rate, source = _fetch_blockchain_hash_rate(logger)
+    if hash_rate is not None:
+        values["hash_rate"] = hash_rate
+        sources.append(source or "blockchain_info_hash_rate_chart")
+
+    stablecoins_supply, source = _fetch_defillama_stablecoins_supply(logger)
+    if stablecoins_supply is not None:
+        values["stablecoins_supply"] = stablecoins_supply
+        sources.append(source or "defillama_stablecoins_total_pegged_usd")
+
     dxy, source = _fetch_stooq_quote("dx.f", "dxy", "stooq_dx_f_quote", logger)
     if dxy is not None:
         values["dxy"] = dxy
         sources.append(source or "stooq_dx_f_quote")
+
+    us_rates, source = _fetch_fred_dgs10(logger)
+    if us_rates is not None:
+        values["us_rates"] = us_rates
+        sources.append(source or "fred_dgs10_10y_treasury_rate")
 
     nasdaq, source = _fetch_stooq_quote("%5Endx", "nasdaq", "stooq_ndx_quote", logger)
     if nasdaq is not None:

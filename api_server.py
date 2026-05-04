@@ -32,9 +32,9 @@ DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
-API_VERSION = "1.3.0"
+API_VERSION = "1.3.1"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.3.0"
+SCHEMA_VERSION = "gpt_action_schema_v1.3.1"
 
 
 def resolve_git_commit() -> str:
@@ -691,15 +691,15 @@ def status() -> dict[str, Any]:
             "btc_spot": "Bitget BTCUSDT spot ticker and candles",
             "funding_rate": "Bitget current funding rate when available",
             "open_interest": "Bitget open interest when available",
+            "hash_rate": "Blockchain.com hash-rate chart when available",
             "dxy": "Stooq DX.F quote when available",
+            "us_rates": "FRED DGS10 10Y Treasury rate when available",
             "nasdaq": "Stooq ^NDX quote when available",
+            "stablecoins_supply": "DeFiLlama stablecoins peggedUSD total when available",
             "absent_without_connector": [
                 "etf_flows",
                 "liquidations",
-                "hash_rate",
                 "exchange_reserves",
-                "stablecoins_supply",
-                "us_rates",
             ],
         },
         "runtime_controls": {
