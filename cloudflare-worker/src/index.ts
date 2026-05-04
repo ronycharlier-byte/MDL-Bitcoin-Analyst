@@ -61,8 +61,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.5.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.5.0";
+const WORKER_VERSION = "1.6.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.6.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -166,7 +166,7 @@ export default {
           return json(rateLimitResponse(rateLimit), 429);
         }
         const input = await readJson(request);
-        if (Array.isArray(input.horizons)) {
+        if (shouldRouteRunAsMultiFrame(input)) {
           const body = normalizeRenderMultiRunPayload(input, env);
           const result = await proxyRenderPost("/multi-run", body, env);
           return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
@@ -265,6 +265,16 @@ function normalizeRenderModel(value: unknown): string {
     "correlation_model"
   ]);
   return allowed.has(model) ? model : "ensemble";
+}
+
+function shouldRouteRunAsMultiFrame(input: Record<string, unknown>): boolean {
+  if (Array.isArray(input.horizons)) {
+    return true;
+  }
+  if (input.horizon === undefined || input.horizon === null || input.horizon === "") {
+    return true;
+  }
+  return false;
 }
 
 async function proxyRenderGet(path: string, env: Env): Promise<Record<string, unknown>> {

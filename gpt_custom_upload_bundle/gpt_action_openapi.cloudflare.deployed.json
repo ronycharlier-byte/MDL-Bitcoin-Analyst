@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quant BTC Model Bitget Bridge Worker",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "description": "Always-awake Cloudflare Worker facade for the Render Bitget-backed probabilistic BTC model. Outputs are probabilistic and must never be presented as certainty."
   },
   "servers": [
@@ -130,7 +130,7 @@
       "post": {
         "operationId": "runQuantBtcModel",
         "summary": "Run the Bitget-backed BTC model through the Cloudflare bridge",
-        "description": "Primary analysis operation. For complete or multi-frame analysis, send horizons [7,30,90,180,365] in this operation. For a single explicit horizon only, send horizon. No non-Bitget exchange fallback is used by the bridge.",
+        "description": "Primary analysis operation. Default behavior with asset only is multi-frame [7,30,90,180,365]. Send horizon only for a single explicit horizon. No non-Bitget exchange fallback is used by the bridge.",
         "requestBody": {
           "required": true,
           "content": {
@@ -138,7 +138,10 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "asset"
+                  "asset",
+                  "horizons",
+                  "simulations",
+                  "model"
                 ],
                 "properties": {
                   "asset": {
@@ -166,7 +169,7 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 3650,
-                    "description": "Single horizon in days. Use only when the user asks for one explicit horizon; do not use for complete analysis."
+                    "description": "Optional single horizon in days. Do not send for complete analysis."
                   },
                   "simulations": {
                     "type": "integer",

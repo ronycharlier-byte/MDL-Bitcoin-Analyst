@@ -28,6 +28,7 @@ Live analysis rule:
 - The Cloudflare schema bridges to Render so Bitget remains the required source.
 - Do not substitute any non-Bitget exchange if the Bitget bridge fails.
 - Use `runQuantBtcModel` with `horizons: [7, 30, 90, 180, 365]` for complete current BTC analysis. Do not use `horizon: 365` for a multi-frame request.
+- If the GPT Actions UI only exposes `asset`, call `runQuantBtcModel` with `asset: BTC`; `/run` defaults to the 5-frame result when no `horizon` is sent.
 - `runQuantBtcMultiFrame` may be used if the GPT Actions UI exposes it, but it is optional because `/run` supports multi-frame routing.
 - Use `runQuantBtcModel` for one explicit horizon.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.

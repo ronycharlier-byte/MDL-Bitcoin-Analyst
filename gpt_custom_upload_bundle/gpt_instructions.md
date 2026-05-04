@@ -13,7 +13,7 @@ Default flow:
 - If the user gives one explicit horizon only, call `runQuantBtcModel` with `horizon`.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 
-Exact default multi-frame payload for `runQuantBtcModel`: `asset=BTC`, `horizons=[7,30,90,180,365]`, `simulations=2000`, `model=ensemble`.
+Exact default multi-frame payload for `runQuantBtcModel`: `asset=BTC`, `horizons=[7,30,90,180,365]`, `simulations=2000`, `model=ensemble`. If the Action UI only allows `asset`, still call it: `/run` defaults to the 5-frame result when `horizon` is absent.
 
 Do not answer a requested multi-frame analysis after only 1 or 2 single-horizon runs. For a 5-frame request, the live response must contain all requested horizons, or you must explicitly say which API call failed. Never mark 90/180/365 as absent merely because you did not call them.
 
