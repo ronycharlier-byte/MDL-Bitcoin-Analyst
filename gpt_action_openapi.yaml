@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions.
 servers:
-  - url: https://YOUR-RENDER-SERVICE.onrender.com
-    description: Replace with your deployed Render service URL.
+  - url: https://quant-btc-model-api.onrender.com
+    description: Render deployment.
 paths:
   /health:
     get:
