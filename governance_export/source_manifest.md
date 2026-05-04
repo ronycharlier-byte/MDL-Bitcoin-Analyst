@@ -116,8 +116,9 @@ No-sleep Cloudflare Worker requirements:
 - Schema file: `gpt_action_openapi.cloudflare.deployed.yaml`.
 - Runtime: Cloudflare Worker bridge to the Render Bitget-backed Python engine.
 - Source policy: Bitget required, no non-Bitget exchange fallback for live model conclusions.
-- Operations: `health`, `getQuantBtcLiteVersion`, `getQuantBtcLiteStatus`, `runQuantBtcModel`, `runQuantBtcMultiFrame`, `latestQuantBtcReport`.
-- Default fresh analysis route: `getQuantBtcLiteStatus` then `runQuantBtcMultiFrame` with 7, 30, 90, 180 and 365 day horizons.
+- Operations: `health`, `getQuantBtcLiteVersion`, `getQuantBtcLiteStatus`, `auditQuantBtcLiteSystem`, `runQuantBtcModel`, `runQuantBtcMultiFrame`, `latestQuantBtcReport`.
+- Default fresh analysis route: `auditQuantBtcLiteSystem` then `runQuantBtcMultiFrame` with 7, 30, 90, 180 and 365 day horizons.
+- Audit output is preflight governance only; do not treat it as a forecast.
 - Required bridge fields when present: `cloudflare_bridge.mode`, `cloudflare_bridge.source_policy`, `cloudflare_bridge.render_api_base`.
 - Primary market source remains Bitget through Render. If the bridge fails, live output is absent.
 - Fundamental fields follow the Render response: ETF flows, funding rate, open interest, hash rate, exchange reserves, stablecoin supply, DXY, US rates and Nasdaq may be real when reachable. Liquidations are real only when the Bitget public WebSocket emits a BTCUSDT push during the configured observation window; otherwise they are absent.

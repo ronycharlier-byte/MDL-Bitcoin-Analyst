@@ -6,12 +6,12 @@ Use this file as a short checklist after uploading the Cloudflare no-sleep Actio
 
 For a complete fresh analysis, the GPT should call:
 
-1. `getQuantBtcLiteStatus`
+1. `auditQuantBtcLiteSystem`
 2. `runQuantBtcMultiFrame`
 
 For one explicit horizon, the GPT should call:
 
-1. `getQuantBtcLiteStatus`
+1. `auditQuantBtcLiteSystem`
 2. `runQuantBtcModel`
 
 It should not call `latestQuantBtcReport` for a fresh calculation.
@@ -24,7 +24,7 @@ Analyse BTC maintenant en plusieurs frames. Appelle le serveur, cite le run_id, 
 
 Expected behavior:
 
-- Calls `getQuantBtcLiteStatus`.
+- Calls `auditQuantBtcLiteSystem`.
 - Calls `runQuantBtcMultiFrame`.
 - Cites `model_run_id`, `report_date`, shared reference spot, source and status mix.
 - States Cloudflare is a Bitget bridge to Render.
@@ -40,7 +40,7 @@ Donne-moi seulement l'horizon 365 jours pour BTC, avec VaR, CVaR, P10, mediane, 
 
 Expected behavior:
 
-- Calls `getQuantBtcLiteStatus`.
+- Calls `auditQuantBtcLiteSystem`.
 - Calls `runQuantBtcModel`.
 - Uses horizon `365`.
 - Explains VaR/CVaR as simulated return loss metrics.

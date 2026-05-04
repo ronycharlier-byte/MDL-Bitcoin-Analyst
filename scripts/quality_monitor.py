@@ -12,7 +12,7 @@ from typing import Any
 
 CF_BASE = os.getenv("CF_BASE", "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev").rstrip("/")
 RENDER_BASE = os.getenv("RENDER_BASE", "https://quant-btc-model-api.onrender.com").rstrip("/")
-MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.5.0")
+MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.6.0")
 EXPECTED_HORIZONS = [7, 30, 90, 180, 365]
 REQUIRED_REAL_FIELDS = {
     item.strip()
@@ -83,6 +83,7 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     cf_health = fetch_json(f"{CF_BASE}/health", timeout=60)
     cf_version = fetch_json(f"{CF_BASE}/version", timeout=60)
     cf_status = fetch_json(f"{CF_BASE}/status", timeout=60)
+    audit = fetch_json(f"{CF_BASE}/audit", timeout=120)
     run = fetch_json(f"{CF_BASE}/run?asset=BTC", timeout=240)
 
     require(render_health.get("status") == "ok", "Render health is not ok", render_health)
@@ -122,6 +123,11 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
         bridge,
     )
 
+    require(audit.get("status") == "ok", "Audit endpoint status is not ok", audit)
+    require(audit.get("ready_for_gpt_live_analysis") is True, "Audit endpoint is not ready for GPT live analysis", audit)
+    require(audit.get("source_policy") == "bitget_required_no_exchange_fallback", "Audit source policy is unexpected", audit)
+    require((audit.get("version") or {}).get("api_version") == str(backend_version), "Audit API version mismatch", audit)
+
     fundamentals = run.get("fundamental_inputs") or {}
     real_fields = set(fundamentals.get("real_fields") or [])
     absent_fields = set(fundamentals.get("absent_fields") or [])
@@ -149,6 +155,10 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
         "git_commit": (run.get("version") or {}).get("git_commit"),
         "worker_version": cf_version.get("worker_version") or bridge.get("worker_version"),
         "source_policy": bridge.get("source_policy"),
+        "audit_status": audit.get("status"),
+        "audit_ready": audit.get("ready_for_gpt_live_analysis"),
+        "audit_latest_outputs_auditable": audit.get("latest_outputs_auditable"),
+        "audit_warnings": audit.get("warnings"),
         "horizons": horizons,
         "frame_count": len(frames),
         "archive_id": archive.get("archive_id"),

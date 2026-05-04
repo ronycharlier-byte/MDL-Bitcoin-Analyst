@@ -34,9 +34,22 @@ DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
-API_VERSION = "1.5.0"
+API_VERSION = "1.6.0"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.5.0"
+SCHEMA_VERSION = "gpt_action_schema_v1.6.0"
+SOURCE_POLICY = "bitget_required_no_exchange_fallback"
+REQUIRED_AUDIT_REAL_FIELDS = [
+    "etf_flows",
+    "funding_rate",
+    "open_interest",
+    "hash_rate",
+    "exchange_reserves",
+    "stablecoins_supply",
+    "dxy",
+    "us_rates",
+    "nasdaq",
+]
+ALLOWED_AUDIT_ABSENT_FIELDS = ["liquidations"]
 
 
 def resolve_git_commit() -> str:
@@ -570,6 +583,132 @@ def attach_archive(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     return archive
 
 
+def latest_runtime_archive() -> dict[str, Any]:
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            row = conn.execute(
+                """
+                SELECT archive_id, endpoint, asset, model, horizons_json, run_ids_json,
+                       report_date, reference_spot, api_version, git_commit, status,
+                       archive_json_path, archive_markdown_path, created_at
+                FROM run_archive
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if not row:
+            return {"status": "absent", "reason": "No runtime archive row found."}
+        created_at = float(row[13])
+        return {
+            "status": "stored" if row[10] else "unknown",
+            "archive_id": row[0],
+            "endpoint": row[1],
+            "asset": row[2],
+            "model": row[3],
+            "horizons": json.loads(row[4] or "[]"),
+            "run_ids": json.loads(row[5] or "[]"),
+            "report_date": row[6],
+            "reference_spot": row[7],
+            "api_version": row[8],
+            "git_commit": row[9],
+            "run_status": row[10],
+            "json_path": row[11],
+            "markdown_path": row[12],
+            "created_at": datetime.fromtimestamp(created_at, tz=timezone.utc).isoformat(),
+            "age_seconds": max(0, int(time.time() - created_at)),
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+def latest_external_archive() -> dict[str, Any]:
+    archive_root = ROOT / "external_archive" / "live_runs"
+    try:
+        candidates = sorted(archive_root.rglob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+        if not candidates:
+            return {"status": "absent", "reason": "No bundled external archive snapshot found."}
+        path = candidates[0]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            "status": "present",
+            "path": str(path),
+            "archive_id": payload.get("archive_id"),
+            "created_at": payload.get("created_at"),
+            "api_version": payload.get("api_version"),
+            "git_commit": payload.get("git_commit"),
+            "horizons": payload.get("horizons"),
+            "fundamental_real_fields": (payload.get("fundamental_inputs") or {}).get("real_fields"),
+            "fundamental_absent_fields": (payload.get("fundamental_inputs") or {}).get("absent_fields"),
+            "note": "Bundled GitHub archive snapshot; may lag the live runtime archive.",
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+def audit_payload() -> dict[str, Any]:
+    fundamentals = load_processed_fundamental_inputs("BTC")
+    real_fields = set(fundamentals.get("real_fields") or [])
+    absent_fields = set(fundamentals.get("absent_fields") or [])
+    missing_required = sorted(set(REQUIRED_AUDIT_REAL_FIELDS) - real_fields)
+    unexpected_absent = sorted(absent_fields - set(ALLOWED_AUDIT_ABSENT_FIELDS))
+    runtime_archive = latest_runtime_archive()
+    external_archive = latest_external_archive()
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if missing_required:
+        warnings.append(f"Required live fundamental fields missing from latest processed snapshot: {missing_required}")
+    if unexpected_absent:
+        warnings.append(f"Unexpected absent fundamental fields in latest processed snapshot: {unexpected_absent}")
+    if runtime_archive.get("status") != "stored":
+        warnings.append("No stored runtime archive is available yet; run /multi-run to create one.")
+    if runtime_archive.get("age_seconds") is not None and int(runtime_archive.get("age_seconds") or 0) > 21600:
+        warnings.append("Latest runtime archive is older than 6 hours.")
+
+    return {
+        "status": "ok" if not blockers else "blocked",
+        "service": "quant-btc-model",
+        "audit_kind": "preflight_governance_audit",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "ready_for_gpt_live_analysis": not blockers,
+        "can_attempt_live_run": True,
+        "latest_outputs_auditable": runtime_archive.get("status") == "stored",
+        "blockers": blockers,
+        "warnings": warnings,
+        "required_gpt_flow": [
+            "Call this /audit endpoint before analysis.",
+            "If ready_for_gpt_live_analysis is true, call /multi-run or Cloudflare /run for the fresh multi-frame run.",
+            "Never reuse numbers from /audit as model forecasts; /audit is health/provenance only.",
+            "For every precise model number, cite model_run_id, report_date, reference_spot, source and status.",
+        ],
+        "source_policy": SOURCE_POLICY,
+        "default_frames": DEFAULT_MULTIFRAME_HORIZONS,
+        "required_real_fields": REQUIRED_AUDIT_REAL_FIELDS,
+        "allowed_absent_fields": ALLOWED_AUDIT_ABSENT_FIELDS,
+        "fundamental_snapshot": fundamentals,
+        "latest_runtime_archive": runtime_archive,
+        "latest_external_archive": external_archive,
+        "monitoring": {
+            "github_workflows": {
+                "monitor": ".github/workflows/monitor-api.yml",
+                "archive": ".github/workflows/archive-live-run.yml",
+                "ci": ".github/workflows/ci.yml",
+            },
+            "visible_alert_issue_marker": "[quant-btc-monitor-alert]",
+            "monitor_rule": "If the monitor fails, GitHub Actions opens or updates a visible alert issue.",
+        },
+        "data_status_policy": {
+            "prices": "must be real from Bitget for live conclusions",
+            "simulations": "inferred",
+            "risk_metrics": "inferred",
+            "liquidations": "real only when Bitget WebSocket push is observed; otherwise absent",
+            "non_bitget_exchange_fallback": "forbidden",
+        },
+        "version": version_payload(),
+        "warning": "Audit output is not a market forecast. It only tells the GPT whether a live probabilistic run is governance-ready.",
+    }
+
+
 def read_text(path: Path) -> str:
     if not path.exists():
         return ""
@@ -910,6 +1049,7 @@ def status() -> dict[str, Any]:
             "multi_frame": "/multi-run",
             "latest_artifact": "/latest",
             "version": "/version",
+            "audit": "/audit",
         },
         "default_frames": DEFAULT_MULTIFRAME_HORIZONS,
         "data_sources": {
@@ -944,6 +1084,11 @@ def status() -> dict[str, Any]:
         ],
         "version": version_payload(),
     }
+
+
+@app.get("/audit")
+def audit() -> dict[str, Any]:
+    return audit_payload()
 
 
 @app.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key), Depends(require_rate_limit)])

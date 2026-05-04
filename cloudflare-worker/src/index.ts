@@ -61,8 +61,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.9.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.9.0";
+const WORKER_VERSION = "1.10.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.10.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -117,7 +117,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/run", "/multi-run", "/multiRun", "/latest"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest"],
           runtime_controls: {
             max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
@@ -151,7 +151,7 @@ export default {
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
             render_full_engine: "Render remains the Bitget-backed Python/numpy engine behind this Worker.",
-            recommended_gpt_flow: "Call getQuantBtcLiteStatus, then runQuantBtcMultiFrame for complete analysis or runQuantBtcModel for one explicit horizon."
+            recommended_gpt_flow: "Call auditQuantBtcLiteSystem, then runQuantBtcMultiFrame for complete analysis or runQuantBtcModel for one explicit horizon."
           },
           limitations: [
             "Cloudflare routes GPT analysis to the Render Bitget full engine; direct Worker quant-lite code remains a backup implementation only.",
@@ -168,6 +168,11 @@ export default {
       if (url.pathname === "/latest" && request.method === "GET") {
         const result = await proxyRenderGet("/latest", env);
         return json(withBridgeMetadata(result, "/latest", env));
+      }
+
+      if (url.pathname === "/audit" && request.method === "GET") {
+        const result = await proxyRenderGet("/audit", env);
+        return json(withBridgeMetadata(result, "/audit", env));
       }
 
       if (url.pathname === "/run" && (request.method === "POST" || request.method === "GET")) {

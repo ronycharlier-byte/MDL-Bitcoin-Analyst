@@ -13,7 +13,7 @@ Status:
 - Functional.
 - Supports live `/run` and `/multi-run`.
 - Free Render services may sleep.
-- GitHub Actions monitoring pings `/health`, `/version`, and `/status` every 10 minutes when scheduled workflows are active. This can reduce cold starts, but it is not a hard no-sleep guarantee.
+- GitHub Actions monitoring pings `/health`, `/version`, `/status`, and `/audit` every 10 minutes when scheduled workflows are active. This can reduce cold starts, but it is not a hard no-sleep guarantee.
 
 ## Deployed no-sleep option
 
@@ -28,7 +28,7 @@ Status:
 - Deployed and publicly reachable over HTTPS.
 - TypeScript check passes.
 - GPT Action schema generated and copied into `gpt_custom_upload_bundle/`.
-- `/health`, `/version`, `/status`, `/latest`, `/run`, and `/multi-run` tested successfully.
+- `/health`, `/version`, `/status`, `/audit`, `/latest`, `/run`, and `/multi-run` tested successfully.
 - Worker version: `1.2.0`.
 
 Public endpoint:

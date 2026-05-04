@@ -112,10 +112,13 @@ The public API includes a short SQLite-backed cache, a SQLite-backed rate limit 
 
 - `GET /status`
 - `GET /version`
+- `GET /audit`
 - `api_version`
 - `model_version`
 - `schema_version`
 - `git_commit`
+
+`GET /audit` is the GPT preflight endpoint. It does not run a market simulation; it reports readiness, source policy, latest archive metadata, required real/absent fundamental fields, and the visible monitor alert rule.
 
 GitHub Actions monitoring:
 

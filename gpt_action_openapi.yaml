@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model API
-  version: 1.0.0
+  version: 1.6.0
   description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions.
 servers:
   - url: https://quant-btc-model-api.onrender.com
@@ -28,6 +28,47 @@ paths:
       responses:
         "200":
           description: Public status metadata including data sources, runtime controls, limitations, default frames and version.
+  /audit:
+    get:
+      operationId: auditQuantBtcSystem
+      summary: Audit API health, provenance, source policy and latest archive readiness
+      description: Preflight governance audit. Use before live analysis. This endpoint does not produce model forecasts; it reports whether the system is ready for a fresh probabilistic run.
+      responses:
+        "200":
+          description: Audit JSON with readiness, blockers, warnings, source policy, latest archive metadata, fundamental field status and version.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  ready_for_gpt_live_analysis:
+                    type: boolean
+                  can_attempt_live_run:
+                    type: boolean
+                  latest_outputs_auditable:
+                    type: boolean
+                  blockers:
+                    type: array
+                    items:
+                      type: string
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                  source_policy:
+                    type: string
+                  fundamental_snapshot:
+                    type: object
+                    additionalProperties: true
+                  latest_runtime_archive:
+                    type: object
+                    additionalProperties: true
+                  version:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
   /run:
     post:
       operationId: runQuantBtcModel
