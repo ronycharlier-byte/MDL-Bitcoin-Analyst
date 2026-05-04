@@ -102,6 +102,7 @@ Live Action provenance requirements:
 - Operation: `runQuantBtcModel`.
 - Multi-frame operation: `runQuantBtcMultiFrame`.
 - Required source fields: `model_run_id`, `report_date`, `reference_spot`, `reference_spot_timestamp`, `reference_spot_source`.
+- Fundamental provenance field: `fundamental_inputs` with `real_fields`, `absent_fields`, `sources`, `timestamp`, `status`, and compact point-in-time values.
 - Expected market source for realtime price: `bitget_btcusdt_spot_ticker_realtime`.
 - Expected status mix unless extra data are supplied: prices real; simulations inferred; fundamentals partial_real_absent or absent.
 - Default live frames: 7, 30, 90, 180 and 365 days.

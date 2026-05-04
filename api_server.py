@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -32,9 +33,9 @@ DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
-API_VERSION = "1.3.1"
+API_VERSION = "1.3.2"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.3.1"
+SCHEMA_VERSION = "gpt_action_schema_v1.3.2"
 
 
 def resolve_git_commit() -> str:
@@ -179,6 +180,7 @@ class RunResponse(BaseModel):
     model: str
     provenance: dict[str, Any]
     data_status: dict[str, str]
+    fundamental_inputs: dict[str, Any] | None = None
     distribution: dict[str, Any]
     regime_distribution: dict[str, Any]
     risk_metrics: dict[str, Any]
@@ -201,6 +203,65 @@ def normalized_horizons(horizons: list[int]) -> list[int]:
         if value not in cleaned:
             cleaned.append(value)
     return cleaned
+
+
+def summarize_fundamental_inputs(fundamentals: pd.DataFrame | None) -> dict[str, Any]:
+    metadata_columns = {"timestamp", "asset", "source", "statut"}
+    if fundamentals is None or fundamentals.empty:
+        return {
+            "status": "absent",
+            "real_fields": [],
+            "absent_fields": [],
+            "values": {},
+            "sources": [],
+            "timestamp": None,
+            "statut": "missing",
+            "note": "No fundamental snapshot was loaded.",
+        }
+
+    latest = fundamentals.tail(1).iloc[0]
+    field_columns = [column for column in fundamentals.columns if column not in metadata_columns]
+    values: dict[str, float] = {}
+    absent_fields: list[str] = []
+    field_status: dict[str, str] = {}
+    for column in field_columns:
+        numeric_value = pd.to_numeric(pd.Series([latest.get(column)]), errors="coerce").iloc[0]
+        if pd.notna(numeric_value):
+            values[column] = float(numeric_value)
+            field_status[column] = "real"
+        else:
+            absent_fields.append(column)
+            field_status[column] = "absent"
+
+    source_text = str(latest.get("source") or "")
+    sources = sorted({part.strip() for part in source_text.split(",") if part.strip() and part.strip() != "no_fundamental_source"})
+    status = "absent"
+    if values and absent_fields:
+        status = "partial_real_absent"
+    elif values:
+        status = "real"
+
+    return {
+        "status": status,
+        "real_fields": sorted(values),
+        "absent_fields": sorted(absent_fields),
+        "values": values,
+        "field_status": field_status,
+        "sources": sources,
+        "timestamp": str(latest.get("timestamp")) if latest.get("timestamp") is not None else None,
+        "statut": str(latest.get("statut") or "missing"),
+        "note": "Point-in-time fundamental snapshot, not a complete historical series.",
+    }
+
+
+def load_processed_fundamental_inputs(asset: str) -> dict[str, Any]:
+    path = ROOT / "data" / "processed" / f"{asset.upper()}_fundamental_features.csv"
+    try:
+        if path.exists():
+            return summarize_fundamental_inputs(pd.read_csv(path))
+    except Exception:
+        pass
+    return summarize_fundamental_inputs(None)
 
 
 def require_api_key(
@@ -521,6 +582,7 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
         spot_override=spot_override,
     )
     fundamentals = load_fundamental_features(payload.asset, price_frame, logger)
+    fundamental_inputs = summarize_fundamental_inputs(fundamentals)
     returns = daily_returns(price_frame)
     spot = float(price_frame["close"].dropna().iloc[-1])
     latest_row = price_frame.tail(1).to_dict("records")[0]
@@ -581,10 +643,9 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
                         "market_prices": "real" if "real" in set(price_frame["statut"].astype(str)) else "mock_or_missing",
                         "simulation_outputs": "inferred",
                         "risk_metrics": "inferred",
-                        "fundamental_variables": "partial_real_absent"
-                        if fundamentals.drop(columns=["timestamp", "asset", "source", "statut"], errors="ignore").notna().any().any()
-                        else "absent",
+                        "fundamental_variables": fundamental_inputs["status"],
                     },
+                    "fundamental_inputs": fundamental_inputs,
                     "distribution": distribution,
                     "regime_distribution": regime_distribution(distribution),
                     "risk_metrics": risk,
@@ -601,6 +662,7 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
     return {
         "price_frame": price_frame,
         "fundamentals": fundamentals,
+        "fundamental_inputs": fundamental_inputs,
         "frames": frames,
         "errors": errors,
         "reference_spot": reference_spot,
@@ -641,6 +703,7 @@ def build_run_response(payload: RunRequest) -> RunResponse:
             "fundamental_variables": extract_bullet_value(report, "Fundamental variables status")
             or "absent_unless_supplied",
         },
+        fundamental_inputs=load_processed_fundamental_inputs(payload.asset),
         distribution=distribution,
         regime_distribution=regime_distribution(distribution),
         risk_metrics=risk,
@@ -790,6 +853,7 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
             "runtime": "fast_in_memory_multi_frame",
             "fresh_run": True,
         },
+        "fundamental_inputs": fast_result["fundamental_inputs"],
         "data_status": {
             "market_prices": "real" if market_statuses == {"real"} else "real_or_mock_per_frame",
             "simulation_outputs": "inferred",

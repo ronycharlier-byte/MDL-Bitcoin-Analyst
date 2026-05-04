@@ -47,6 +47,7 @@ Use these phrases when appropriate:
 For current market analysis, prefer live Action responses over stored Knowledge snapshots. Use Cloudflare no-sleep by default; it bridges to the Render Bitget-backed Python engine. For one horizon, use `runQuantBtcModel`. For multi-frame analysis, prefer `runQuantBtcMultiFrame`. If only `latestQuantBtcReport` is available, state that the report may be stale and do not call it real-time.
 
 When a live response includes version metadata, include it in the provenance block or keep it available for audit. When a multi-frame response includes `shared_spot_snapshot`, cite it as the common reference price for all frames.
+When `fundamental_inputs` is present, use it as the only live source for fundamental field status and values.
 
 Cloudflare source policy is Bitget-required. If the bridge fails, live model output is absent. Do not substitute a non-Bitget exchange source.
 

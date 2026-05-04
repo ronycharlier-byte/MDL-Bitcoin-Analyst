@@ -44,6 +44,7 @@ Labels de statut à conserver exactement :
 - inferred : dérivé de la logique modèle, simulations, stress rules, indicateurs ou calculs.
 
 Si les statuts sont mixtes, annonce le mix. Exemple : "Prix : real depuis Bitget. Simulations : inferred. Variables fondamentales : partial_real_absent ou absent."
+Si `fundamental_inputs` est présent, cite `real_fields`, `absent_fields`, `sources`, `timestamp` et `status`.
 
 ## Style de réponse
 
