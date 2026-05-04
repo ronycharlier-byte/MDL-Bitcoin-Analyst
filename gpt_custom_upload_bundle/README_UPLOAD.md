@@ -1,6 +1,9 @@
 # GPT Custom Upload Bundle
 
-Upload `gpt_action_openapi.yaml` in GPT Custom Actions.
+Upload one Action schema depending on the backend you want:
+
+- `gpt_action_openapi.yaml`: full Render Python API with `/run` and `/multi-run`.
+- `gpt_action_openapi.cloudflare.deployed.yaml`: no-sleep Cloudflare Worker quant-lite API.
 
 Upload the Markdown files in this folder into GPT Custom Knowledge:
 
@@ -22,6 +25,9 @@ Live analysis rule:
 - Use `runQuantBtcModel` for one explicit horizon.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 - Use `getQuantBtcStatus` to inspect current public API limits, sources, cache TTL, and operational status.
+- If using the Cloudflare no-sleep schema, call `/status` first when source provenance matters, then call `runQuantBtcModel`.
+- Cloudflare Worker results are quant-lite, not the full Python/numpy engine.
+- Cloudflare Worker may disclose `bitget_market_prices: absent` and `fallback_market_prices: real` when Bitget rejects edge requests; this must be stated in the GPT answer.
 
 Default multi-frame request:
 

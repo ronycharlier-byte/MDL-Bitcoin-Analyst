@@ -15,7 +15,7 @@ Status:
 - Free Render services may sleep.
 - GitHub Actions monitoring pings `/health`, `/version`, and `/status` every 10 minutes when scheduled workflows are active. This can reduce cold starts, but it is not a hard no-sleep guarantee.
 
-## Prepared no-sleep option
+## Deployed no-sleep option
 
 Cloudflare Worker folder:
 
@@ -25,20 +25,39 @@ cloudflare-worker/
 
 Status:
 
-- Code prepared.
+- Deployed and publicly reachable over HTTPS.
 - TypeScript check passes.
-- Dry-run bundle works.
-- Deployment is blocked until Cloudflare Wrangler is authenticated on this machine.
+- GPT Action schema generated and copied into `gpt_custom_upload_bundle/`.
+- `/health`, `/version`, `/status`, `/latest`, and `/run` tested successfully.
 
-Required command:
+Public endpoint:
+
+```text
+https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
+```
+
+Generated GPT Action schema:
+
+```text
+cloudflare-worker/gpt_action_openapi.cloudflare.deployed.yaml
+gpt_custom_upload_bundle/gpt_action_openapi.cloudflare.deployed.yaml
+```
+
+Redeploy command:
 
 ```powershell
 cd C:\Users\ronyc\Desktop\Corpus\quant_btc_model\cloudflare-worker
-npx wrangler login
 npm run deploy:schema
 ```
 
-After login and deploy, upload the generated Cloudflare schema to GPT Actions if you want the no-sleep Worker endpoint as the primary backend.
+Wrangler is authenticated on this machine for the Cloudflare account used during deployment.
+
+Live data note:
+
+- Bitget remains the primary market source.
+- Bitget currently returns HTTP 403 from the Cloudflare Worker runtime.
+- The Worker therefore falls back to real Kraken XBT/USD daily OHLC data and discloses this in `data_status.market_source` and `warnings`.
+- If Bitget becomes reachable from Cloudflare later, the Worker will use Bitget automatically.
 
 Important limitation:
 

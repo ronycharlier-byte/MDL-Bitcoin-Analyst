@@ -8,21 +8,31 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
 Write-Host "Checking Cloudflare Wrangler authentication..."
-$whoami = npx wrangler whoami 2>&1
-if ($LASTEXITCODE -ne 0 -or ($whoami -join "`n") -match "not authenticated") {
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$whoami = & npx wrangler whoami 2>&1
+$whoamiExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
+if ($whoamiExitCode -ne 0 -or ($whoami -join "`n") -match "not authenticated") {
   Write-Host "Wrangler is not authenticated. Starting Cloudflare login..."
-  npx wrangler login
-  if ($LASTEXITCODE -ne 0) {
+  $ErrorActionPreference = "Continue"
+  & npx wrangler login
+  $loginExitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previousErrorActionPreference
+  if ($loginExitCode -ne 0) {
     throw "Cloudflare login failed or was not completed."
   }
 }
 
 Write-Host "Deploying Cloudflare Worker..."
-$deployOutput = npx wrangler deploy 2>&1
+$ErrorActionPreference = "Continue"
+$deployOutput = & npx wrangler deploy 2>&1
+$deployExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
 $deployText = $deployOutput -join "`n"
 Write-Host $deployText
 
-if ($LASTEXITCODE -ne 0) {
+if ($deployExitCode -ne 0) {
   throw "Wrangler deploy failed."
 }
 

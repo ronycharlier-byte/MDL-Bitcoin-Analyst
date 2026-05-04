@@ -2,6 +2,7 @@ name = "quant-btc-model-lite"
 main = "src/index.ts"
 compatibility_date = "2026-05-04"
 workers_dev = true
+preview_urls = false
 
 [vars]
 MAX_SIMULATIONS = "5000"

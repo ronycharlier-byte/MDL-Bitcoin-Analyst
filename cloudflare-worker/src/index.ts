@@ -20,12 +20,23 @@ interface Candle {
   volume: number;
 }
 
+interface MarketCandles {
+  candles: Candle[];
+  source: string;
+  status: "real";
+  warning?: string;
+}
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
   "access-control-allow-headers": "content-type"
 };
+
+const WORKER_VERSION = "1.1.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.1.0";
+const MODEL_VERSION = "cloudflare_quant_lite_v1";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -40,7 +51,55 @@ export default {
         return json({
           status: "ok",
           service: "quant-btc-model-lite-worker",
+          worker_version: WORKER_VERSION,
           mode: "quant_lite_probabilistic",
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (url.pathname === "/version" && request.method === "GET") {
+        return json({
+          status: "ok",
+          service: "quant-btc-model-lite-worker",
+          worker_version: WORKER_VERSION,
+          schema_version: SCHEMA_VERSION,
+          model_version: MODEL_VERSION,
+          runtime: "cloudflare_worker",
+          max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
+          default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
+          default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650),
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (url.pathname === "/status" && request.method === "GET") {
+        return json({
+          status: "ok",
+          service: "quant-btc-model-lite-worker",
+          worker_version: WORKER_VERSION,
+          always_awake_target: true,
+          runtime: "cloudflare_worker_free_tier",
+          endpoints: ["/health", "/version", "/status", "/run", "/latest"],
+          runtime_controls: {
+            max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
+            default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
+            default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650)
+          },
+          data_sources: {
+            primary_market_source: "bitget_btcusdt_spot_candles",
+            fallback_market_sources: [
+              "kraken_xbtusd_daily_ohlc",
+              "coingecko_btc_usd_daily_prices"
+            ],
+            fundamental_features: "absent",
+            corpus_knowledge_base: "absent"
+          },
+          limitations: [
+            "This is a quant-lite Worker runtime, not the full Python/numpy engine.",
+            "Bitget may reject Cloudflare edge requests; fallback market sources are explicitly disclosed.",
+            "Outputs are probabilistic scenarios, not deterministic predictions.",
+            "Every precise number must be cited with model_run_id, report_date, reference_spot and data status."
+          ],
           timestamp: new Date().toISOString()
         });
       }
@@ -111,9 +170,10 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
   const runStartedAt = new Date();
   const modelRunId = `cfql_${runStartedAt.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomRunSuffix()}`;
 
-  const candles = await fetchBitgetCandles();
+  const market = await fetchMarketCandles();
+  const candles = market.candles;
   if (candles.length < 30) {
-    throw new Error("Insufficient Bitget market history for quant-lite run.");
+    throw new Error("Insufficient real market history for quant-lite run.");
   }
 
   const sorted = candles.sort((a, b) => a.timestamp - b.timestamp);
@@ -173,6 +233,9 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
   if (requestedSimulations > simulations) {
     warnings.push(`Requested simulations capped from ${requestedSimulations} to ${simulations} to protect the free Worker runtime.`);
   }
+  if (market.warning) {
+    warnings.push(market.warning);
+  }
 
   return {
     status: "ok",
@@ -182,7 +245,7 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
     simulations,
     requested_simulations: requestedSimulations,
     model,
-    model_version: "cloudflare_quant_lite_v1",
+    model_version: MODEL_VERSION,
     model_run_id: modelRunId,
     report_date: runCompletedAt.toISOString(),
     provenance: {
@@ -191,16 +254,18 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
       run_started_at: runStartedAt.toISOString(),
       run_completed_at: runCompletedAt.toISOString(),
       model_run_id: modelRunId,
-      model_version: "cloudflare_quant_lite_v1",
+      model_version: MODEL_VERSION,
       reference_spot: spot,
-      reference_spot_source: "bitget_btcusdt_spot_candles",
+      reference_spot_source: market.source,
       reference_spot_timestamp: new Date(sorted[sorted.length - 1].timestamp).toISOString(),
       calculation_origin: "cloudflare_worker_quant_lite_runtime",
       status: "mixed"
     },
     data_status: {
       market_prices: "real",
-      market_source: "bitget_btcusdt_spot_candles",
+      market_source: market.source,
+      bitget_market_prices: market.source.startsWith("bitget") ? "real" : "absent",
+      fallback_market_prices: market.source.startsWith("bitget") ? "absent" : "real",
       simulation_results: "inferred",
       risk_metrics: "inferred",
       stress_tests: "inferred",
@@ -222,7 +287,7 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
     stress_tests: stress,
     confidence_score: confidence,
     assumptions: [
-      "Historical daily Bitget BTCUSDT spot candles are used as the real market input.",
+      `${market.source} is used as the real market input for this run.`,
       "Terminal distribution is inferred from a heavy-tail jump approximation calibrated on recent log returns.",
       "No ETF flow, DXY, rates, Nasdaq, funding, open interest, liquidation, hash rate, exchange reserve or stablecoin fields are connected in the Worker.",
       "The result is a scenario distribution, not a deterministic forecast."
@@ -245,12 +310,45 @@ async function runQuantLite(input: RunRequest, env: Env): Promise<Record<string,
   };
 }
 
+async function fetchMarketCandles(): Promise<MarketCandles> {
+  try {
+    return {
+      candles: await fetchBitgetCandles(),
+      source: "bitget_btcusdt_spot_candles",
+      status: "real"
+    };
+  } catch (error) {
+    const bitgetMessage = error instanceof Error ? error.message : String(error);
+    try {
+      return {
+        candles: await fetchKrakenCandles(),
+        source: "kraken_xbtusd_daily_ohlc_fallback_after_bitget_error",
+        status: "real",
+        warning: `Bitget market candles were unavailable from the Worker runtime (${bitgetMessage}); Kraken real XBT/USD daily OHLC prices were used as an explicit fallback.`
+      };
+    } catch (krakenError) {
+      const krakenMessage = krakenError instanceof Error ? krakenError.message : String(krakenError);
+      try {
+        return {
+          candles: await fetchCoinGeckoCandles(),
+          source: "coingecko_btc_usd_daily_prices_fallback_after_bitget_and_kraken_error",
+          status: "real",
+          warning: `Bitget and Kraken market candles were unavailable from the Worker runtime (Bitget: ${bitgetMessage}; Kraken: ${krakenMessage}); CoinGecko real BTC/USD prices were used as an explicit fallback.`
+        };
+      } catch (coinGeckoError) {
+        const coinGeckoMessage = coinGeckoError instanceof Error ? coinGeckoError.message : String(coinGeckoError);
+        throw new Error(`Market data unavailable. Bitget error: ${bitgetMessage}. Kraken error: ${krakenMessage}. CoinGecko error: ${coinGeckoMessage}.`);
+      }
+    }
+  }
+}
+
 async function fetchBitgetCandles(): Promise<Candle[]> {
   const candles: Candle[] = [];
   let endTime = Date.now();
 
   for (let page = 0; page < 8; page += 1) {
-    const url = new URL("https://api.bitget.com/api/v2/spot/market/history-candles");
+    const url = new URL("https://api.bitget.com/api/v2/spot/market/candles");
     url.searchParams.set("symbol", "BTCUSDT");
     url.searchParams.set("granularity", "1Dutc");
     url.searchParams.set("endTime", String(endTime));
@@ -299,6 +397,93 @@ async function fetchBitgetCandles(): Promise<Candle[]> {
     unique.set(candle.timestamp, candle);
   }
   return Array.from(unique.values());
+}
+
+async function fetchKrakenCandles(): Promise<Candle[]> {
+  const url = new URL("https://api.kraken.com/0/public/OHLC");
+  url.searchParams.set("pair", "XBTUSD");
+  url.searchParams.set("interval", "1440");
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      "accept": "application/json",
+      "user-agent": "quant-btc-model-lite-worker/1.0"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Kraken fallback request failed with HTTP ${response.status}.`);
+  }
+
+  const payload = await response.json() as { error?: unknown; result?: Record<string, unknown> };
+  const errors = Array.isArray(payload.error) ? payload.error : [];
+  if (errors.length > 0) {
+    throw new Error(`Kraken fallback returned errors: ${errors.join(", ")}.`);
+  }
+
+  const result = payload.result || {};
+  const key = Object.keys(result).find((name) => name !== "last");
+  const rows = key && Array.isArray(result[key]) ? result[key] as unknown[] : [];
+  const candles: Candle[] = [];
+
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length < 7) {
+      continue;
+    }
+    const timestamp = Number(row[0]) * 1000;
+    const open = Number(row[1]);
+    const high = Number(row[2]);
+    const low = Number(row[3]);
+    const close = Number(row[4]);
+    const volume = Number(row[6]);
+    if ([timestamp, open, high, low, close].every(Number.isFinite) && close > 0) {
+      candles.push({ timestamp, open, high, low, close, volume });
+    }
+  }
+
+  return candles;
+}
+
+async function fetchCoinGeckoCandles(): Promise<Candle[]> {
+  const url = new URL("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart");
+  url.searchParams.set("vs_currency", "usd");
+  url.searchParams.set("days", "1000");
+  url.searchParams.set("interval", "daily");
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      "accept": "application/json",
+      "user-agent": "quant-btc-model-lite-worker/1.0"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`CoinGecko fallback request failed with HTTP ${response.status}.`);
+  }
+
+  const payload = await response.json() as { prices?: unknown };
+  const prices = Array.isArray(payload.prices) ? payload.prices : [];
+  const candles: Candle[] = [];
+
+  for (const row of prices) {
+    if (!Array.isArray(row) || row.length < 2) {
+      continue;
+    }
+    const timestamp = Number(row[0]);
+    const close = Number(row[1]);
+    if (Number.isFinite(timestamp) && Number.isFinite(close) && close > 0) {
+      candles.push({
+        timestamp,
+        open: close,
+        high: close,
+        low: close,
+        close,
+        volume: 0
+      });
+    }
+  }
+
+  return candles;
 }
 
 function normalizeAsset(asset: unknown): string {

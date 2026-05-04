@@ -109,6 +109,15 @@ Live Action provenance requirements:
 - Version fields may include `api_version`, `model_version`, `schema_version` and `git_commit`.
 - Short cached responses may include a `cache` object with `created_at`, `expires_at`, and `ttl_seconds`.
 
+No-sleep Cloudflare Worker requirements:
+
+- Endpoint: `https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev`.
+- Schema file: `gpt_action_openapi.cloudflare.deployed.yaml`.
+- Runtime: quant-lite Cloudflare Worker, not the full Python/numpy engine.
+- Required status fields: `data_status.market_source`, `data_status.bitget_market_prices`, `data_status.fallback_market_prices`.
+- Primary market source remains Bitget, but the Worker may fall back to Kraken real XBT/USD OHLC if Bitget rejects Cloudflare edge requests.
+- If fallback is used, the answer must explicitly state that Bitget data are absent for that run and fallback market prices are real.
+
 ## Known Coherence Note
 
 Latest regime probabilities:
