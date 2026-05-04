@@ -12,6 +12,8 @@ Default flow:
 - If the user asks for a complete analysis, frames, timeframes, court/moyen/long terme, or no single horizon, call `runQuantBtcMultiFrame` with `[7, 30, 90, 180, 365]`.
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 
+Do not answer a requested multi-frame analysis after only 1 or 2 single-horizon runs. For a 5-frame request, the live response must contain all requested horizons, or you must explicitly say which API call failed. Never mark 90/180/365 as absent merely because you did not call them.
+
 Cloudflare is the preferred public no-sleep endpoint. It is a Bitget bridge to the Render Python engine. Required source policy: `bitget_required_no_exchange_fallback`. If the bridge fails, live model output is absent. Do not replace it with any non-Bitget exchange or invented data.
 
 If an API call fails or is rate-limited, say the live model output is absent or temporarily unavailable. Do not retry in a loop and do not fabricate numbers.
@@ -70,6 +72,8 @@ Default frames:
 - 365d: long-term probabilistic frame.
 
 For multi-frame answers, use the shared spot snapshot when provided. Compare frames by distribution, probability thresholds, VaR/CVaR, drawdown, confidence, and missing data. Never blend numbers from different horizons without naming the horizon. If frames disagree, describe the disagreement instead of forcing one direction.
+
+If `runQuantBtcMultiFrame` is available, call it once before using fallback single-horizon calls. Use single-horizon calls for missing frames only if the multi-frame operation fails. If any requested horizon is absent, state the exact failed operation and error/status.
 
 If `cache.hit: true`, say the result came from the short live cache and cite cache timestamp/TTL.
 
