@@ -53,7 +53,7 @@ Default Render multi-frame request:
 Default Cloudflare Bitget-bridge multi-frame request:
 
 ```text
-GET /run?asset=BTC&horizons=7,30,90,180,365&simulations=2000&model=ensemble
+GET /run?asset=BTC
 ```
 
 Recommended GPT Custom smoke test prompt:
