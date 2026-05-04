@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model API
-  version: 1.7.0
+  version: 1.8.0
   description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions. Numeric outputs include UTC and Europe/Paris provenance fields when available.
 servers:
   - url: https://quant-btc-model-api.onrender.com
@@ -259,6 +259,117 @@ paths:
       responses:
         "200":
           description: Latest stored report and dashboard markdown. This is not guaranteed to be fresh; call POST /run for real-time calculation.
+  /history:
+    get:
+      operationId: getQuantBtcRunHistory
+      summary: Return recent archived live runs and storage status
+      parameters:
+        - name: asset
+          in: query
+          required: false
+          schema:
+            type: string
+            default: BTC
+      responses:
+        "200":
+          description: Recent archive metadata and durable storage status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  archives:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  durable_storage:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
+  /compare-runs:
+    get:
+      operationId: compareQuantBtcRuns
+      summary: Compare latest run against previous archived run
+      parameters:
+        - name: asset
+          in: query
+          required: false
+          schema:
+            type: string
+            default: BTC
+      responses:
+        "200":
+          description: Run-to-run changes in spot, VaR/CVaR, regimes and confidence.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                additionalProperties: true
+  /alerts:
+    get:
+      operationId: getQuantBtcAlerts
+      summary: Return latest stale-data, risk and confidence alerts
+      parameters:
+        - name: asset
+          in: query
+          required: false
+          schema:
+            type: string
+            default: BTC
+      responses:
+        "200":
+          description: Alert list generated from latest archive.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  alerts:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                additionalProperties: true
+  /backtest-summary:
+    get:
+      operationId: getQuantBtcBacktestSummary
+      summary: Return baseline walk-forward backtest diagnostics
+      parameters:
+        - name: asset
+          in: query
+          required: false
+          schema:
+            type: string
+            default: BTC
+      responses:
+        "200":
+          description: Backtest diagnostics such as hit rate, Brier score, calibration and interval coverage.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                additionalProperties: true
 components:
   schemas:
     Placeholder:

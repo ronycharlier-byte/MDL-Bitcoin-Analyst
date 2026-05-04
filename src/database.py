@@ -85,6 +85,12 @@ SCHEMA = [
         skewness REAL,
         kurtosis REAL,
         max_drawdown REAL,
+        mean_simulated_max_drawdown REAL,
+        expected_max_drawdown REAL,
+        median_max_drawdown REAL,
+        p95_max_drawdown REAL,
+        worst_sample_drawdown REAL,
+        drawdown_definition TEXT,
         conditional_volatility REAL,
         source TEXT NOT NULL,
         statut TEXT NOT NULL CHECK (statut IN ('real', 'mock', 'missing')),
@@ -167,8 +173,24 @@ def init_database(db_path: Path = DB_PATH) -> Path:
     with connect(db_path) as conn:
         for statement in SCHEMA:
             conn.execute(statement)
+        migrate_database(conn)
         conn.commit()
     return db_path
+
+
+def migrate_database(conn: sqlite3.Connection) -> None:
+    risk_columns = {row[1] for row in conn.execute("PRAGMA table_info(risk_metrics)").fetchall()}
+    migrations = {
+        "mean_simulated_max_drawdown": "ALTER TABLE risk_metrics ADD COLUMN mean_simulated_max_drawdown REAL",
+        "expected_max_drawdown": "ALTER TABLE risk_metrics ADD COLUMN expected_max_drawdown REAL",
+        "median_max_drawdown": "ALTER TABLE risk_metrics ADD COLUMN median_max_drawdown REAL",
+        "p95_max_drawdown": "ALTER TABLE risk_metrics ADD COLUMN p95_max_drawdown REAL",
+        "worst_sample_drawdown": "ALTER TABLE risk_metrics ADD COLUMN worst_sample_drawdown REAL",
+        "drawdown_definition": "ALTER TABLE risk_metrics ADD COLUMN drawdown_definition TEXT",
+    }
+    for column, statement in migrations.items():
+        if column not in risk_columns:
+            conn.execute(statement)
 
 
 def insert_dataframe(table: str, df: pd.DataFrame, db_path: Path = DB_PATH) -> int:

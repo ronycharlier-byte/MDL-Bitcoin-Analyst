@@ -123,6 +123,26 @@ The public API includes a short SQLite-backed cache, a SQLite-backed rate limit 
 
 `GET /audit` is the GPT preflight endpoint. It does not run a market simulation; it reports readiness, source policy, latest archive metadata, required real/absent fundamental fields, timezone policy, and the visible monitor alert rule.
 
+Additional production diagnostics:
+
+- `GET /history`: recent runtime archives plus durable-storage status.
+- `GET /compare-runs`: latest archive vs previous archive deltas for spot, VaR/CVaR, regimes and confidence.
+- `GET /alerts`: stale data, VaR, confidence and transition-regime alerts.
+- `GET /backtest-summary`: visible walk-forward baseline diagnostics.
+- `GET /dashboard`: simple live web dashboard, also mirrored at `reports/dashboard.html`.
+- `GET /pdf-report`: lightweight timestamped PDF export for the latest archive.
+
+Every live multi-frame response now includes:
+
+- data freshness gates (`spot` blocks when stale or absent; fundamentals warn when stale);
+- Monte Carlo probability error margins;
+- multi-seed stability diagnostics;
+- expanded drawdown fields: `mean_simulated_max_drawdown`, `median_max_drawdown`, `p95_max_drawdown`, `worst_sample_drawdown`;
+- Bitget order-book liquidity snapshot when reachable;
+- options/implied volatility context when reachable;
+- ETF flow 1d/7d/30d trend diagnostics when reachable;
+- heuristic explainability by momentum, volatility, macro, derivatives and ETF context.
+
 GitHub Actions monitoring:
 
 ```text
@@ -150,7 +170,7 @@ gpt_custom_upload_bundle/
 
 - No source file outside `quant_btc_model` is modified.
 - Corpus integration copies relevant files into `knowledge_base/corpus_raw`.
-- Market loading uses local CSV first, then public online candles (`Bitget`, then `CoinGecko`) unless `--no-online` is set.
+- Market loading uses local CSV first, then public online Bitget candles unless `--no-online` is set. Non-Bitget market fallback is disabled by default for live GPT runs.
 - If real market data are unavailable, the engine generates synthetic prices tagged `mock` and logs `MOCK`.
 - Missing fundamental fields remain SQL `NULL` and are logged in `logs/system.log`.
 - SQLite tables include `timestamp`, `source`, and `statut` (`real`, `mock`, or `missing`).
@@ -222,7 +242,11 @@ Implemented in `src/risk_metrics.py`:
 - CVaR 95 and 99
 - skewness
 - kurtosis
-- max drawdown
+- `max_drawdown` backward-compatible alias for mean simulated max drawdown
+- `mean_simulated_max_drawdown` / `expected_max_drawdown`
+- `median_max_drawdown`
+- `p95_max_drawdown`
+- `worst_sample_drawdown`
 - conditional volatility
 
 ## Corpus pipeline

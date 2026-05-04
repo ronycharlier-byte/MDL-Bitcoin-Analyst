@@ -59,11 +59,60 @@ def max_drawdown_from_returns(returns) -> float | None:
 
 
 def max_drawdown_from_paths(paths: np.ndarray) -> float | None:
+    summary = drawdown_summary_from_paths(paths)
+    return summary.get("mean_simulated_max_drawdown")
+
+
+def drawdown_summary_from_paths(paths: np.ndarray | None) -> dict:
     if paths is None or paths.size == 0:
-        return None
+        return {
+            "mean_simulated_max_drawdown": None,
+            "expected_max_drawdown": None,
+            "median_max_drawdown": None,
+            "p95_max_drawdown": None,
+            "worst_sample_drawdown": None,
+            "drawdown_definition": "absent_pathwise_drawdown",
+        }
     peak = np.maximum.accumulate(paths, axis=1)
     drawdown = paths / peak - 1
-    return float(np.nanmean(np.nanmin(drawdown, axis=1)))
+    per_path_max_drawdown = np.nanmin(drawdown, axis=1)
+    per_path_max_drawdown = per_path_max_drawdown[np.isfinite(per_path_max_drawdown)]
+    if per_path_max_drawdown.size == 0:
+        return {
+            "mean_simulated_max_drawdown": None,
+            "expected_max_drawdown": None,
+            "median_max_drawdown": None,
+            "p95_max_drawdown": None,
+            "worst_sample_drawdown": None,
+            "drawdown_definition": "absent_pathwise_drawdown",
+        }
+    mean_drawdown = float(np.nanmean(per_path_max_drawdown))
+    return {
+        "mean_simulated_max_drawdown": mean_drawdown,
+        "expected_max_drawdown": mean_drawdown,
+        "median_max_drawdown": float(np.nanmedian(per_path_max_drawdown)),
+        "p95_max_drawdown": float(np.nanquantile(per_path_max_drawdown, 0.05)),
+        "worst_sample_drawdown": float(np.nanmin(per_path_max_drawdown)),
+        "drawdown_definition": (
+            "per-path peak-to-trough drawdown from simulated sample paths; values are negative returns. "
+            "p95_max_drawdown is the 95% loss-side drawdown threshold, i.e. the 5th percentile of path drawdowns."
+        ),
+    }
+
+
+def drawdown_summary_from_returns(returns) -> dict:
+    fallback = max_drawdown_from_returns(returns)
+    return {
+        "mean_simulated_max_drawdown": fallback,
+        "expected_max_drawdown": fallback,
+        "median_max_drawdown": fallback,
+        "p95_max_drawdown": fallback,
+        "worst_sample_drawdown": fallback,
+        "drawdown_definition": (
+            "fallback drawdown computed on the sequence of simulated terminal returns because pathwise sample_paths "
+            "were absent; use pathwise fields when available."
+        ),
+    }
 
 
 def conditional_volatility(returns, lambda_: float = 0.94) -> float | None:
@@ -79,7 +128,11 @@ def conditional_volatility(returns, lambda_: float = 0.94) -> float | None:
 def compute_risk_metrics(simulated_returns, historical_returns=None, sample_paths=None) -> dict:
     sim = clean_returns(simulated_returns)
     hist = clean_returns(historical_returns) if historical_returns is not None else sim
-    drawdown = max_drawdown_from_paths(sample_paths) if sample_paths is not None else max_drawdown_from_returns(sim)
+    drawdown_summary = (
+        drawdown_summary_from_paths(sample_paths)
+        if sample_paths is not None
+        else drawdown_summary_from_returns(sim)
+    )
     return {
         "var_95": value_at_risk(sim, 0.95),
         "var_99": value_at_risk(sim, 0.99),
@@ -87,7 +140,8 @@ def compute_risk_metrics(simulated_returns, historical_returns=None, sample_path
         "cvar_99": expected_shortfall(sim, 0.99),
         "skewness": skewness(sim),
         "kurtosis": kurtosis(sim),
-        "max_drawdown": drawdown,
+        "max_drawdown": drawdown_summary.get("mean_simulated_max_drawdown"),
+        **drawdown_summary,
         "conditional_volatility": conditional_volatility(hist),
     }
 

@@ -61,8 +61,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.11.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.11.0";
+const WORKER_VERSION = "1.12.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.12.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -114,6 +114,17 @@ export default {
           default_horizons: parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS),
           rate_limit_runs_per_minute: getRateLimit(env).limit,
           rate_limit_window_seconds: getRateLimit(env).windowSeconds,
+          supported_diagnostics: [
+            "data_freshness_gate",
+            "monte_carlo_error_margins",
+            "multi_seed_stability",
+            "expanded_drawdown_metrics",
+            "compare_runs",
+            "alerts",
+            "backtest_summary",
+            "dashboard_redirect",
+            "pdf_report_redirect"
+          ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
           analysis_consistency_policy: "One answer must use one fresh run/archive_id unless the user asks for a comparison.",
@@ -131,7 +142,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest", "/history", "/compare-runs", "/alerts", "/backtest-summary", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
@@ -177,7 +188,8 @@ export default {
             "Outputs are probabilistic scenarios, not deterministic predictions.",
             "Public endpoint has a best-effort per-IP in-isolate rate limit and simulation caps.",
             "Every precise number must be cited with full model_run_id, report_date UTC, report_date Europe/Paris, reference_spot and data status.",
-            "A user-facing answer must not truncate run_id values unless it also provides the full run_id in the provenance section."
+            "A user-facing answer must not truncate run_id values unless it also provides the full run_id in the provenance section.",
+            "Spot freshness, Monte Carlo error, multi-seed stability, alerts and run comparison diagnostics must be surfaced when present."
           ],
           timestamp: now.toISOString(),
           timestamp_utc: now.toISOString(),
@@ -193,6 +205,19 @@ export default {
       if (url.pathname === "/audit" && request.method === "GET") {
         const result = await proxyRenderGet("/audit", env);
         return json(withBridgeMetadata(result, "/audit", env));
+      }
+
+      if (["/history", "/compare-runs", "/alerts", "/backtest-summary"].includes(url.pathname) && request.method === "GET") {
+        const result = await proxyRenderGet(`${url.pathname}${url.search}`, env);
+        return json(withBridgeMetadata(result, url.pathname, env));
+      }
+
+      if (url.pathname === "/dashboard" && request.method === "GET") {
+        return Response.redirect(renderUrl("/dashboard", env), 302);
+      }
+
+      if (url.pathname === "/pdf-report" && request.method === "GET") {
+        return Response.redirect(renderUrl(`/pdf-report${url.search}`, env), 302);
       }
 
       if (url.pathname === "/run" && (request.method === "POST" || request.method === "GET")) {

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quant BTC Model Dashboard</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f7f8fb; color: #101114; }
+    header { padding: 18px 22px; background: #101114; color: white; display: flex; gap: 16px; align-items: center; justify-content: space-between; }
+    main { max-width: 1180px; margin: 0 auto; padding: 20px; }
+    button { border: 0; background: #1f6feb; color: white; padding: 10px 14px; border-radius: 6px; cursor: pointer; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .card { background: white; border: 1px solid #d8dee8; border-radius: 8px; padding: 14px; }
+    .muted { color: #687385; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d8dee8; }
+    th, td { padding: 10px; border-bottom: 1px solid #e6eaf0; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    .warn { color: #a15c00; }
+    .bad { color: #b42318; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <strong>Quant BTC Model</strong>
+      <div class="muted">Dashboard probabiliste live, source Bitget</div>
+    </div>
+    <button onclick="loadRun()">Actualiser</button>
+  </header>
+  <main>
+    <section class="grid" id="summary"></section>
+    <h3>Multi-frame</h3>
+    <div id="frames"></div>
+    <h3>Alertes</h3>
+    <div id="alerts" class="grid"></div>
+  </main>
+  <script>
+    const API_BASE = "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev";
+    const fmtPct = v => v == null ? "absent" : (v * 100).toFixed(2) + "%";
+    const fmtUsd = v => v == null ? "absent" : "$" + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+    async function loadRun() {
+      document.getElementById("summary").innerHTML = "<div class='card'>Chargement...</div>";
+      const response = await fetch(API_BASE + "/multi-run?asset=BTC");
+      const data = await response.json();
+      const prov = data.provenance_summary || {};
+      const archive = data.archive || {};
+      document.getElementById("summary").innerHTML = [
+        ["Spot", (prov.reference_spots || ["absent"])[0]],
+        ["Archive", archive.archive_id || "absent"],
+        ["Date UTC", prov.report_date_utc || "absent"],
+        ["Statut", data.status || "absent"]
+      ].map(([k,v]) => `<div class='card'><div class='muted'>${k}</div><strong>${v}</strong></div>`).join("");
+      document.getElementById("frames").innerHTML = `<table><tr><th>Horizon</th><th>Médiane</th><th>P10</th><th>P90</th><th>P(up)</th><th>VaR95</th><th>CVaR95</th><th>Conf.</th></tr>${(data.frames || []).map(f => {
+        const d = f.distribution || {}, r = f.risk_metrics || {}, c = f.confidence || {};
+        return `<tr><td>${f.horizon}j</td><td>${fmtUsd(d.median_price)}</td><td>${fmtUsd(d.p10_price)}</td><td>${fmtUsd(d.p90_price)}</td><td>${fmtPct(d.prob_up)}</td><td>${fmtPct(r.var_95)}</td><td>${fmtPct(r.cvar_95)}</td><td>${c.score ?? "absent"}/100</td></tr>`;
+      }).join("")}</table>`;
+      document.getElementById("alerts").innerHTML = (data.alerts || []).map(a => `<div class='card ${a.level === "blocker" ? "bad" : "warn"}'><strong>${a.type}</strong><div>${a.message || ""}</div></div>`).join("") || "<div class='card'>Aucune alerte.</div>";
+    }
+    loadRun();
+  </script>
+</body>
+</html>

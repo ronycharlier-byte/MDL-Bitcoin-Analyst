@@ -336,8 +336,11 @@ def load_market_prices(
     frame = load_prices_from_csv(asset, logger)
     if frame is None and allow_online:
         frame = fetch_bitget_prices(asset, logger, days=days)
-    if frame is None and allow_online:
+    allow_non_bitget_fallback = os.getenv("ALLOW_NON_BITGET_MARKET_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+    if frame is None and allow_online and allow_non_bitget_fallback:
         frame = fetch_coingecko_prices(asset, logger, days=days)
+    elif frame is None and allow_online:
+        logger.warning("non_bitget_market_fallback_disabled | source=coingecko_market_chart | policy=bitget_required")
     if frame is None or frame.empty:
         frame = generate_mock_prices(asset, logger, days=days)
     frame = append_realtime_spot(frame, asset, logger, allow_online=allow_online, spot_override=spot_override)
@@ -651,6 +654,43 @@ def _fetch_farside_etf_flows(logger) -> tuple[float | None, str | None]:
     except Exception as exc:
         logger.warning("etf_flows_fetch_failed | source=%s | error=%s", source_name, exc)
     return None, None
+
+
+def fetch_farside_etf_flow_history(logger, limit: int = 60) -> pd.DataFrame:
+    url = "https://farside.co.uk/bitcoin-etf-flow-all-data/"
+    source_name = "farside_bitcoin_etf_flow_total_usd_m_history"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "quant-btc-model/1.0"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+        rows = _extract_farside_flow_rows(html)
+        parsed: list[dict] = []
+        for row in rows:
+            parsed_date = pd.to_datetime(row.get("Date"), format="%d %b %Y", errors="coerce", utc=True)
+            total_value = _parse_farside_number(row.get("Total"))
+            if pd.isna(parsed_date) or total_value is None:
+                continue
+            parsed.append(
+                {
+                    "timestamp": parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "asset": "BTC",
+                    "etf_flow_usd_m": float(total_value),
+                    "source": source_name,
+                    "statut": STATUS_REAL,
+                }
+            )
+        if not parsed:
+            logger.warning("etf_flow_history_absent | source=%s | reason=no_published_rows", source_name)
+            return pd.DataFrame()
+        frame = pd.DataFrame(parsed).drop_duplicates(subset=["timestamp"], keep="last").sort_values("timestamp")
+        frame = frame.tail(max(1, int(limit))).reset_index(drop=True)
+        out = PROCESSED_DIR / "BTC_etf_flow_history.csv"
+        frame.to_csv(out, index=False)
+        logger.info("etf_flow_history_loaded | source=%s | rows=%s", source_name, len(frame))
+        return frame
+    except Exception as exc:
+        logger.warning("etf_flow_history_fetch_failed | source=%s | error=%s", source_name, exc)
+        return pd.DataFrame()
 
 
 def _fetch_fred_dgs10(logger) -> tuple[float | None, str | None]:

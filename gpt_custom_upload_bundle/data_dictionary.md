@@ -102,6 +102,12 @@ Latest status: inferred from simulations and historical returns.
 | skewness | Distribution asymmetry. |
 | kurtosis | Tail thickness indicator. |
 | max_drawdown | Expected path drawdown from simulated paths. |
+| mean_simulated_max_drawdown | Mean of per-path peak-to-trough simulated drawdowns. Preferred field for expected drawdown. |
+| expected_max_drawdown | Alias of mean_simulated_max_drawdown. |
+| median_max_drawdown | Median per-path simulated max drawdown. |
+| p95_max_drawdown | 95% loss-side simulated drawdown threshold, stored as a negative return. |
+| worst_sample_drawdown | Worst path drawdown observed in the simulated sample. Do not present as theoretical worst case. |
+| drawdown_definition | Text definition of how drawdown was computed. |
 | conditional_volatility | EWMA-like annualized conditional volatility. |
 
 ## Simulation Outputs
@@ -144,6 +150,20 @@ Latest status: inferred from historical market data.
 | mean_absolute_error | Absolute return error. |
 | interval_coverage | Fraction of realized outcomes inside model interval. |
 | observations | Number of out-of-sample observations. |
+
+## Live Quality Diagnostics
+
+| Field | Meaning |
+|---|---|
+| freshness.spot | Spot freshness gate. If stale/absent, live analysis must stop. |
+| freshness.fundamentals | Fundamental snapshot freshness. Stale/absent should be reported as a warning. |
+| monte_carlo_error | Binomial sampling error and 95% margins for simulated probabilities. |
+| multi_seed_stability | Dispersion of key metrics across multiple seeds. |
+| alerts | Quality/risk warnings such as stale spot, VaR > 30%, confidence < 50, transition > 25%. |
+| liquidity | Bitget order-book spread/depth/imbalance snapshot when reachable. |
+| options | Options/implied volatility context when reachable; not a Bitget spot replacement. |
+| etf_flow_trends | ETF 1d/7d/30d flow diagnostics when reachable. |
+| explainability | Heuristic contribution summary; not causal proof. |
 
 ## Risk Metric Wording
 

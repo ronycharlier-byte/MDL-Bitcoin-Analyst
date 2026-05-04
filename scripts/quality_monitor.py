@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 CF_BASE = os.getenv("CF_BASE", "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev").rstrip("/")
 RENDER_BASE = os.getenv("RENDER_BASE", "https://quant-btc-model-api.onrender.com").rstrip("/")
-MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.7.0")
+MIN_API_VERSION = os.getenv("MIN_API_VERSION", "1.8.0")
 EXPECTED_HORIZONS = [7, 30, 90, 180, 365]
 PARIS_TZ = ZoneInfo("Europe/Paris")
 REQUIRED_REAL_FIELDS = {
@@ -80,8 +80,14 @@ def compact_frame(frame: dict[str, Any]) -> dict[str, Any]:
         "var_95": risk.get("var_95"),
         "cvar_95": risk.get("cvar_95"),
         "max_drawdown": risk.get("max_drawdown"),
+        "mean_simulated_max_drawdown": risk.get("mean_simulated_max_drawdown"),
+        "median_max_drawdown": risk.get("median_max_drawdown"),
+        "p95_max_drawdown": risk.get("p95_max_drawdown"),
+        "worst_sample_drawdown": risk.get("worst_sample_drawdown"),
         "confidence_score": confidence.get("score"),
         "regime_distribution": frame.get("regime_distribution"),
+        "monte_carlo_error": frame.get("monte_carlo_error"),
+        "multi_seed_stability": frame.get("multi_seed_stability"),
     }
 
 
@@ -96,6 +102,8 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     cf_status = fetch_json(f"{CF_BASE}/status", timeout=60)
     audit = fetch_json(f"{CF_BASE}/audit", timeout=120)
     run = fetch_json(f"{CF_BASE}/run?asset=BTC", timeout=240)
+    alerts = fetch_json(f"{CF_BASE}/alerts?asset=BTC", timeout=120)
+    history = fetch_json(f"{CF_BASE}/history?asset=BTC&limit=2", timeout=120)
 
     require(render_health.get("status") == "ok", "Render health is not ok", render_health)
     require(cf_health.get("status") == "ok", "Cloudflare health is not ok", cf_health)
@@ -143,6 +151,9 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
     require(bool(audit.get("timezone_policy")), "Audit timezone policy is missing", audit)
     require(bool((run.get("provenance_summary") or {}).get("report_date_utc")), "Run report_date_utc is missing", run.get("provenance_summary"))
     require(bool((run.get("provenance_summary") or {}).get("report_date_paris")), "Run report_date_paris is missing", run.get("provenance_summary"))
+    freshness = run.get("freshness") or {}
+    spot_freshness = freshness.get("spot") or {}
+    require(spot_freshness.get("is_fresh") is True, "Run spot freshness gate is not fresh", freshness)
 
     fundamentals = run.get("fundamental_inputs") or {}
     real_fields = set(fundamentals.get("real_fields") or [])
@@ -165,6 +176,9 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
         require((frame.get("provenance") or {}).get("reference_spot_timestamp_paris"), "Frame spot timestamp Paris missing", frame)
         require((frame.get("risk_metrics") or {}).get("var_95") is not None, "Frame VaR missing", frame)
         require((frame.get("risk_metrics") or {}).get("cvar_95") is not None, "Frame CVaR missing", frame)
+        require((frame.get("risk_metrics") or {}).get("mean_simulated_max_drawdown") is not None, "Frame expanded drawdown missing", frame)
+        require((frame.get("monte_carlo_error") or {}).get("status") == "inferred", "Frame Monte Carlo error missing", frame)
+        require((frame.get("multi_seed_stability") or {}).get("status") == "inferred", "Frame multi-seed stability missing", frame)
         require((frame.get("confidence") or {}).get("score") is not None, "Frame confidence missing", frame)
 
     summary = {
@@ -187,6 +201,11 @@ def evaluate() -> tuple[dict[str, Any], dict[str, Any]]:
         "archive_id": archive.get("archive_id"),
         "archive_created_at_utc": archive.get("created_at_utc"),
         "archive_created_at_paris": archive.get("created_at_paris"),
+        "freshness": freshness,
+        "alerts_status": alerts.get("status"),
+        "alert_count": len(alerts.get("alerts") or []),
+        "history_status": history.get("status"),
+        "history_count": len(history.get("archives") or []),
         "fundamental_status": fundamentals.get("status"),
         "fundamental_real_fields": sorted(real_fields),
         "fundamental_absent_fields": sorted(absent_fields),

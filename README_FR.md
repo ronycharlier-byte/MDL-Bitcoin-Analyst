@@ -34,6 +34,17 @@ GET /multi-run?asset=BTC
 GET /latest
 ```
 
+Endpoints de diagnostic ajoutés :
+
+```text
+GET /history?asset=BTC
+GET /compare-runs?asset=BTC
+GET /alerts?asset=BTC
+GET /backtest-summary?asset=BTC
+GET /dashboard
+GET /pdf-report
+```
+
 Flux recommandé pour un GPT Custom :
 
 1. Appeler `auditQuantBtcLiteSystem`.
@@ -55,6 +66,17 @@ Flux recommandé pour un GPT Custom :
 - Stress tests.
 - Confidence score.
 - Statut des données utilisées.
+
+Ajouts de robustesse :
+
+- Gate de fraîcheur : le spot Bitget stale ou absent bloque le run live.
+- Erreur Monte Carlo sur les probabilités.
+- Stabilité multi-seed.
+- Drawdown clarifié : moyenne/expected, médiane, P95 et pire échantillon simulé.
+- Comparaison de runs archivés.
+- Alertes : VaR élevée, confidence faible, transition de régime, données stale.
+- Dashboard web simple et export PDF.
+- Contexte premium best-effort : carnet Bitget, options/vol implicite, tendances ETF et explainability heuristique.
 
 ## Gouvernance Importante
 
@@ -155,4 +177,3 @@ Ce projet est propriétaire et visible pour revue/évaluation seulement.
 Usage commercial, revente, produit GPT, API hébergée, SaaS, client work, redistribution ou déploiement en production nécessitent une autorisation écrite préalable.
 
 Voir [`LICENSE`](LICENSE).
-

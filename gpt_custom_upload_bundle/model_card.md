@@ -15,6 +15,7 @@ Probabilistic quantitative infrastructure for Bitcoin scenario analysis, risk es
 - Compare bull, bear, and range scenario probabilities.
 - Explain model assumptions and limitations.
 - Support governance, research, and decision review.
+- Check live data freshness, Monte Carlo uncertainty, multi-seed stability, archived run comparisons, alerts and baseline backtests when available.
 
 ## Not Intended For
 
@@ -34,6 +35,16 @@ Probabilistic quantitative infrastructure for Bitcoin scenario analysis, risk es
 - Liquidation cascade model.
 - Macro correlation model.
 - Dynamic ensemble model.
+
+## Live Diagnostics Added
+
+- Data freshness gate: stale or absent Bitget spot blocks live quantitative analysis.
+- Expanded drawdown metrics: mean/expected, median, P95 loss-side threshold and worst sample drawdown.
+- Monte Carlo error margins for simulated probabilities.
+- Multi-seed stability diagnostics.
+- Run comparison endpoint for latest vs previous archives.
+- Alerts for VaR, confidence, transition regime and stale data.
+- Optional context: Bitget liquidity, options/implied volatility, ETF flow trends and heuristic explainability.
 
 ## Latest Export Snapshot
 

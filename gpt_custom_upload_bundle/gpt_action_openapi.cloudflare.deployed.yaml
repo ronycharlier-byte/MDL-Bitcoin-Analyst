@@ -1,7 +1,7 @@
-﻿openapi: 3.1.0
+openapi: 3.1.0
 info:
   title: Quant BTC Model Bitget Bridge Worker
-  version: 1.11.0
+  version: 1.12.0
   description: Always-awake Cloudflare Worker facade for the Render Bitget-backed
     probabilistic BTC model. Outputs are probabilistic and must never be presented
     as certainty. Report and spot timestamps must be displayed as UTC and Europe/Paris.
@@ -192,3 +192,118 @@ paths:
         '200':
           description: Stateless Worker note. Call /run for a fresh probabilistic
             result.
+  /history:
+    get:
+      operationId: getQuantBtcRunHistory
+      summary: Return recent archived live runs
+      parameters:
+      - name: asset
+        in: query
+        required: false
+        schema:
+          type: string
+          default: BTC
+      responses:
+        '200':
+          description: Recent runtime archives and durable storage status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  archives:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  durable_storage:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
+  /compare-runs:
+    get:
+      operationId: compareQuantBtcRuns
+      summary: Compare latest run against the previous archived run
+      parameters:
+      - name: asset
+        in: query
+        required: false
+        schema:
+          type: string
+          default: BTC
+      responses:
+        '200':
+          description: Run-to-run deltas for spot, VaR/CVaR, regimes and confidence.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  current_archive_id:
+                    type: string
+                  previous_archive_id:
+                    type: string
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                additionalProperties: true
+  /alerts:
+    get:
+      operationId: getQuantBtcAlerts
+      summary: Return latest quality and risk alerts
+      parameters:
+      - name: asset
+        in: query
+        required: false
+        schema:
+          type: string
+          default: BTC
+      responses:
+        '200':
+          description: Current alerts for stale data, VaR, confidence and regime transition.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  alerts:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                additionalProperties: true
+  /backtest-summary:
+    get:
+      operationId: getQuantBtcBacktestSummary
+      summary: Return visible baseline backtest diagnostics
+      parameters:
+      - name: asset
+        in: query
+        required: false
+        schema:
+          type: string
+          default: BTC
+      responses:
+        '200':
+          description: Hit rate, Brier, calibration, absolute error and coverage diagnostics.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                additionalProperties: true

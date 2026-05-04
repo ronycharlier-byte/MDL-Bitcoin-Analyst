@@ -103,7 +103,7 @@ def _market_bias(distribution: dict, confidence: dict | None = None, risk: dict 
     bull = distribution.get("prob_bull", 0.0)
     bear = distribution.get("prob_bear", 0.0)
     score = (confidence or {}).get("score")
-    drawdown = abs((risk or {}).get("max_drawdown") or 0.0)
+    drawdown = abs((risk or {}).get("mean_simulated_max_drawdown") or (risk or {}).get("max_drawdown") or 0.0)
     qualifier = ""
     if score is not None and score < 50:
         qualifier = " with low-to-moderate confidence"
@@ -283,7 +283,11 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 - Interpretation CVaR 95: this estimates the average loss inside scenarios worse than VaR 95.
 - Skewness: {_fmt_num(risk.get("skewness"))}
 - Kurtosis: {_fmt_num(risk.get("kurtosis"))}
-- Expected max drawdown: {_fmt_pct(risk.get("max_drawdown"))}
+- Expected / mean simulated max drawdown: {_fmt_pct(risk.get("mean_simulated_max_drawdown") or risk.get("max_drawdown"))}
+- Median simulated max drawdown: {_fmt_pct(risk.get("median_max_drawdown"))}
+- P95 simulated max drawdown threshold: {_fmt_pct(risk.get("p95_max_drawdown"))}
+- Worst sample drawdown: {_fmt_pct(risk.get("worst_sample_drawdown"))}
+- Drawdown definition: {risk.get("drawdown_definition") or "pathwise definition unavailable"}
 - Conditional volatility: {_fmt_pct(risk.get("conditional_volatility"))}
 
 ## Stress tests
@@ -335,7 +339,7 @@ This report is probabilistic infrastructure output, not a deterministic forecast
 - Status mix: price data {data_tag}; simulation results inferred; fundamental variables {fundamentals_status}
 - Biais marche: {_market_bias(distribution, confidence=confidence, risk=risk)}
 - Risque court terme: VaR95 loss {_fmt_pct(risk.get("var_95"))}, CVaR95 tail loss {_fmt_pct(risk.get("cvar_95"))}
-- Risque long terme: P10 {_fmt_pct(distribution.get("p10_return"))}, expected drawdown {_fmt_pct(risk.get("max_drawdown"))}
+- Risque long terme: P10 {_fmt_pct(distribution.get("p10_return"))}, expected drawdown {_fmt_pct(risk.get("mean_simulated_max_drawdown") or risk.get("max_drawdown"))}
 - Scenario dominant: {dominant}; non classe / transition {_fmt_pct(regimes["unclassified"])}
 - Niveau d'invalidation: {_fmt_price(distribution.get("p10_price"))} on horizon distribution P10
 - Confidence score: {confidence.get("score", 0)}/100
