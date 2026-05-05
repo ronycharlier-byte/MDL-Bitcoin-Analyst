@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- dashboard_version: 2026-05-05-product-polish -->
 <html lang="fr">
 <head>
   <meta charset="utf-8">
@@ -6,348 +7,1063 @@
   <title>Quant BTC Model Dashboard</title>
   <style>
     :root {
-      --bg: #f5f7fb;
-      --panel: #ffffff;
-      --panel-2: #fdfefe;
-      --ink: #121722;
-      --muted: #657184;
-      --line: #dbe2ee;
-      --blue: #2166f3;
-      --green: #10845f;
-      --amber: #a86605;
+      --bg: #eef2f6;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #111827;
+      --muted: #64748b;
+      --line: #d7dee9;
+      --line-soft: #e8edf4;
+      --blue: #2563eb;
+      --blue-soft: #eaf1ff;
+      --green: #0f766e;
+      --green-soft: #e7f6f2;
+      --amber: #b7791f;
+      --amber-soft: #fff6df;
       --red: #b42318;
-      --violet: #6654d9;
-      --shadow: 0 14px 34px rgba(24, 35, 58, .08);
+      --red-soft: #fff0ef;
+      --violet: #6d5bd0;
+      --violet-soft: #f1efff;
+      --shadow: 0 18px 42px rgba(15, 23, 42, .08);
+      --radius: 8px;
     }
+
     * { box-sizing: border-box; }
     body {
       margin: 0;
+      min-width: 320px;
       background: var(--bg);
       color: var(--ink);
-      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Arial, sans-serif;
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
     }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 22px; line-height: 1.15; letter-spacing: 0; }
+    h2 { font-size: 16px; line-height: 1.2; letter-spacing: 0; }
+    h3 {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+    a { color: var(--blue); }
+
     header {
       position: sticky;
       top: 0;
-      z-index: 10;
-      background: rgba(255,255,255,.94);
+      z-index: 20;
       border-bottom: 1px solid var(--line);
-      backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, .94);
+      backdrop-filter: blur(14px);
     }
-    .topbar, main { width: min(1380px, calc(100% - 28px)); margin: 0 auto; }
+    .wrap {
+      width: min(1440px, calc(100% - 32px));
+      margin: 0 auto;
+    }
     .topbar {
-      min-height: 72px;
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 18px;
       align-items: center;
+      min-height: 76px;
+      padding: 10px 0;
     }
-    h1, h2, h3, p { margin: 0; }
-    h1 { font-size: 22px; letter-spacing: 0; }
-    h2 { font-size: 16px; margin: 24px 0 10px; }
-    h3 { font-size: 13px; margin-bottom: 8px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
-    .muted { color: var(--muted); }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .title-block {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .subtitle {
+      color: var(--muted);
+      max-width: 860px;
+      overflow-wrap: anywhere;
+    }
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
     button, input, select {
+      min-height: 38px;
       border: 1px solid var(--line);
       border-radius: 7px;
-      min-height: 38px;
-      padding: 0 12px;
       background: #fff;
       color: var(--ink);
       font: inherit;
     }
+    input, select {
+      width: 100%;
+      padding: 0 11px;
+    }
     button {
       cursor: pointer;
-      font-weight: 700;
-      transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 13px;
+      font-weight: 800;
+      transition: background .14s ease, border-color .14s ease, color .14s ease, transform .14s ease, box-shadow .14s ease;
+      white-space: nowrap;
     }
-    button:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
-    button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
-    button.secondary { background: #eef4ff; border-color: #c8d9ff; color: #1749b4; }
-    button.ghost { background: transparent; }
-    main { padding: 18px 0 40px; }
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, .10);
+    }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .secondary { border-color: #b8caf4; background: var(--blue-soft); color: #174ea6; }
+    .quiet { background: transparent; color: var(--muted); }
+
+    main { padding: 18px 0 44px; }
     .layout {
       display: grid;
-      grid-template-columns: 280px 1fr;
+      grid-template-columns: 306px minmax(0, 1fr);
       gap: 16px;
       align-items: start;
     }
-    aside, section.panel, .metric, .chart, .alert, .plan, .history-row {
-      background: var(--panel);
+    aside, .panel, .metric, .source-strip {
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: var(--radius);
+      background: var(--surface);
       box-shadow: var(--shadow);
     }
-    aside { padding: 14px; position: sticky; top: 88px; }
+    aside {
+      position: sticky;
+      top: 94px;
+      display: grid;
+      gap: 17px;
+      padding: 16px;
+    }
+    .panel {
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .panel-head {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .panel-head p { color: var(--muted); margin-top: 4px; }
     .stack { display: grid; gap: 10px; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .field { display: grid; gap: 5px; }
-    label { color: var(--muted); font-size: 12px; font-weight: 700; }
-    input, select { width: 100%; }
-    .panel { padding: 16px; margin-bottom: 16px; }
-    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .metric { padding: 13px; min-height: 86px; box-shadow: none; }
-    .metric strong { display: block; margin-top: 4px; font-size: 18px; }
-    .metric small { color: var(--muted); }
-    .split { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; }
-    table { width: 100%; border-collapse: collapse; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-    th, td { padding: 10px; border-bottom: 1px solid #e8edf5; text-align: right; white-space: nowrap; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .muted { color: var(--muted); }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    label { color: var(--muted); font-size: 12px; font-weight: 800; }
+
+    .chip-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      max-width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0 9px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .chip.ok { border-color: #a7e3d6; background: var(--green-soft); color: var(--green); }
+    .chip.warn { border-color: #f0d082; background: var(--amber-soft); color: #7a4b05; }
+    .chip.bad { border-color: #ffb4ad; background: var(--red-soft); color: var(--red); }
+    .chip.info { border-color: #c5d5fa; background: var(--blue-soft); color: #174ea6; }
+    .chip.violet { border-color: #d7d0ff; background: var(--violet-soft); color: #5140b8; }
+
+    .source-strip {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0;
+      margin-bottom: 14px;
+      overflow: hidden;
+      box-shadow: none;
+    }
+    .source-item {
+      min-height: 72px;
+      padding: 12px;
+      border-right: 1px solid var(--line-soft);
+      background: var(--surface-soft);
+      min-width: 0;
+    }
+    .source-item:last-child { border-right: 0; }
+    .source-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .source-item strong {
+      display: block;
+      margin-top: 5px;
+      overflow-wrap: anywhere;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      min-height: 98px;
+      padding: 14px;
+      box-shadow: none;
+      border-top: 3px solid var(--blue);
+      min-width: 0;
+    }
+    .metric.green { border-top-color: var(--green); }
+    .metric.amber { border-top-color: var(--amber); }
+    .metric.red { border-top-color: var(--red); }
+    .metric.violet { border-top-color: var(--violet); }
+    .metric span {
+      color: var(--muted);
+      display: block;
+      font-size: 12px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .metric strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 22px;
+      line-height: 1.15;
+      overflow-wrap: anywhere;
+    }
+    .metric small {
+      color: var(--muted);
+      display: block;
+      margin-top: 7px;
+      overflow-wrap: anywhere;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, .85fr);
+      gap: 16px;
+    }
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 820px;
+      background: #fff;
+    }
+    th, td {
+      padding: 10px 11px;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: right;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
     th:first-child, td:first-child { text-align: left; }
-    th { color: var(--muted); font-size: 12px; background: #f7f9fc; }
+    th {
+      color: var(--muted);
+      background: var(--surface-soft);
+      font-size: 12px;
+      font-weight: 900;
+    }
     tr:last-child td { border-bottom: 0; }
-    .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .chart { padding: 12px; box-shadow: none; }
-    .bar-row { display: grid; grid-template-columns: 54px 1fr 70px; align-items: center; gap: 8px; margin: 9px 0; }
-    .bar { height: 10px; background: #ecf1f7; border-radius: 999px; overflow: hidden; }
-    .bar > span { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
-    .bar.green > span { background: var(--green); }
-    .bar.amber > span { background: var(--amber); }
-    .bar.violet > span { background: var(--violet); }
-    .alert { padding: 12px; border-left: 4px solid var(--amber); box-shadow: none; }
-    .alert.blocker { border-left-color: var(--red); }
-    .alert.info { border-left-color: var(--blue); }
-    .plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .plan { padding: 14px; box-shadow: none; display: grid; gap: 8px; }
-    .plan strong { font-size: 18px; }
-    .history-row { box-shadow: none; padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
-    .status { font-weight: 800; }
-    .ok { color: var(--green); }
-    .warn { color: var(--amber); }
-    .bad { color: var(--red); }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
-    .notice { padding: 10px 12px; border-radius: 8px; background: #fff8e8; border: 1px solid #f0d79b; color: #62420a; }
-    @media (max-width: 980px) {
+
+    .bar-group { display: grid; gap: 12px; }
+    .bar-line {
+      display: grid;
+      grid-template-columns: 54px minmax(120px, 1fr) 74px;
+      gap: 9px;
+      align-items: center;
+    }
+    .bar-track {
+      height: 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #edf2f7;
+    }
+    .bar-track span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+    .bar-track.green span { background: var(--green); }
+    .bar-track.amber span { background: var(--amber); }
+    .bar-track.red span { background: var(--red); }
+    .bar-track.violet span { background: var(--violet); }
+    .stacked-regime {
+      display: flex;
+      height: 14px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #edf2f7;
+    }
+    .stacked-regime span { display: block; height: 100%; }
+    .stacked-regime .bull { background: var(--green); }
+    .stacked-regime .bear { background: var(--red); }
+    .stacked-regime .range { background: var(--blue); }
+    .stacked-regime .transition { background: var(--violet); }
+
+    .alert-row, .history-row, .diag-row, .storage-row, .plan-row {
+      display: grid;
+      gap: 4px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .alert-row:last-child, .history-row:last-child, .diag-row:last-child, .storage-row:last-child, .plan-row:last-child {
+      border-bottom: 0;
+    }
+    .alert-row strong, .history-row strong, .diag-row strong, .storage-row strong, .plan-row strong {
+      overflow-wrap: anywhere;
+    }
+    .alert-row.warning strong, .alert-row.warn strong { color: var(--amber); }
+    .alert-row.error strong, .alert-row.blocker strong, .alert-row.bad strong { color: var(--red); }
+    .alert-row.info strong, .alert-row.ok strong { color: var(--blue); }
+    .notice {
+      border: 1px solid #f0d082;
+      border-radius: var(--radius);
+      background: var(--amber-soft);
+      color: #6f4608;
+      padding: 10px 11px;
+      overflow-wrap: anywhere;
+    }
+    .status-text.ok { color: var(--green); }
+    .status-text.warn { color: var(--amber); }
+    .status-text.bad { color: var(--red); }
+    .footer-note {
+      color: var(--muted);
+      margin-top: 12px;
+      max-width: 980px;
+    }
+
+    @media (max-width: 1120px) {
       .layout, .split { grid-template-columns: 1fr; }
       aside { position: static; }
-      .metrics, .charts, .plans { grid-template-columns: 1fr; }
+      .source-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .source-item:nth-child(2n) { border-right: 0; }
+    }
+    @media (max-width: 760px) {
+      .wrap { width: min(100% - 20px, 1440px); }
       .topbar { grid-template-columns: 1fr; }
-      .actions { justify-content: flex-start; }
-      th, td { white-space: normal; }
+      .top-actions { justify-content: flex-start; }
+      .metrics, .source-strip { grid-template-columns: 1fr; }
+      .source-item { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+      .source-item:last-child { border-bottom: 0; }
+      .bar-line { grid-template-columns: 44px minmax(90px, 1fr) 68px; }
+      button {
+        width: 100%;
+        min-height: 42px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .row button, .top-actions button {
+        width: auto;
+        white-space: nowrap;
+      }
     }
   </style>
 </head>
 <body>
   <header>
-    <div class="topbar">
-      <div>
-        <h1>Quant BTC Model</h1>
-        <p class="muted">Runs probabilistes live, audit, backtests publics, alertes et suivi client.</p>
+    <div class="wrap topbar">
+      <div class="title-block">
+        <div class="chip-row" id="topChips">
+          <span class="chip info">Worker -> Render</span>
+          <span class="chip ok">Bitget required</span>
+          <span class="chip violet">D1 storage</span>
+          <span class="chip warn">Probabilistic only</span>
+        </div>
+        <div>
+          <h1>Quant BTC Model Dashboard</h1>
+          <p class="subtitle">Console operationnelle pour runs BTC live, gouvernance, stockage durable, backtests visibles et alertes. Aucun chiffre n'est presente comme certitude.</p>
+        </div>
       </div>
-      <div class="actions">
+      <div class="top-actions">
         <button class="primary" id="runBtn">Lancer 5 frames</button>
-        <button class="secondary" id="pdfBtn">PDF</button>
-        <button class="ghost" id="refreshBtn">Rafraichir</button>
+        <button class="secondary" id="refreshBtn">Rafraichir</button>
+        <button class="quiet" id="pdfBtn">Rapport PDF</button>
       </div>
     </div>
   </header>
-  <main>
+
+  <main class="wrap">
     <div class="layout">
-      <aside class="stack">
-        <h3>Acces client</h3>
-        <div class="field">
-          <label for="clientKey">Client key</label>
-          <input id="clientKey" placeholder="qbtc_..." autocomplete="off">
+      <aside>
+        <div class="stack">
+          <h3>Commande</h3>
+          <button class="primary" id="runBtnSide">Run BTC 7/30/90/180/365</button>
+          <button class="secondary" id="refreshBtnSide">Audit + historique</button>
+          <p class="muted">Le dashboard appelle le Worker Cloudflare en production pour eviter le cold start et alimenter D1.</p>
         </div>
-        <div class="row">
-          <button class="secondary" id="saveKeyBtn">Enregistrer</button>
-          <button class="ghost" id="clearKeyBtn">Effacer</button>
+        <div class="stack">
+          <h3>Acces client</h3>
+          <div class="field">
+            <label for="clientKey">Client key</label>
+            <input id="clientKey" placeholder="qbtc_..." autocomplete="off">
+          </div>
+          <div class="row">
+            <button class="secondary" id="saveKeyBtn">Enregistrer</button>
+            <button class="quiet" id="clearKeyBtn">Effacer</button>
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" placeholder="client@email.com">
+          </div>
+          <div class="field">
+            <label for="plan">Plan</label>
+            <select id="plan">
+              <option value="free">Free</option>
+              <option value="analyst">Analyst</option>
+              <option value="pro">Pro</option>
+            </select>
+          </div>
+          <button id="registerBtn">Creer une cle</button>
+          <div id="clientBox" class="notice">Aucune cle client chargee.</div>
         </div>
-        <div class="field">
-          <label for="email">Email</label>
-          <input id="email" placeholder="client@email.com">
+        <div class="stack">
+          <h3>Alertes client</h3>
+          <div class="field">
+            <label for="alertChannel">Canal</label>
+            <select id="alertChannel">
+              <option value="webhook">Webhook</option>
+              <option value="discord">Discord</option>
+              <option value="telegram">Telegram</option>
+              <option value="email">Email</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="alertTarget">Cible</label>
+            <input id="alertTarget" placeholder="https://... ou email/chat_id">
+          </div>
+          <button id="subscribeBtn">Ajouter alerte</button>
         </div>
-        <div class="field">
-          <label for="plan">Plan</label>
-          <select id="plan"><option value="free">Free</option><option value="analyst">Analyst</option><option value="pro">Pro</option></select>
+        <div class="stack">
+          <h3>Etat</h3>
+          <p id="statusBox" class="status-text muted">Pret.</p>
         </div>
-        <button id="registerBtn">Creer une cle</button>
-        <div id="clientBox" class="notice">Aucune cle client chargee.</div>
-        <h3>Alertes</h3>
-        <div class="field">
-          <label for="alertChannel">Canal</label>
-          <select id="alertChannel"><option value="webhook">Webhook</option><option value="discord">Discord</option><option value="telegram">Telegram</option><option value="email">Email</option></select>
-        </div>
-        <div class="field">
-          <label for="alertTarget">Cible</label>
-          <input id="alertTarget" placeholder="https://... ou email/chat_id">
-        </div>
-        <button id="subscribeBtn">Ajouter alerte</button>
-        <div id="statusBox" class="muted">Pret.</div>
       </aside>
+
       <div>
+        <section class="source-strip" id="sourceStrip"></section>
         <section class="metrics" id="summary"></section>
         <section class="panel">
-          <h2>Distribution multi-frame</h2>
+          <div class="panel-head">
+            <div>
+              <h2>Distribution multi-frame</h2>
+              <p>Percentiles, probabilites, marges Monte Carlo et provenance par horizon.</p>
+            </div>
+            <span class="chip info" id="frameCountChip">0 frame</span>
+          </div>
           <div id="framesTable"></div>
         </section>
         <section class="split">
-          <div class="panel">
-            <h2>Surface de risque</h2>
-            <div class="charts" id="riskCharts"></div>
-          </div>
-          <div class="panel">
-            <h2>Alertes actives</h2>
-            <div class="stack" id="alertsBox"></div>
-          </div>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Surface de risque</h2>
+                <p>VaR/CVaR exprimees comme pertes positives; drawdown simule explicite.</p>
+              </div>
+            </div>
+            <div id="riskCharts"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Regimes</h2>
+                <p>Bull, bear, range et transition doivent totaliser pres de 100%.</p>
+              </div>
+            </div>
+            <div id="regimeCharts"></div>
+          </section>
         </section>
         <section class="split">
-          <div class="panel">
-            <h2>Backtests visibles</h2>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Gouvernance</h2>
+                <p>Audit pre-run, fraicheur data, statuts real/inferred/absent et policy de source.</p>
+              </div>
+            </div>
+            <div id="governanceBox"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Stockage durable</h2>
+                <p>D1 Cloudflare conserve les metadonnees utiles sans base massive brute.</p>
+              </div>
+            </div>
+            <div id="storageBox"></div>
+          </section>
+        </section>
+        <section class="split">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Diagnostics contexte</h2>
+                <p>Liquidite, options, ETF flows et stabilite multi-seed quand disponibles.</p>
+              </div>
+            </div>
+            <div id="diagnosticsBox"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Alertes actives</h2>
+                <p>Seuils de risque, transition de regime, confidence faible et data stale.</p>
+              </div>
+            </div>
+            <div id="alertsBox"></div>
+          </section>
+        </section>
+        <section class="split">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Backtests visibles</h2>
+                <p>Hit rate, Brier, couverture P10/P90, breaches VaR et benchmark random walk.</p>
+              </div>
+            </div>
             <div id="backtestBox"></div>
-          </div>
-          <div class="panel">
-            <h2>Plans et quotas</h2>
-            <div class="plans" id="plansBox"></div>
-          </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Comparaison dernier run</h2>
+                <p>Delta distribution, risque et confidence par rapport au run precedent.</p>
+              </div>
+            </div>
+            <div id="compareBox"></div>
+          </section>
         </section>
         <section class="split">
-          <div class="panel">
-            <h2>Historique</h2>
-            <div class="stack" id="historyBox"></div>
-          </div>
-          <div class="panel">
-            <h2>Comparaison dernier run</h2>
-            <div id="compareBox"></div>
-          </div>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Historique</h2>
+                <p>Archives recentes, D1 prioritaire si disponible, runtime Render en fallback.</p>
+              </div>
+            </div>
+            <div id="historyBox"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Plans et quotas</h2>
+                <p>Packaging commercial simple pour Whop, GPT Custom ou acces API.</p>
+              </div>
+            </div>
+            <div id="plansBox"></div>
+          </section>
         </section>
+        <p class="footer-note">Ce dashboard affiche des distributions, probabilites et risques. Il ne produit pas de prediction certaine, d'objectif garanti, ni de conseil financier.</p>
       </div>
     </div>
   </main>
+
   <script>
-    const state = { lastRun: null };
+    const WORKER_BASE = "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev";
+    const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+    const API_BASE = LOCAL_HOSTS.has(location.hostname) ? "" : WORKER_BASE;
+    const state = { lastRun: null, audit: null, storage: null, history: null };
     const $ = (id) => document.getElementById(id);
+    const esc = (value) => String(value ?? "absent").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[char]));
+    const rawNumber = (value) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
+    const first = (...values) => values.find((value) => value !== undefined && value !== null && value !== "");
+    const pct = (value, digits = 2) => {
+      const n = rawNumber(value);
+      return n === null ? "absent" : `${(n * 100).toFixed(digits)}%`;
+    };
+    const pctSigned = (value, digits = 2) => {
+      const n = rawNumber(value);
+      if (n === null) return "absent";
+      const sign = n > 0 ? "+" : "";
+      return `${sign}${(n * 100).toFixed(digits)}%`;
+    };
+    const usd = (value, digits = 0) => {
+      const n = rawNumber(value);
+      return n === null ? esc(value) : `$${n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits })}`;
+    };
+    const intText = (value) => {
+      const n = rawNumber(value);
+      return n === null ? "absent" : n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+    };
+    const setStatus = (message, kind = "") => {
+      $("statusBox").className = `status-text ${kind || "muted"}`;
+      $("statusBox").textContent = message;
+    };
     const headers = () => {
       const key = localStorage.getItem("qbtc_client_key") || "";
       return key ? { "x-client-key": key } : {};
     };
     const jsonHeaders = () => ({ "content-type": "application/json", ...headers() });
-    const pct = (v) => v == null ? "absent" : `${(Number(v) * 100).toFixed(2)}%`;
-    const usd = (v) => v == null ? "absent" : `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-    const text = (v) => v == null || v === "" ? "absent" : String(v);
-    const setStatus = (msg, kind = "") => { $("statusBox").className = kind || "muted"; $("statusBox").textContent = msg; };
-    function renderEmptyRun() {
-      $("summary").innerHTML = [
-        ["Run live", "Non lance", "Clique sur Lancer 5 frames"],
-        ["Spot Bitget", "Absent", "Sera cite avec timestamp UTC/Paris"],
-        ["Archive", "Absent", "Creee apres le run"],
-        ["Confidence", "Absent", "Disponible par horizon"],
-      ].map(([k,v,s]) => `<div class="metric"><small>${k}</small><strong>${v}</strong><small>${s}</small></div>`).join("");
-      $("framesTable").innerHTML = `<p class="muted">Aucun run charge. Lance une analyse live pour afficher P10, mediane, P90, VaR/CVaR, regimes et run_id.</p>`;
-      $("riskCharts").innerHTML = `<div class="chart"><h3>VaR 95 perte</h3><p class="muted">En attente du run.</p></div><div class="chart"><h3>Regime bull</h3><p class="muted">En attente du run.</p></div>`;
-      $("alertsBox").innerHTML = `<div class="alert info"><strong>En attente</strong><p>Les alertes s'affichent apres un run ou depuis la derniere archive.</p></div>`;
-    }
-    async function api(path, options = {}) {
-      const response = await fetch(path, { ...options, headers: { ...(options.headers || {}), ...headers() } });
+    const endpoint = (path, forceWorker = false) => {
+      if (path.startsWith("http")) return path;
+      if (forceWorker) return `${WORKER_BASE}${path}`;
+      return `${API_BASE}${path}`;
+    };
+    async function api(path, options = {}, forceWorker = false) {
+      const response = await fetch(endpoint(path, forceWorker), {
+        ...options,
+        headers: { ...(options.headers || {}), ...headers() }
+      });
       const data = await response.json().catch(() => ({ status: "error", error: "json_parse_failed" }));
-      if (!response.ok) throw new Error(data.detail || data.error || `HTTP ${response.status}`);
+      if (!response.ok) throw new Error(data.detail || data.error || data.message || `HTTP ${response.status}`);
       return data;
     }
-    function renderSummary(data) {
+
+    function sourceBadge(status) {
+      const s = String(status || "absent").toLowerCase();
+      if (s.includes("real") || s === "ok" || s === "fresh") return "ok";
+      if (s.includes("inferred") || s.includes("partial") || s.includes("warning")) return "warn";
+      if (s.includes("absent") || s.includes("error") || s.includes("stale")) return "bad";
+      return "info";
+    }
+    function setTopChips(version, storage) {
+      const worker = version?.cloudflare_bridge?.worker_version || version?.worker_version || storage?.worker_version || "Worker";
+      const schema = version?.cloudflare_bridge?.schema_version || version?.schema_version || "schema";
+      const d1 = storage?.status || state.storage?.status || "unknown";
+      $("topChips").innerHTML = [
+        `<span class="chip info">${esc(API_BASE ? "Worker -> Render" : "Local Render")}</span>`,
+        `<span class="chip ok">Bitget required</span>`,
+        `<span class="chip ${sourceBadge(d1)}">D1 ${esc(d1)}</span>`,
+        `<span class="chip violet">${esc(worker)}</span>`,
+        `<span class="chip warn">${esc(schema)}</span>`
+      ].join("");
+    }
+    function sourceItems(items) {
+      return items.map(([label, value]) => `<div class="source-item"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("");
+    }
+    function metric(label, value, sub, color = "blue") {
+      return `<div class="metric ${color}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(sub)}</small></div>`;
+    }
+    function emptyRows(message) {
+      return `<div class="diag-row"><strong class="muted">${esc(message)}</strong></div>`;
+    }
+    function renderInitial() {
+      $("sourceStrip").innerHTML = sourceItems([
+        ["Source", API_BASE ? "Cloudflare Worker" : "Local Render"],
+        ["Spot", "absent"],
+        ["Archive", "absent"],
+        ["Statut", "aucun run live"],
+        ["Heure", "UTC + Europe/Paris"]
+      ]);
+      $("summary").innerHTML = [
+        metric("Run live", "Non lance", "Lancer 5 frames pour creer une archive", "blue"),
+        metric("Spot Bitget", "absent", "Prix real requis avant calcul", "green"),
+        metric("D1 storage", "verification...", "Stockage durable externe gratuit", "violet"),
+        metric("Confidence", "absent", "Score par horizon apres run", "amber")
+      ].join("");
+      $("framesTable").innerHTML = `<p class="muted">Aucun run charge. Lance une analyse live pour afficher P10, mediane, P90, VaR/CVaR, regimes, run_id et marges Monte Carlo.</p>`;
+      $("riskCharts").innerHTML = emptyRows("En attente du run live.");
+      $("regimeCharts").innerHTML = emptyRows("En attente du run live.");
+      $("governanceBox").innerHTML = emptyRows("Audit en cours de chargement.");
+      $("storageBox").innerHTML = emptyRows("Statut D1 en cours de chargement.");
+      $("diagnosticsBox").innerHTML = emptyRows("Les diagnostics apparaissent apres un run.");
+      $("alertsBox").innerHTML = emptyRows("Aucune alerte chargee.");
+      $("backtestBox").innerHTML = emptyRows("Backtests en cours de chargement.");
+      $("compareBox").innerHTML = emptyRows("Deux archives sont necessaires pour comparer.");
+      $("historyBox").innerHTML = emptyRows("Historique en cours de chargement.");
+      $("plansBox").innerHTML = emptyRows("Plans en cours de chargement.");
+      $("frameCountChip").textContent = "0 frame";
+    }
+    function renderIdleSummary() {
+      if (state.lastRun) return;
+      const audit = state.audit || {};
+      const storage = state.storage || {};
+      const counts = storage.counts || {};
+      const ready = first(audit.ready_for_gpt_live_analysis, "unknown");
+      $("summary").innerHTML = [
+        metric("Audit", first(audit.status, "loading"), `ready_for_gpt_live_analysis: ${ready}`, sourceBadge(audit.status)),
+        metric("D1 storage", first(storage.status, "loading"), `${intText(counts.runs)} runs / ${intText(counts.usage_events)} usage events`, sourceBadge(storage.status)),
+        metric("Dernier run", "absent", "Lance 5 frames pour generer une archive fraiche", "blue"),
+        metric("Mode", API_BASE ? "Worker live" : "Local Render", "Bitget only, probabilistic output", "violet")
+      ].join("");
+    }
+
+    function spotFrom(data) {
       const prov = data.provenance_summary || {};
-      const archive = data.archive || {};
-      const firstSpot = (prov.reference_spots || [])[0];
-      const conf365 = (data.frames || []).find(f => f.horizon === 365)?.confidence?.score;
-      const spotFresh = data.freshness?.spot?.status || "absent";
-      const items = [
-        ["Spot Bitget", firstSpot, data.freshness?.spot?.age_seconds != null ? `${data.freshness.spot.age_seconds}s` : ""],
-        ["Archive", archive.archive_id || "absent", archive.created_at_paris || ""],
-        ["Statut donnees", data.data_status?.fundamental_variables || "absent", `spot ${spotFresh}`],
-        ["Confidence 365j", conf365 == null ? "absent" : `${conf365}/100`, "direction longue fragile si < 50"],
-      ];
-      $("summary").innerHTML = items.map(([k,v,s]) => `<div class="metric"><small>${k}</small><strong>${v}</strong><small>${s}</small></div>`).join("");
+      const spots = Array.isArray(prov.reference_spots) ? prov.reference_spots : [];
+      return first(data.reference_spot, data.spot, data.spot_price, prov.reference_spot, spots[0], data.archive?.reference_spot);
+    }
+    function spotTimestampFrom(data) {
+      const prov = data.provenance_summary || {};
+      const stamps = Array.isArray(prov.spot_timestamps) ? prov.spot_timestamps : [];
+      return first(data.spot_timestamp_utc, prov.spot_timestamp_utc, stamps[0], data.archive?.spot_timestamp_utc);
+    }
+    function runDateFrom(data) {
+      return first(data.report_date_utc, data.archive?.created_at_utc, data.archive?.report_date_utc, data.created_at_utc);
+    }
+    function runDateParisFrom(data) {
+      return first(data.report_date_paris, data.archive?.created_at_paris, data.archive?.report_date_paris, data.created_at_paris);
+    }
+    function framesFrom(data) {
+      return Array.isArray(data.frames) ? data.frames : [];
+    }
+    function confidenceValue(frame) {
+      return first(frame?.confidence?.score, frame?.confidence_score);
+    }
+    function riskValue(frame, key, fallback) {
+      const risk = frame?.risk_metrics || {};
+      return first(risk[key], risk[fallback]);
+    }
+    function regimeTransition(regime) {
+      const bull = rawNumber(regime?.bull) || 0;
+      const bear = rawNumber(regime?.bear) || 0;
+      const range = rawNumber(regime?.range) || 0;
+      return first(regime?.non_classified_transition, regime?.transition, regime?.non_classified, Math.max(0, 1 - bull - bear - range));
+    }
+    function regimeParts(frame) {
+      const reg = frame?.regime_distribution || {};
+      return {
+        bull: rawNumber(reg.bull) || 0,
+        bear: rawNumber(reg.bear) || 0,
+        range: rawNumber(reg.range) || 0,
+        transition: rawNumber(regimeTransition(reg)) || 0
+      };
+    }
+    function monteCarloMargin(frame, key = "prob_up") {
+      const margin = first(
+        frame?.monte_carlo_error?.probabilities?.[key]?.margin_95,
+        frame?.monte_carlo_error?.[key]?.margin_95,
+        frame?.mc_error?.[key]?.margin_95
+      );
+      return rawNumber(margin);
+    }
+
+    function renderRun(data) {
+      const frames = framesFrom(data);
+      const frame365 = frames.find((frame) => Number(frame.horizon) === 365) || frames[frames.length - 1] || {};
+      const spot = spotFrom(data);
+      const spotFresh = data.freshness?.spot || {};
+      const archiveId = data.archive?.archive_id || data.archive_id || "absent";
+      const var365 = riskValue(frame365, "var_95");
+      const conf365 = confidenceValue(frame365);
+      $("sourceStrip").innerHTML = sourceItems([
+        ["Archive", archiveId],
+        ["Run UTC", runDateFrom(data) || "absent"],
+        ["Run Paris", runDateParisFrom(data) || "absent"],
+        ["Spot Bitget", typeof spot === "number" ? usd(spot, 2) : spot],
+        ["Spot timestamp", spotTimestampFrom(data) || "absent"]
+      ]);
+      $("summary").innerHTML = [
+        metric("Frames", `${frames.length}/5`, "Horizons 7, 30, 90, 180, 365", frames.length === 5 ? "green" : "amber"),
+        metric("Spot freshness", first(spotFresh.status, "unknown"), spotFresh.age_seconds == null ? "age absent" : `${spotFresh.age_seconds}s vs max ${spotFresh.max_age_seconds || "?"}s`, sourceBadge(spotFresh.status)),
+        metric("VaR 365", pct(var365), "Perte positive simulee, 95%", rawNumber(var365) >= .30 ? "red" : "amber"),
+        metric("Confidence 365", conf365 == null ? "absent" : `${conf365}/100`, "Conclusion longue fragile si < 50", rawNumber(conf365) < 50 ? "red" : "green")
+      ].join("");
+      $("frameCountChip").textContent = `${frames.length} frame${frames.length > 1 ? "s" : ""}`;
+      renderFrames(data);
+      renderRisk(data);
+      renderRegimes(data);
+      renderDiagnostics(data);
+      renderAlerts(data);
+      renderGovernance(state.audit, data);
+      renderStorage(state.storage, data);
+      setTopChips(data.version || data, state.storage);
     }
     function renderFrames(data) {
-      const rows = (data.frames || []).map(f => {
-        const d = f.distribution || {}, r = f.risk_metrics || {}, c = f.confidence || {}, m = f.monte_carlo_error || {};
-        const margin = m.probabilities?.prob_up?.margin_95;
-        return `<tr><td>${f.horizon}j</td><td class="mono">${f.run_id}</td><td>${usd(d.p10_price)}</td><td>${usd(d.median_price)}</td><td>${usd(d.p90_price)}</td><td>${pct(d.prob_up)} ${margin == null ? "" : `+/- ${(margin*100).toFixed(2)}pt`}</td><td>${pct(r.var_95)}</td><td>${pct(r.cvar_95)}</td><td>${c.score ?? "absent"}/100</td></tr>`;
+      const rows = framesFrom(data).map((frame) => {
+        const dist = frame.distribution || {};
+        const risk = frame.risk_metrics || {};
+        const margin = monteCarloMargin(frame, "prob_up");
+        const stability = first(frame.multi_seed_stability?.bias_stability_label, "absent");
+        return `<tr>
+          <td>${esc(frame.horizon)}j</td>
+          <td class="mono">${esc(frame.run_id)}</td>
+          <td>${usd(dist.p10_price)}</td>
+          <td>${usd(dist.median_price)}</td>
+          <td>${usd(dist.p90_price)}</td>
+          <td>${pctSigned(dist.median_return)}</td>
+          <td>${pct(dist.prob_up)}${margin === null ? "" : ` +/- ${(margin * 100).toFixed(2)}pt`}</td>
+          <td>${pct(risk.var_95)}</td>
+          <td>${pct(risk.cvar_95)}</td>
+          <td>${pct(first(risk.expected_max_drawdown, risk.mean_simulated_max_drawdown, risk.max_drawdown))}</td>
+          <td>${esc(confidenceValue(frame) ?? "absent")}/100</td>
+          <td>${esc(stability)}</td>
+        </tr>`;
       }).join("");
-      $("framesTable").innerHTML = `<table><thead><tr><th>Horizon</th><th>Run ID</th><th>P10</th><th>Mediane</th><th>P90</th><th>P(up)</th><th>VaR95</th><th>CVaR95</th><th>Confidence</th></tr></thead><tbody>${rows}</tbody></table>`;
+      $("framesTable").innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>Horizon</th><th>Run ID</th><th>P10 prix</th><th>Mediane</th><th>P90 prix</th><th>Rdt median</th><th>P(up)</th><th>VaR95</th><th>CVaR95</th><th>Expected DD</th><th>Conf.</th><th>Multi-seed</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="12">Aucune frame retournee.</td></tr>`}</tbody>
+      </table></div>`;
     }
     function renderRisk(data) {
-      const frames = data.frames || [];
-      const riskBars = frames.map(f => `<div class="bar-row"><span>${f.horizon}j</span><div class="bar amber"><span style="width:${Math.min(100, (f.risk_metrics?.var_95 || 0) * 180)}%"></span></div><span>${pct(f.risk_metrics?.var_95)}</span></div>`).join("");
-      const regimeBars = frames.map(f => {
-        const reg = f.regime_distribution || {};
-        return `<div class="bar-row"><span>${f.horizon}j</span><div class="bar green"><span style="width:${Math.min(100, (reg.bull || 0) * 100)}%"></span></div><span>${pct(reg.bull)}</span></div>`;
+      const frames = framesFrom(data);
+      const varBars = frames.map((frame) => {
+        const v = rawNumber(riskValue(frame, "var_95")) || 0;
+        const c = rawNumber(riskValue(frame, "cvar_95")) || 0;
+        const color = v >= .30 ? "red" : v >= .18 ? "amber" : "green";
+        return `<div class="bar-line"><span>${esc(frame.horizon)}j</span><div class="bar-track ${color}"><span style="width:${Math.min(100, v * 160)}%"></span></div><strong>${pct(v)}</strong></div>
+        <div class="bar-line"><span>CVaR</span><div class="bar-track violet"><span style="width:${Math.min(100, c * 140)}%"></span></div><strong>${pct(c)}</strong></div>`;
       }).join("");
-      $("riskCharts").innerHTML = `<div class="chart"><h3>VaR 95 perte</h3>${riskBars}</div><div class="chart"><h3>Regime bull</h3>${regimeBars}</div>`;
+      const ddRows = frames.map((frame) => {
+        const r = frame.risk_metrics || {};
+        return `<tr><td>${esc(frame.horizon)}j</td><td>${pct(first(r.expected_max_drawdown, r.mean_simulated_max_drawdown, r.max_drawdown))}</td><td>${pct(r.median_max_drawdown)}</td><td>${pct(r.p95_max_drawdown)}</td><td>${pct(r.worst_sample_drawdown)}</td></tr>`;
+      }).join("");
+      $("riskCharts").innerHTML = `<div class="bar-group">${varBars || emptyRows("Risque absent.")}</div>
+        <div class="table-wrap" style="margin-top:14px"><table>
+          <thead><tr><th>Horizon</th><th>Expected max DD</th><th>Median DD</th><th>P95 DD</th><th>Worst sample DD</th></tr></thead>
+          <tbody>${ddRows || `<tr><td colspan="5">Drawdown absent.</td></tr>`}</tbody>
+        </table></div>`;
+    }
+    function renderRegimes(data) {
+      const rows = framesFrom(data).map((frame) => {
+        const p = regimeParts(frame);
+        const sum = p.bull + p.bear + p.range + p.transition;
+        const gap = Math.abs(1 - sum);
+        return `<div class="bar-line" style="grid-template-columns:54px minmax(140px,1fr) 90px">
+          <span>${esc(frame.horizon)}j</span>
+          <div class="stacked-regime" title="Bull / Bear / Range / Transition">
+            <span class="bull" style="width:${Math.max(0, p.bull * 100)}%"></span>
+            <span class="bear" style="width:${Math.max(0, p.bear * 100)}%"></span>
+            <span class="range" style="width:${Math.max(0, p.range * 100)}%"></span>
+            <span class="transition" style="width:${Math.max(0, p.transition * 100)}%"></span>
+          </div>
+          <strong>${gap <= .02 ? "ok" : `gap ${(gap * 100).toFixed(1)}pt`}</strong>
+        </div>
+        <div class="diag-row">
+          <strong>${esc(frame.horizon)}j: bull ${pct(p.bull)}, bear ${pct(p.bear)}, range ${pct(p.range)}, transition ${pct(p.transition)}</strong>
+          <span class="muted">Somme: ${(sum * 100).toFixed(2)}%. ${gap <= .02 ? "Coherence acceptable." : "Ne pas lire comme repartition complete."}</span>
+        </div>`;
+      }).join("");
+      $("regimeCharts").innerHTML = `<div class="bar-group">${rows || emptyRows("Regimes absents.")}</div>`;
     }
     function renderAlerts(data) {
-      const alerts = data.alerts || [];
-      $("alertsBox").innerHTML = alerts.length ? alerts.map(a => `<div class="alert ${a.level || ""}"><strong>${a.type}</strong><p>${a.message || `Horizon ${a.horizon ?? ""} valeur ${pct(a.value)}`}</p></div>`).join("") : `<div class="alert info"><strong>Aucune alerte</strong><p>Le dernier run ne signale pas de seuil critique.</p></div>`;
+      const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+      const warnings = [...(data.warnings || []), ...(data.freshness?.warnings || []), ...(data.monte_carlo_warnings || [])];
+      const alertHtml = alerts.map((alert) => {
+        const level = alert.level || alert.severity || "warning";
+        const title = alert.type || alert.code || level;
+        const message = alert.message || (alert.horizon ? `Horizon ${alert.horizon}j` : "Alerte sans detail.");
+        return `<div class="alert-row ${esc(level)}"><strong>${esc(title)}</strong><span class="muted">${esc(message)}</span></div>`;
+      }).join("");
+      const warningHtml = warnings.slice(0, 6).map((warning) => `<div class="alert-row warning"><strong>warning</strong><span class="muted">${esc(warning)}</span></div>`).join("");
+      $("alertsBox").innerHTML = alertHtml || warningHtml || `<div class="alert-row ok"><strong>Aucune alerte active</strong><span class="muted">Aucun seuil critique retourne par le dernier run.</span></div>`;
+    }
+    function renderDiagnostics(data) {
+      const frames = framesFrom(data);
+      const firstFrame = frames[0] || {};
+      const lastFrame = frames[frames.length - 1] || {};
+      const context = data.context_diagnostics || data.context || {};
+      const liquidity = context.liquidity || context.order_book || data.liquidity || {};
+      const options = context.options || data.options_context || {};
+      const etf = context.etf_flows || context.etf_flow_trend || data.etf_flow_trend || {};
+      const stability = lastFrame.multi_seed_stability || {};
+      const probUpStd = stability.metrics?.prob_up?.std;
+      const rows = [
+        ["Multi-seed", first(stability.bias_stability_label, "absent"), `runs ${first(stability.seed_runs, "absent")} / sims ${first(stability.simulations_per_seed, "absent")}`],
+        ["P(up) dispersion", probUpStd == null ? "absent" : pct(probUpStd), "Std entre seeds, horizon le plus long affiche"],
+        ["Liquidite", first(liquidity.status, liquidity.source, "absent"), `spread ${first(liquidity.spread_bps, liquidity.spread, "absent")}`],
+        ["Options", first(options.status, options.source, "absent"), `IV mediane ${pct(first(options.median_implied_volatility, options.iv_median))}`],
+        ["ETF flows", first(etf.status, etf.source, "absent"), `7d ${first(etf.flow_7d_usd_m, etf.flow_7d, "absent")} / 30d ${first(etf.flow_30d_usd_m, etf.flow_30d, "absent")}`],
+        ["Run sample", first(firstFrame.run_id, "absent"), `last ${first(lastFrame.run_id, "absent")}`]
+      ];
+      $("diagnosticsBox").innerHTML = rows.map(([k, v, s]) => `<div class="diag-row"><strong>${esc(k)}: ${esc(v)}</strong><span class="muted">${esc(s)}</span></div>`).join("");
+    }
+    function renderGovernance(audit, runData = state.lastRun) {
+      const data = audit || {};
+      const live = runData || {};
+      const blockers = data.blockers || [];
+      const warnings = data.warnings || [];
+      const sourcePolicy = first(data.source_policy, live.source_policy, "bitget_required_no_exchange_fallback");
+      const ready = first(data.ready_for_gpt_live_analysis, "unknown");
+      const statuses = live.data_status || data.data_status || {};
+      const rows = [
+        ["Audit", data.status || "absent", `ready_for_gpt_live_analysis: ${ready}`],
+        ["Source policy", sourcePolicy, "Aucun fallback non-Bitget pour le spot"],
+        ["Prix", first(statuses.market_prices, statuses.bitget_required, "real required"), "Donnee de marche observee"],
+        ["Simulations", first(statuses.simulation_outputs, statuses.simulations, "inferred"), "Trajectoires modelisees"],
+        ["Risques", first(statuses.risk_metrics, "inferred"), "VaR/CVaR/drawdown inferees"],
+        ["Fondamentaux", first(statuses.fundamental_variables, statuses.fundamentals, "partial_real_absent"), "Variables absentes affichees comme telles"],
+        ["Blockers", blockers.length, blockers.length ? blockers.join(" | ") : "aucun"],
+        ["Warnings", warnings.length, warnings.slice(0, 2).join(" | ") || "aucun warning audit"]
+      ];
+      $("governanceBox").innerHTML = rows.map(([k, v, s]) => `<div class="diag-row"><strong>${esc(k)}: ${esc(v)}</strong><span class="muted">${esc(s)}</span></div>`).join("");
+    }
+    function renderStorage(storage, runData = state.lastRun) {
+      const data = storage || {};
+      const counts = data.counts || {};
+      const queued = runData?.cloudflare_d1 || {};
+      const rows = [
+        ["D1 status", first(data.status, "absent"), first(data.database_name, data.reason, "quant-btc-model-lite-db")],
+        ["Runs stockes", intText(counts.runs), "Archives metadata persistantes"],
+        ["Usage events", intText(counts.usage_events), "Logs d'usage pour quotas"],
+        ["Clients", intText(counts.clients), "Cles API en stockage durable"],
+        ["Alert subscriptions", intText(counts.alert_subscriptions), "Abonnements webhook/email/chat"],
+        ["Dernier run", first(queued.status, queued.queued, "absent"), first(queued.note, queued.target, "cloudflare_d1")]
+      ];
+      $("storageBox").innerHTML = rows.map(([k, v, s]) => `<div class="storage-row"><strong>${esc(k)}: ${esc(v)}</strong><span class="muted">${esc(s)}</span></div>`).join("");
+    }
+    function renderHistory(data) {
+      state.history = data;
+      const d1Runs = Array.isArray(data.d1_recent_runs) ? data.d1_recent_runs : [];
+      const archives = d1Runs.length ? d1Runs : (Array.isArray(data.archives) ? data.archives : []);
+      const source = d1Runs.length ? "D1" : "runtime";
+      $("historyBox").innerHTML = archives.slice(0, 10).map((archive) => {
+        const spot = first(archive.reference_spot, archive.spot, "spot absent");
+        const created = first(archive.created_at_paris, archive.report_date_paris, archive.created_at_utc, archive.report_date_utc, "date absente");
+        const horizons = Array.isArray(archive.horizons) ? archive.horizons.join("/") : "single";
+        return `<div class="history-row"><strong class="mono">${esc(archive.archive_id || "archive_absente")}</strong><span class="muted">${esc(source)} | ${esc(created)} | ${esc(horizons)} | ${usd(spot, 2)}</span></div>`;
+      }).join("") || emptyRows("Aucun historique disponible.");
+      if (data.cloudflare_d1) {
+        state.storage = data.cloudflare_d1;
+        renderStorage(state.storage);
+      }
+    }
+    function renderCompare(data) {
+      if (!data || data.status !== "ok") {
+        $("compareBox").innerHTML = `<div class="diag-row"><strong>Comparaison absente</strong><span class="muted">${esc(data?.message || "Deux archives multi-frame sont necessaires.")}</span></div>`;
+        return;
+      }
+      const rows = (data.frames || []).map((frame) => `<tr><td>${esc(frame.horizon)}j</td><td>${pctSigned(frame.prob_up_delta)}</td><td>${pctSigned(frame.var_95_delta)}</td><td>${pctSigned(frame.cvar_95_delta)}</td><td>${esc(frame.confidence_delta ?? "absent")}</td></tr>`).join("");
+      $("compareBox").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Horizon</th><th>Delta P(up)</th><th>Delta VaR95</th><th>Delta CVaR95</th><th>Delta conf.</th></tr></thead><tbody>${rows || `<tr><td colspan="5">Aucun delta frame.</td></tr>`}</tbody></table></div>`;
+    }
+    function renderBacktests(data) {
+      const rows = data?.rows || data?.backtests || [];
+      $("backtestBox").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Horizon</th><th>Hit</th><th>Brier</th><th>P10/P90 cov.</th><th>VaR95 breach</th><th>RW Brier</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${esc(first(row.horizon_days, row.horizon, "absent"))}j</td><td>${pct(row.hit_rate)}</td><td>${row.brier_score == null ? "absent" : Number(row.brier_score).toFixed(3)}</td><td>${pct(row.p10_p90_coverage)}</td><td>${pct(row.var95_breach_rate)}</td><td>${row.random_walk_brier_score == null ? "absent" : Number(row.random_walk_brier_score).toFixed(3)}</td></tr>`).join("") || `<tr><td colspan="6">Backtests absents.</td></tr>`}</tbody></table></div>`;
+    }
+    function renderPlans(data) {
+      const plans = data?.plans || {};
+      const rows = Object.entries(plans).map(([id, plan]) => `<div class="plan-row"><strong>${esc(plan.name || id)}: ${esc(plan.price_eur ?? "absent")} EUR/mois</strong><span class="muted">${esc(plan.monthly_run_quota ?? "absent")} runs/mois | ${esc((plan.features || []).slice(0, 3).join(", "))}</span><button onclick="checkout('${esc(id)}')" ${id === "free" ? "disabled" : ""}>Checkout ${esc(plan.name || id)}</button></div>`).join("");
+      $("plansBox").innerHTML = rows || emptyRows("Plans absents.");
+    }
+    function renderClient(data) {
+      const usage = data?.client_usage || {};
+      if (!usage.authenticated) {
+        $("clientBox").innerHTML = "Aucune cle client chargee.";
+        return;
+      }
+      $("clientBox").innerHTML = `<strong>${esc(usage.plan)}</strong><br>${esc(usage.usage_this_month)}/${esc(usage.quota_runs_per_month)} runs ce mois<br><span class="mono">${esc(usage.client_id)}</span>`;
+    }
+
+    function toggleRunButtons(disabled) {
+      ["runBtn", "runBtnSide"].forEach((id) => { $(id).disabled = disabled; });
     }
     async function runLive() {
       setStatus("Run multi-frame en cours...");
-      const data = await api("/multi-run", { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ asset: "BTC" }) });
-      state.lastRun = data;
-      renderSummary(data); renderFrames(data); renderRisk(data); renderAlerts(data);
-      setStatus("Run termine.", "ok");
-      await refreshSecondary();
+      toggleRunButtons(true);
+      try {
+        const data = await api("/multi-run", { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ asset: "BTC" }) });
+        state.lastRun = data;
+        renderRun(data);
+        setStatus("Run termine et affiche.", "ok");
+        await refreshSecondary();
+      } catch (error) {
+        setStatus(error.message, "bad");
+      } finally {
+        toggleRunButtons(false);
+      }
     }
     async function refreshSecondary() {
-      const [history, compare, backtests, plans, me] = await Promise.allSettled([
-        api("/history"),
+      setStatus("Chargement audit, D1, historique...");
+      const calls = await Promise.allSettled([
+        api("/audit"),
+        api("/history?asset=BTC&limit=12"),
         api("/compare-runs"),
         api("/backtest-summary"),
         api("/billing/plans"),
         api("/clients/me"),
+        api("/d1/status", {}, true),
+        api("/alerts")
       ]);
+      const [audit, history, compare, backtests, plans, me, storage, alerts] = calls;
+      if (audit.status === "fulfilled") {
+        state.audit = audit.value;
+        renderGovernance(audit.value);
+        setTopChips(audit.value.version || audit.value, state.storage);
+        renderIdleSummary();
+      }
       if (history.status === "fulfilled") renderHistory(history.value);
       if (compare.status === "fulfilled") renderCompare(compare.value);
       if (backtests.status === "fulfilled") renderBacktests(backtests.value);
       if (plans.status === "fulfilled") renderPlans(plans.value);
       if (me.status === "fulfilled") renderClient(me.value);
-    }
-    function renderHistory(data) {
-      $("historyBox").innerHTML = (data.archives || []).slice(0, 8).map(a => `<div class="history-row"><div><strong>${a.archive_id}</strong><div class="muted">${a.created_at_paris || ""} | ${a.horizons?.join("/") || "single"} | ${a.reference_spot || "spot absent"}</div></div><span class="status ok">${a.status}</span></div>`).join("") || "<p class='muted'>Aucun historique runtime.</p>";
-    }
-    function renderCompare(data) {
-      if (data.status !== "ok") { $("compareBox").innerHTML = `<p class="muted">${data.message || "Comparaison absente."}</p>`; return; }
-      $("compareBox").innerHTML = `<table><thead><tr><th>Horizon</th><th>Delta P(up)</th><th>Delta VaR95</th><th>Delta conf.</th></tr></thead><tbody>${(data.frames || []).map(f => `<tr><td>${f.horizon}j</td><td>${pct(f.prob_up_delta)}</td><td>${pct(f.var_95_delta)}</td><td>${text(f.confidence_delta)}</td></tr>`).join("")}</tbody></table>`;
-    }
-    function renderBacktests(data) {
-      $("backtestBox").innerHTML = `<table><thead><tr><th>Horizon</th><th>Hit</th><th>Brier</th><th>P10/P90 cov.</th><th>VaR95 breach</th><th>RW Brier</th></tr></thead><tbody>${(data.rows || []).map(r => `<tr><td>${r.horizon_days}j</td><td>${pct(r.hit_rate)}</td><td>${r.brier_score == null ? "absent" : Number(r.brier_score).toFixed(3)}</td><td>${pct(r.p10_p90_coverage)}</td><td>${pct(r.var95_breach_rate)}</td><td>${r.random_walk_brier_score == null ? "absent" : Number(r.random_walk_brier_score).toFixed(3)}</td></tr>`).join("")}</tbody></table>`;
-    }
-    function renderPlans(data) {
-      const plans = data.plans || {};
-      $("plansBox").innerHTML = Object.entries(plans).map(([id, p]) => `<div class="plan"><span class="muted">${p.name}</span><strong>${p.price_eur} EUR/mois</strong><span>${p.monthly_run_quota} runs/mois</span><button onclick="checkout('${id}')" ${id === "free" ? "disabled" : ""}>Checkout</button></div>`).join("");
-    }
-    function renderClient(data) {
-      const usage = data.client_usage || {};
-      $("clientBox").innerHTML = usage.authenticated ? `<strong>${usage.plan}</strong><br>${usage.usage_this_month}/${usage.quota_runs_per_month} runs ce mois<br><span class="mono">${usage.client_id}</span>` : "Aucune cle client chargee.";
+      if (storage.status === "fulfilled") {
+        state.storage = storage.value;
+        renderStorage(storage.value);
+        setTopChips(state.audit?.version || state.audit || {}, storage.value);
+        renderIdleSummary();
+      }
+      if (alerts.status === "fulfilled" && !state.lastRun) renderAlerts(alerts.value);
+      const rejected = calls.filter((call) => call.status === "rejected");
+      setStatus(rejected.length ? `${rejected.length} bloc(s) secondaire(s) indisponible(s).` : "Dashboard a jour.", rejected.length ? "warn" : "ok");
     }
     async function checkout(plan) {
-      const body = { plan, email: $("email").value || undefined };
-      const data = await api("/billing/checkout", { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
-      if (data.checkout_url) location.href = data.checkout_url;
-      else setStatus(data.reason || data.error || "Stripe absent.", "warn");
+      try {
+        const body = { plan, email: $("email").value || undefined };
+        const data = await api("/billing/checkout", { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
+        if (data.checkout_url) location.href = data.checkout_url;
+        else setStatus(data.reason || data.error || "Checkout non configure.", "warn");
+      } catch (error) {
+        setStatus(error.message, "bad");
+      }
     }
-    $("runBtn").onclick = () => runLive().catch(e => setStatus(e.message, "bad"));
-    $("refreshBtn").onclick = () => refreshSecondary().catch(e => setStatus(e.message, "bad"));
-    $("pdfBtn").onclick = () => { location.href = "/pdf-report"; };
-    $("saveKeyBtn").onclick = () => { localStorage.setItem("qbtc_client_key", $("clientKey").value.trim()); refreshSecondary(); };
-    $("clearKeyBtn").onclick = () => { localStorage.removeItem("qbtc_client_key"); $("clientKey").value = ""; refreshSecondary(); };
-    $("registerBtn").onclick = async () => {
+    async function registerClient() {
       try {
         const data = await api("/clients/register", { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ email: $("email").value || null, plan: $("plan").value }) });
         localStorage.setItem("qbtc_client_key", data.client_key);
         $("clientKey").value = data.client_key;
         renderClient({ client_usage: { authenticated: true, client_id: data.client_id, plan: data.plan, usage_this_month: 0, quota_runs_per_month: data.quota_runs_per_month } });
         setStatus("Cle creee et stockee localement.", "ok");
-      } catch (e) { setStatus(e.message, "bad"); }
-    };
-    $("subscribeBtn").onclick = async () => {
+      } catch (error) {
+        setStatus(error.message, "bad");
+      }
+    }
+    async function subscribeAlert() {
       try {
         const body = { channel: $("alertChannel").value, target: $("alertTarget").value, min_level: "warning" };
         const data = await api("/alerts/subscribe", { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
         setStatus(`Alerte ajoutee: ${data.subscription_id}`, "ok");
-      } catch (e) { setStatus(e.message, "bad"); }
+        await refreshSecondary();
+      } catch (error) {
+        setStatus(error.message, "bad");
+      }
+    }
+    function openPdf() {
+      location.href = endpoint("/pdf-report");
+    }
+
+    $("runBtn").onclick = runLive;
+    $("runBtnSide").onclick = runLive;
+    $("refreshBtn").onclick = () => refreshSecondary().catch((error) => setStatus(error.message, "bad"));
+    $("refreshBtnSide").onclick = () => refreshSecondary().catch((error) => setStatus(error.message, "bad"));
+    $("pdfBtn").onclick = openPdf;
+    $("saveKeyBtn").onclick = () => {
+      localStorage.setItem("qbtc_client_key", $("clientKey").value.trim());
+      refreshSecondary().catch((error) => setStatus(error.message, "bad"));
     };
+    $("clearKeyBtn").onclick = () => {
+      localStorage.removeItem("qbtc_client_key");
+      $("clientKey").value = "";
+      refreshSecondary().catch((error) => setStatus(error.message, "bad"));
+    };
+    $("registerBtn").onclick = registerClient;
+    $("subscribeBtn").onclick = subscribeAlert;
     $("clientKey").value = localStorage.getItem("qbtc_client_key") || "";
-    renderEmptyRun();
-    refreshSecondary().catch(() => {});
+    renderInitial();
+    refreshSecondary().catch((error) => setStatus(error.message, "bad"));
   </script>
 </body>
 </html>
