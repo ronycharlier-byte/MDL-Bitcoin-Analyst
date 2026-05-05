@@ -62,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.16.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.16.0";
+const WORKER_VERSION = "1.17.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.17.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -194,7 +194,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -299,6 +299,31 @@ export default {
 
       if (url.pathname === "/pdf-report" && request.method === "GET") {
         return Response.redirect(renderUrl(`/pdf-report${url.search}`, env), 302);
+      }
+
+      if (url.pathname === "/analyze" && (request.method === "POST" || request.method === "GET")) {
+        const rateLimit = checkRateLimit(request, env);
+        if (!rateLimit.allowed) {
+          return json(rateLimitResponse(rateLimit), 429);
+        }
+        const input = await readInput(request, url);
+        const presetPath = analysisPresetPathFromInput(input);
+        const preset = ANALYSIS_PRESETS[presetPath];
+        const body = normalizeRenderPresetPayload(input, env, preset);
+        const result = await proxyRenderPost("/multi-run", body, env, request);
+        result.analysis_preset = {
+          ...publicAnalysisPreset(presetPath, env),
+          requested_endpoint: "/analyze",
+          requested_preset: preset.name
+        };
+        result.cloudflare_bridge = {
+          ...objectValue(result.cloudflare_bridge),
+          operation_path: "/analyze",
+          render_operation_path: "/multi-run",
+          analysis_preset: preset.name
+        };
+        result.cloudflare_d1 = queueD1RunPersist(result, "/analyze", body, env, ctx);
+        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
       if (ANALYSIS_PRESETS[url.pathname] && (request.method === "POST" || request.method === "GET")) {
@@ -465,6 +490,17 @@ function publicAnalysisPreset(path: string, env: Env): Record<string, unknown> {
 
 function publicAnalysisPresets(env: Env): Record<string, unknown>[] {
   return Object.keys(ANALYSIS_PRESETS).map((path) => publicAnalysisPreset(path, env));
+}
+
+function analysisPresetPathFromInput(input: Record<string, unknown>): string {
+  const preset = String(input.preset || input.mode || "deep").trim().toLowerCase();
+  if (preset === "quick" || preset === "standard" || preset === "default") {
+    return "/quick";
+  }
+  if (preset === "tactical" || preset === "short" || preset === "short_term") {
+    return "/tactical";
+  }
+  return "/deep";
 }
 
 function normalizeRenderModel(value: unknown): string {

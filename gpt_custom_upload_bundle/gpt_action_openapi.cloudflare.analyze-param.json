@@ -1,0 +1,125 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model GPT Analyze Schema",
+    "version": "1.17.0-analyze-param",
+    "description": "Minimal GPT Action schema for Quant BTC Model. One analysis endpoint, probabilistic outputs only."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "btcAnalyzeHealth",
+        "summary": "Health check",
+        "description": "Check Worker availability.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze": {
+      "get": {
+        "operationId": "btcAnalyze",
+        "summary": "Run BTC probabilistic analysis",
+        "description": "Run BTC probabilistic analysis. preset can be quick, tactical, or deep. Defaults to deep.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "description": "Analysis preset: quick, tactical, or deep. Use deep for full analysis.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "quick",
+                "tactical",
+                "deep"
+              ],
+              "default": "deep"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {}
+  }
+}
