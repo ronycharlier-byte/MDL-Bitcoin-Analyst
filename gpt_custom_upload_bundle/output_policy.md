@@ -60,6 +60,7 @@ Use these phrases when appropriate:
 - "Fundamental value unit/source/timestamp/status: [unit] / [source] / [timestamp] / [real|absent|inferred]."
 
 For current market analysis, prefer live Action responses over stored Knowledge snapshots. Use Cloudflare no-sleep by default; it bridges to the Render Bitget-backed Python engine. First call `auditQuantBtcLiteSystem` when available. For one horizon, use `runQuantBtcModel`. For multi-frame analysis, prefer `runQuantBtcMultiFrame`. If only `latestQuantBtcReport` is available, state that the report may be stale and do not call it real-time.
+Distinct preset Actions may be used when available: `runQuantBtcQuick` for standard 7/30/90/180/365 analysis, `runQuantBtcTactical` for short 1/3/7/14/30 analysis, and `runQuantBtcDeep` for full 1/3/7/14/30/90/180/365 higher-simulation reports.
 
 When a live response includes version metadata, include it in the provenance block or keep it available for audit. When a multi-frame response includes `shared_spot_snapshot`, cite it as the common reference price for all frames.
 When `fundamental_inputs` is present, use it as the only live source for fundamental field status and values.

@@ -7,7 +7,13 @@ Use this file as a short checklist after uploading the Cloudflare no-sleep Actio
 For a complete fresh analysis, the GPT should call:
 
 1. `auditQuantBtcLiteSystem`
-2. `runQuantBtcMultiFrame`
+2. `runQuantBtcMultiFrame` or a preset action.
+
+Preset actions:
+
+- `runQuantBtcQuick`: 7/30/90/180/365, 2k simulations per horizon.
+- `runQuantBtcTactical`: 1/3/7/14/30, 5k simulations per horizon.
+- `runQuantBtcDeep`: 1/3/7/14/30/90/180/365, up to 10k simulations per horizon.
 
 For one explicit horizon, the GPT should call:
 
@@ -63,6 +69,32 @@ Expected behavior:
 - Stops or reruns if two different archive IDs or spot timestamps are mixed.
 - Shows `report_date_utc` / `report_date_paris` and `reference_spot_timestamp_utc` / `reference_spot_timestamp_paris`.
 - Labels prices as real Bitget and simulations/risks as inferred.
+
+## Prompt 4
+
+```text
+Fais une analyse super complete BTC avec les frames courtes et longues, plus de simulations, marges Monte Carlo, backtests et limites.
+```
+
+Expected behavior:
+
+- Calls `auditQuantBtcLiteSystem`.
+- Calls `runQuantBtcDeep`.
+- Uses frames 1/3/7/14/30/90/180/365 when returned.
+- Shows Monte Carlo margins for key probabilities when present.
+- Mentions long-horizon VaR breach/backtest caveats when present.
+
+## Prompt 5
+
+```text
+Fais une lecture tactique BTC court terme 1/3/7/14/30 jours.
+```
+
+Expected behavior:
+
+- Calls `auditQuantBtcLiteSystem`.
+- Calls `runQuantBtcTactical`.
+- Treats 1d/3d as tactical and microstructure-sensitive, not as a strong deterministic signal.
 
 ## Failure Behavior
 

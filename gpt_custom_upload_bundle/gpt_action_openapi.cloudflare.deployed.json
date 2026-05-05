@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quant BTC Model Bitget Bridge Worker",
-    "version": "1.14.0",
+    "version": "1.15.0",
     "description": "Always-awake Cloudflare Worker facade for the Render Bitget-backed probabilistic BTC model. Outputs are probabilistic and must never be presented as certainty. Report and spot timestamps must be displayed as UTC and Europe/Paris."
   },
   "servers": [
@@ -359,6 +359,231 @@
                       "additionalProperties": true
                     },
                     "cloudflare_bridge": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Bitget bridge run failed JSON."
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          }
+        }
+      }
+    },
+    "/run-quick": {
+      "get": {
+        "operationId": "runQuantBtcQuick",
+        "summary": "Run the quick BTC multi-frame preset",
+        "description": "Distinct quick analysis URL. Uses Bitget through the Render bridge with frames [7,30,90,180,365] and 2000 simulations per horizon.",
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quick preset probabilistic JSON result with one archive_id, shared spot, frames, provenance, risk metrics, Monte Carlo margins and analysis_preset metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "analysis_preset": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "horizons": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "frames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "archive": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "cloudflare_bridge": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "data_status": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Bitget bridge run failed JSON."
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          }
+        }
+      }
+    },
+    "/run-tactical": {
+      "get": {
+        "operationId": "runQuantBtcTactical",
+        "summary": "Run the tactical short-frame BTC preset",
+        "description": "Distinct tactical analysis URL. Uses Bitget through the Render bridge with short frames [1,3,7,14,30] and 5000 simulations per horizon.",
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tactical preset probabilistic JSON result with short horizons, provenance, risk metrics, Monte Carlo margins and analysis_preset metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "analysis_preset": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "horizons": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "frames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "archive": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "cloudflare_bridge": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "data_status": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Bitget bridge run failed JSON."
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          }
+        }
+      }
+    },
+    "/run-deep": {
+      "get": {
+        "operationId": "runQuantBtcDeep",
+        "summary": "Run the deep full-frame BTC preset",
+        "description": "Distinct deep analysis URL. Uses Bitget through the Render bridge with frames [1,3,7,14,30,90,180,365] and up to 10000 simulations per horizon.",
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deep preset probabilistic JSON result with short and long frames, provenance, risk metrics, Monte Carlo margins, backtest caveats and analysis_preset metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "analysis_preset": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "horizons": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "frames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "archive": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "cloudflare_bridge": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "data_status": {
                       "type": "object",
                       "additionalProperties": true
                     }

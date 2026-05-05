@@ -8,7 +8,7 @@ preview_urls = false
 crons = ["*/5 * * * *"]
 
 [vars]
-MAX_SIMULATIONS = "5000"
+MAX_SIMULATIONS = "10000"
 DEFAULT_SIMULATIONS = "2000"
 DEFAULT_HORIZON = "365"
 DEFAULT_HORIZONS = "7,30,90,180,365"

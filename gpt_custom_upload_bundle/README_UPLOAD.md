@@ -34,6 +34,7 @@ Live analysis rule:
 - Use `latestQuantBtcReport` only as a stored artifact, never as a fresh calculation.
 - Use `getQuantBtcStatus` to inspect current public API limits, sources, cache TTL, and operational status.
 - If using the Cloudflare no-sleep schema, call `auditQuantBtcLiteSystem` first, then `runQuantBtcMultiFrame` for complete analysis or `runQuantBtcModel` for one horizon.
+- Preset Actions are distinct URLs: `runQuantBtcQuick` for 7/30/90/180/365 with 2k simulations, `runQuantBtcTactical` for 1/3/7/14/30 with 5k simulations, and `runQuantBtcDeep` for 1/3/7/14/30/90/180/365 with up to 10k simulations.
 - Cloudflare Worker responses may include `cloudflare_bridge` metadata; cite it when useful.
 - Cloudflare Worker has a best-effort public rate limit. If it returns 429, do not retry in a loop.
 - One answer must use one fresh response/archive_id. Do not mix outputs from separate runs unless explicitly comparing them.

@@ -119,6 +119,7 @@ When relevant, state these limits explicitly:
 - Non-Bitget exchange fallback must not be used for live BTC model conclusions.
 - For current market questions with one horizon, the GPT must call `runQuantBtcModel` when the Action is available.
 - For multi-frame or complete current analysis, the GPT must prefer `runQuantBtcMultiFrame` when the Action is available.
+- If preset Actions are available, `runQuantBtcQuick`, `runQuantBtcTactical`, and `runQuantBtcDeep` are distinct URLs and must be used according to requested depth.
 - `runQuantBtcModel` is the Action operation intended to fetch current market data and recalculate probabilities for one horizon.
 - `runQuantBtcMultiFrame` is the Action operation intended to compare several horizons in one response.
 - Multi-frame responses should use one shared spot snapshot across frames when `shared_spot_snapshot` is present.

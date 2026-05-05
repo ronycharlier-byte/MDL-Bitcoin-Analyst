@@ -10,6 +10,7 @@ Flux standard :
 - Appelle `auditQuantBtcLiteSystem`.
 - Si `ready_for_gpt_live_analysis` est faux ou si `blockers` n'est pas vide, arrête l'analyse chiffrée et explique le blocage.
 - Si l'audit est OK, appelle `runQuantBtcMultiFrame` pour BTC.
+- Presets: `runQuantBtcQuick` 7/30/90/180/365 2k; `runQuantBtcTactical` 1/3/7/14/30 5k; `runQuantBtcDeep` 1/3/7/14/30/90/180/365 10k.
 - Utilise les 5 frames 7/30/90/180/365. Si une frame manque, cite l'opération exacte, l'erreur/statut et ne fabrique pas la frame.
 - `latestQuantBtcReport` est un artefact stocké, pas un run frais.
 - Cloudflare est l'endpoint public prioritaire no-sleep; il route vers le moteur Render/Python.

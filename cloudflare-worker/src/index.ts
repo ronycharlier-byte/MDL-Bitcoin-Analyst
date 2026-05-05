@@ -1,4 +1,4 @@
-interface Env {
+﻿interface Env {
   DB?: D1Database;
   MAX_SIMULATIONS?: string;
   DEFAULT_SIMULATIONS?: string;
@@ -62,11 +62,35 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.14.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.14.0";
+const WORKER_VERSION = "1.15.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.15.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
+const SIMULATION_HARD_CAP = 10000;
+const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
+  "/run-quick": {
+    name: "quick",
+    label: "Quick multi-frame",
+    horizons: [7, 30, 90, 180, 365],
+    simulations: 2000,
+    description: "Standard live GPT analysis with the established 7/30/90/180/365 frames."
+  },
+  "/run-tactical": {
+    name: "tactical",
+    label: "Tactical short-frame",
+    horizons: [1, 3, 7, 14, 30],
+    simulations: 5000,
+    description: "Short-horizon analysis for 1/3/7/14/30 day risk, liquidity and regime sensitivity."
+  },
+  "/run-deep": {
+    name: "deep",
+    label: "Deep full-frame",
+    horizons: [1, 3, 7, 14, 30, 90, 180, 365],
+    simulations: 10000,
+    description: "Higher-power full-frame analysis for detailed reports, Monte Carlo margins and long-horizon caveats."
+  }
+};
 const USER_DISPLAY_TIMEZONE = "Europe/Paris";
 const TIMEZONE_POLICY = "Source timestamps are UTC. User-facing GPT answers must show both UTC and Europe/Paris when citing report dates or spot timestamps.";
 const rateLimitBuckets = new Map<string, number[]>();
@@ -109,10 +133,11 @@ export default {
           model_version: MODEL_VERSION,
           runtime: "cloudflare_worker",
           bridge_target: getRenderApiBase(env),
-          max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
-          default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
+          max_simulations: getMaxSimulations(env),
+          default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
           default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650),
           default_horizons: parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS),
+          analysis_presets: publicAnalysisPresets(env),
           rate_limit_runs_per_minute: getRateLimit(env).limit,
           rate_limit_window_seconds: getRateLimit(env).windowSeconds,
           supported_diagnostics: [
@@ -128,7 +153,8 @@ export default {
             "client_keys_quotas_usage_logs",
             "billing_plans_checkout_bridge",
             "alert_subscriptions",
-            "cloudflare_d1_free_durable_storage"
+            "cloudflare_d1_free_durable_storage",
+            "analysis_presets_quick_tactical_deep"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -147,12 +173,13 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
-            max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
-            default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
+            max_simulations: getMaxSimulations(env),
+            default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
             default_horizon: clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650),
             default_horizons: parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS),
+            analysis_presets: publicAnalysisPresets(env),
             rate_limit_runs_per_minute: getRateLimit(env).limit,
             rate_limit_window_seconds: getRateLimit(env).windowSeconds
           },
@@ -253,6 +280,25 @@ export default {
         return Response.redirect(renderUrl(`/pdf-report${url.search}`, env), 302);
       }
 
+      if (ANALYSIS_PRESETS[url.pathname] && (request.method === "POST" || request.method === "GET")) {
+        const rateLimit = checkRateLimit(request, env);
+        if (!rateLimit.allowed) {
+          return json(rateLimitResponse(rateLimit), 429);
+        }
+        const preset = ANALYSIS_PRESETS[url.pathname];
+        const body = normalizeRenderPresetPayload(await readInput(request, url), env, preset);
+        const result = await proxyRenderPost("/multi-run", body, env, request);
+        result.analysis_preset = publicAnalysisPreset(url.pathname, env);
+        result.cloudflare_bridge = {
+          ...objectValue(result.cloudflare_bridge),
+          operation_path: url.pathname,
+          render_operation_path: "/multi-run",
+          analysis_preset: preset.name
+        };
+        result.cloudflare_d1 = queueD1RunPersist(result, url.pathname, body, env, ctx);
+        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+      }
+
       if (url.pathname === "/run" && (request.method === "POST" || request.method === "GET")) {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
@@ -336,7 +382,7 @@ function renderUrl(path: string, env: Env): string {
 }
 
 function normalizeRenderRunPayload(input: Record<string, unknown>, env: Env): Record<string, unknown> {
-  const maxSimulations = clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000);
+  const maxSimulations = getMaxSimulations(env);
   const defaultSimulations = clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, maxSimulations);
   return {
     asset: normalizeAsset(input.asset),
@@ -349,7 +395,7 @@ function normalizeRenderRunPayload(input: Record<string, unknown>, env: Env): Re
 }
 
 function normalizeRenderMultiRunPayload(input: Record<string, unknown>, env: Env): Record<string, unknown> {
-  const maxSimulations = clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000);
+  const maxSimulations = getMaxSimulations(env);
   const defaultSimulations = clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, maxSimulations);
   return {
     asset: normalizeAsset(input.asset),
@@ -359,6 +405,45 @@ function normalizeRenderMultiRunPayload(input: Record<string, unknown>, env: Env
     skip_corpus: typeof input.skip_corpus === "boolean" ? input.skip_corpus : true,
     no_online: typeof input.no_online === "boolean" ? input.no_online : false
   };
+}
+
+function normalizeRenderPresetPayload(
+  input: Record<string, unknown>,
+  env: Env,
+  preset: { name: string; horizons: number[]; simulations: number }
+): Record<string, unknown> {
+  const max = getMaxSimulations(env);
+  return {
+    asset: normalizeAsset(input.asset),
+    horizons: preset.horizons,
+    simulations: Math.min(preset.simulations, max),
+    model: normalizeRenderModel(input.model),
+    skip_corpus: typeof input.skip_corpus === "boolean" ? input.skip_corpus : true,
+    no_online: typeof input.no_online === "boolean" ? input.no_online : false
+  };
+}
+
+function getMaxSimulations(env: Env): number {
+  return clampInt(parseNumber(env.MAX_SIMULATIONS, SIMULATION_HARD_CAP), 100, SIMULATION_HARD_CAP);
+}
+
+function publicAnalysisPreset(path: string, env: Env): Record<string, unknown> {
+  const preset = ANALYSIS_PRESETS[path];
+  const simulations = Math.min(preset.simulations, getMaxSimulations(env));
+  return {
+    name: preset.name,
+    label: preset.label,
+    endpoint: path,
+    horizons: preset.horizons,
+    simulations_per_horizon: simulations,
+    model: "ensemble",
+    description: preset.description,
+    status: simulations < preset.simulations ? "capped_by_runtime" : "ok"
+  };
+}
+
+function publicAnalysisPresets(env: Env): Record<string, unknown>[] {
+  return Object.keys(ANALYSIS_PRESETS).map((path) => publicAnalysisPreset(path, env));
 }
 
 function normalizeRenderModel(value: unknown): string {
@@ -887,7 +972,7 @@ async function runQuantLite(
     throw new Error("Only BTC is supported by the quant-lite Worker.");
   }
 
-  const maxSimulations = clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000);
+  const maxSimulations = getMaxSimulations(env);
   const defaultSimulations = clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, maxSimulations);
   const defaultHorizon = clampInt(parseNumber(env.DEFAULT_HORIZON, 365), 1, 3650);
   const requestedSimulations = clampInt(parseNumber(input.simulations, defaultSimulations), 100, 250000);
@@ -1070,7 +1155,7 @@ async function runQuantLiteMultiFrame(input: MultiRunRequest, env: Env): Promise
     throw new Error("Only BTC is supported by the quant-lite Worker.");
   }
 
-  const maxSimulations = clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000);
+  const maxSimulations = getMaxSimulations(env);
   const defaultSimulations = clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, maxSimulations);
   const requestedSimulations = clampInt(parseNumber(input.simulations, defaultSimulations), 100, 250000);
   const simulations = Math.min(requestedSimulations, maxSimulations);
