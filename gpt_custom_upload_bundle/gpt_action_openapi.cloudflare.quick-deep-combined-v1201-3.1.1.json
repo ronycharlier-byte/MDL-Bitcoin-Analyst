@@ -1,0 +1,123 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Quant BTC Quick And Deep Analyze V1201",
+    "version": "1.20.1-combined-3.1.1",
+    "description": "Single GPT Action set for the Quant BTC Model. Includes quick cached BTC analysis and deep cached BTC analysis on the same Cloudflare Worker domain."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/analyze": {
+      "get": {
+        "operationId": "btcQuickAnalyzeV1201",
+        "summary": "Analyze BTC with quick cached mode",
+        "description": "Run quick BTC probabilistic analysis using server-side quick mode: 7/30/90/180/365 day frames and 2000 simulations per horizon. No parameters.",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "report_date_paris": {
+                      "type": "string"
+                    },
+                    "reference_spot": {
+                      "type": "string"
+                    },
+                    "reference_spot_timestamp_utc": {
+                      "type": "string"
+                    },
+                    "frames_count": {
+                      "type": "integer"
+                    },
+                    "response_type": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze-deep": {
+      "get": {
+        "operationId": "btcDeepAnalyzeV1201",
+        "summary": "Analyze BTC with deep cached mode",
+        "description": "Run deep BTC probabilistic analysis using server-side deep mode: 1/3/7/14/30/90/180/365 day frames and up to 10000 simulations per horizon. No parameters.",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "report_date_paris": {
+                      "type": "string"
+                    },
+                    "reference_spot": {
+                      "type": "string"
+                    },
+                    "reference_spot_timestamp_utc": {
+                      "type": "string"
+                    },
+                    "frames_count": {
+                      "type": "integer"
+                    },
+                    "response_type": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
