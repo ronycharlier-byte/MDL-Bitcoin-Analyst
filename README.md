@@ -154,7 +154,7 @@ Productization layer:
 
 - Client keys are lightweight access tokens for quota tracking and usage logs.
 - Plans are defined in the API as Free, Analyst and Pro; Stripe checkout is inactive until `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ANALYST` and `STRIPE_PRICE_PRO` are configured.
-- Durable off-host storage can be enabled with `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY`, or with `EXTERNAL_ARCHIVE_WEBHOOK_URL`.
+- Durable off-host storage is now available for free through Cloudflare D1 on the Worker. Render can still mirror compact records to Supabase or an external webhook if those env vars are configured.
 - Alert delivery is best-effort: webhook/Discord use HTTPS targets, Telegram requires `TELEGRAM_BOT_TOKEN`, and email requires `ALERT_EMAIL_WEBHOOK_URL`.
 - Public backtests expose hit rate, Brier score, calibration error, P10/P90 coverage, VaR breach rates and random-walk benchmark fields.
 

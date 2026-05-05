@@ -90,7 +90,7 @@ Couche produit ajoutee :
 - Cles client pour quotas et logs d'usage.
 - Plans Free, Analyst et Pro exposes par l'API.
 - Checkout Stripe actif seulement si `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ANALYST` et `STRIPE_PRICE_PRO` sont configures.
-- Stockage durable externe via `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` ou `EXTERNAL_ARCHIVE_WEBHOOK_URL`.
+- Stockage durable gratuit via Cloudflare D1 cote Worker. Render peut encore miroir vers Supabase ou webhook externe si les variables sont configurees.
 - Alertes webhook, Discord, Telegram ou email en best-effort.
 - Backtests visibles : hit rate, Brier, calibration, couverture P10/P90, breaches VaR et benchmark random walk.
 

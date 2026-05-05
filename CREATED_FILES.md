@@ -67,6 +67,8 @@ This document records the autonomous brick added under `quant_btc_model`.
 
 - `api_server.py`: now exposes client keys, quotas, usage logs, billing plan metadata, Stripe Checkout creation, alert subscriptions and durable-storage status.
 - `cloudflare-worker/src/index.ts`: proxies product helper routes to the Render engine while preserving the no-sleep Worker entrypoint.
+- `cloudflare-worker/migrations/0001_quant_btc_storage.sql`: Cloudflare D1 schema for durable runs, usage events, clients and alert subscriptions.
+- `cloudflare-worker/wrangler.toml`: D1 binding `DB` for the free `quant-btc-model-lite-db` database.
 - `external_archive/runtime_events/`: ignored local JSONL runtime sink for compact run and usage events.
 
 ## Governance export

@@ -1,4 +1,5 @@
 interface Env {
+  DB?: D1Database;
   MAX_SIMULATIONS?: string;
   DEFAULT_SIMULATIONS?: string;
   DEFAULT_HORIZON?: string;
@@ -61,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.13.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.13.0";
+const WORKER_VERSION = "1.14.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.14.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -75,7 +76,7 @@ export default {
     ctx.waitUntil(warmRenderBitgetBridge(env));
   },
 
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -126,7 +127,8 @@ export default {
             "pdf_report_redirect",
             "client_keys_quotas_usage_logs",
             "billing_plans_checkout_bridge",
-            "alert_subscriptions"
+            "alert_subscriptions",
+            "cloudflare_d1_free_durable_storage"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -145,7 +147,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
@@ -175,6 +177,12 @@ export default {
               "bitget_uta_liquidation_ws_btcusdt_quote_observed_window"
             ],
             corpus_knowledge_base: "absent"
+          },
+          durable_storage: {
+            cloudflare_d1: env.DB ? "configured" : "absent",
+            database_name: "quant-btc-model-lite-db",
+            free_tier_role: "durable run, usage, client and alert metadata storage",
+            render_runtime_storage: "secondary"
           },
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
@@ -210,13 +218,30 @@ export default {
         return json(withBridgeMetadata(result, "/audit", env));
       }
 
+      if (url.pathname === "/d1/status" && request.method === "GET") {
+        return json(await d1Status(env));
+      }
+
       if (["/history", "/compare-runs", "/alerts", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/clients/me", "/usage-summary"].includes(url.pathname) && request.method === "GET") {
         const result = await proxyRenderGet(`${url.pathname}${url.search}`, env, request);
-        return json(withBridgeMetadata(result, url.pathname, env));
+        const bridged = withBridgeMetadata(result, url.pathname, env);
+        if (url.pathname === "/history") {
+          bridged.cloudflare_d1 = await d1Status(env);
+          bridged.d1_recent_runs = await listD1Runs(env, normalizeAsset(url.searchParams.get("asset") || "BTC"), clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50));
+        }
+        return json(bridged);
       }
 
       if (["/clients/register", "/alerts/subscribe", "/billing/checkout"].includes(url.pathname) && request.method === "POST") {
         const result = await proxyRenderPost(url.pathname, await readJson(request), env, request);
+        if (url.pathname === "/clients/register") {
+          const queued = queueD1ClientPersist(result, env, ctx);
+          result.cloudflare_d1 = queued;
+        }
+        if (url.pathname === "/alerts/subscribe") {
+          const queued = queueD1AlertSubscriptionPersist(result, env, ctx);
+          result.cloudflare_d1 = queued;
+        }
         return json(result);
       }
 
@@ -237,10 +262,12 @@ export default {
         if (shouldRouteRunAsMultiFrame(input)) {
           const body = normalizeRenderMultiRunPayload(input, env);
           const result = await proxyRenderPost("/multi-run", body, env, request);
+          result.cloudflare_d1 = queueD1RunPersist(result, "/multi-run", body, env, ctx);
           return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
         }
         const body = normalizeRenderRunPayload(input, env);
         const result = await proxyRenderPost("/run", body, env, request);
+        result.cloudflare_d1 = queueD1RunPersist(result, "/run", body, env, ctx);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
@@ -251,6 +278,7 @@ export default {
         }
         const body = normalizeRenderMultiRunPayload(await readInput(request, url), env);
         const result = await proxyRenderPost("/multi-run", body, env, request);
+        result.cloudflare_d1 = queueD1RunPersist(result, "/multi-run", body, env, ctx);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
@@ -451,6 +479,322 @@ function withBridgeMetadata(result: Record<string, unknown>, path: string, env: 
       non_bitget_market_fallback: "absent"
     }
   };
+}
+
+function queueD1RunPersist(
+  result: Record<string, unknown>,
+  endpoint: string,
+  requestBody: Record<string, unknown>,
+  env: Env,
+  ctx: ExecutionContext
+): Record<string, unknown> {
+  if (!env.DB) {
+    return { status: "absent", target: "cloudflare_d1", reason: "DB binding is not configured" };
+  }
+  const archiveId = archiveIdFromPayload(result);
+  ctx.waitUntil(persistRunToD1(result, endpoint, requestBody, env));
+  ctx.waitUntil(persistUsageToD1(result, endpoint, requestBody, env));
+  return {
+    status: "queued",
+    target: "cloudflare_d1",
+    database_name: "quant-btc-model-lite-db",
+    archive_id: archiveId,
+    note: "Compact run and usage metadata are written asynchronously to D1."
+  };
+}
+
+function queueD1ClientPersist(result: Record<string, unknown>, env: Env, ctx: ExecutionContext): Record<string, unknown> {
+  if (!env.DB) {
+    return { status: "absent", target: "cloudflare_d1", reason: "DB binding is not configured" };
+  }
+  ctx.waitUntil(persistClientToD1(result, env));
+  return {
+    status: "queued",
+    target: "cloudflare_d1",
+    database_name: "quant-btc-model-lite-db",
+    client_id: typeof result.client_id === "string" ? result.client_id : null
+  };
+}
+
+function queueD1AlertSubscriptionPersist(result: Record<string, unknown>, env: Env, ctx: ExecutionContext): Record<string, unknown> {
+  if (!env.DB) {
+    return { status: "absent", target: "cloudflare_d1", reason: "DB binding is not configured" };
+  }
+  ctx.waitUntil(persistAlertSubscriptionToD1(result, env));
+  return {
+    status: "queued",
+    target: "cloudflare_d1",
+    database_name: "quant-btc-model-lite-db",
+    subscription_id: typeof result.subscription_id === "string" ? result.subscription_id : null
+  };
+}
+
+async function persistRunToD1(
+  result: Record<string, unknown>,
+  endpoint: string,
+  requestBody: Record<string, unknown>,
+  env: Env
+): Promise<void> {
+  if (!env.DB) {
+    return;
+  }
+  const compact = compactRunPayload(result);
+  const archiveId = compact.archive_id || `${new Date().toISOString()}_${randomRunSuffix()}`;
+  const version = objectValue(result.version);
+  await env.DB.prepare(`
+    INSERT OR REPLACE INTO quant_runs (
+      archive_id, asset, model, horizons_json, run_ids_json, report_date_utc,
+      reference_spot, status, api_version, worker_version, render_git_commit,
+      payload_json, created_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    String(archiveId),
+    stringOrNull(result.asset) || normalizeAsset(requestBody.asset),
+    stringOrNull(result.model) || stringOrNull(requestBody.model),
+    JSON.stringify(compact.horizons || []),
+    JSON.stringify(compact.run_ids || []),
+    compact.report_date_utc || new Date().toISOString(),
+    compact.reference_spot,
+    stringOrNull(result.status) || "ok",
+    stringOrNull(version.api_version),
+    WORKER_VERSION,
+    stringOrNull(version.git_commit),
+    JSON.stringify(compact),
+    new Date().toISOString()
+  ).run();
+}
+
+async function persistUsageToD1(
+  result: Record<string, unknown>,
+  endpoint: string,
+  requestBody: Record<string, unknown>,
+  env: Env
+): Promise<void> {
+  if (!env.DB) {
+    return;
+  }
+  const clientUsage = objectValue(result.client_usage);
+  const horizons = Array.isArray(result.horizons)
+    ? result.horizons
+    : Array.isArray(requestBody.horizons)
+      ? requestBody.horizons
+      : requestBody.horizon ? [requestBody.horizon] : [];
+  await env.DB.prepare(`
+    INSERT INTO usage_events (
+      client_id, endpoint, asset, model, horizons_json, simulations,
+      archive_id, status, created_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    stringOrNull(clientUsage.client_id),
+    endpoint,
+    stringOrNull(result.asset) || normalizeAsset(requestBody.asset),
+    stringOrNull(result.model) || stringOrNull(requestBody.model),
+    JSON.stringify(horizons),
+    numberOrNull(result.simulations_per_horizon) || numberOrNull(result.simulations) || numberOrNull(requestBody.simulations),
+    archiveIdFromPayload(result),
+    stringOrNull(result.status) || "ok",
+    new Date().toISOString()
+  ).run();
+}
+
+async function persistClientToD1(result: Record<string, unknown>, env: Env): Promise<void> {
+  if (!env.DB || typeof result.client_id !== "string") {
+    return;
+  }
+  await env.DB.prepare(`
+    INSERT OR REPLACE INTO api_clients (
+      client_id, email, plan, quota_runs_per_month, status,
+      created_at_utc, updated_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    result.client_id,
+    stringOrNull(result.email),
+    stringOrNull(result.plan),
+    numberOrNull(result.quota_runs_per_month),
+    stringOrNull(result.status) || "ok",
+    stringOrNull(result.created_at_utc) || new Date().toISOString(),
+    new Date().toISOString()
+  ).run();
+}
+
+async function persistAlertSubscriptionToD1(result: Record<string, unknown>, env: Env): Promise<void> {
+  if (!env.DB || typeof result.subscription_id !== "string") {
+    return;
+  }
+  await env.DB.prepare(`
+    INSERT OR REPLACE INTO alert_subscriptions (
+      subscription_id, client_id, channel, target, min_level, status, created_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    result.subscription_id,
+    stringOrNull(result.client_id),
+    stringOrNull(result.channel) || "webhook",
+    stringOrNull(result.target) || "absent",
+    stringOrNull(result.min_level) || "warning",
+    stringOrNull(result.status) || "ok",
+    stringOrNull(result.created_at_utc) || new Date().toISOString()
+  ).run();
+}
+
+async function d1Status(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", target: "cloudflare_d1", reason: "DB binding is not configured" };
+  }
+  try {
+    const [runs, usage, clients, subscriptions] = await env.DB.batch([
+      env.DB.prepare("SELECT COUNT(*) AS count FROM quant_runs"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM usage_events"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM api_clients"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM alert_subscriptions")
+    ]);
+    return {
+      status: "ok",
+      target: "cloudflare_d1",
+      database_name: "quant-btc-model-lite-db",
+      binding: "DB",
+      counts: {
+        runs: countFromD1(runs),
+        usage_events: countFromD1(usage),
+        clients: countFromD1(clients),
+        alert_subscriptions: countFromD1(subscriptions)
+      },
+      free_tier_role: "durable metadata storage for run archives, usage logs, clients and alert subscriptions",
+      checked_at_utc: new Date().toISOString(),
+      checked_at_paris: parisIso(new Date())
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      target: "cloudflare_d1",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function listD1Runs(env: Env, asset: string, limit: number): Promise<Record<string, unknown>[]> {
+  if (!env.DB) {
+    return [];
+  }
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT archive_id, asset, model, horizons_json, report_date_utc,
+             reference_spot, status, api_version, worker_version,
+             render_git_commit, created_at_utc
+      FROM quant_runs
+      WHERE asset = ?
+      ORDER BY created_at_utc DESC
+      LIMIT ?
+    `).bind(asset, limit).all();
+    return (results || []).map((row) => ({
+      archive_id: row.archive_id,
+      asset: row.asset,
+      model: row.model,
+      horizons: parseStoredJsonArray(row.horizons_json),
+      report_date_utc: row.report_date_utc,
+      report_date_paris: typeof row.report_date_utc === "string" ? parisIso(new Date(row.report_date_utc)) : null,
+      reference_spot: row.reference_spot,
+      status: row.status,
+      api_version: row.api_version,
+      worker_version: row.worker_version,
+      render_git_commit: row.render_git_commit,
+      created_at_utc: row.created_at_utc,
+      created_at_paris: typeof row.created_at_utc === "string" ? parisIso(new Date(row.created_at_utc)) : null
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function compactRunPayload(result: Record<string, unknown>): Record<string, unknown> {
+  const archive = objectValue(result.archive);
+  const provenance = objectValue(result.provenance_summary);
+  const referenceSpots = Array.isArray(provenance.reference_spots) ? provenance.reference_spots : [];
+  const frames = Array.isArray(result.frames) ? result.frames.map((item) => {
+    const frame = objectValue(item);
+    return {
+      horizon: frame.horizon,
+      run_id: frame.run_id,
+      distribution: frame.distribution,
+      regime_distribution: frame.regime_distribution,
+      risk_metrics: frame.risk_metrics,
+      confidence: frame.confidence,
+      monte_carlo_error: compactMonteCarloError(objectValue(frame.monte_carlo_error)),
+      multi_seed_stability: compactStability(objectValue(frame.multi_seed_stability))
+    };
+  }) : [];
+  return {
+    schema: "cloudflare_d1_quant_btc_run_v1",
+    archive_id: stringOrNull(archive.archive_id) || stringOrNull(provenance.archive_id),
+    asset: result.asset,
+    model: result.model,
+    horizons: Array.isArray(result.horizons) ? result.horizons : frames.map((frame) => frame.horizon),
+    run_ids: frames.map((frame) => frame.run_id).filter(Boolean),
+    report_date_utc: stringOrNull(provenance.report_date_utc) || stringOrNull(provenance.report_date),
+    report_date_paris: stringOrNull(provenance.report_date_paris),
+    reference_spot: referenceSpots.length ? referenceSpots[0] : null,
+    data_status: result.data_status,
+    alerts: result.alerts,
+    version: result.version,
+    cloudflare_bridge: result.cloudflare_bridge,
+    frames,
+    stored_at_utc: new Date().toISOString(),
+    storage_policy: "Compact D1 record; raw simulation paths and massive payloads are excluded."
+  };
+}
+
+function compactMonteCarloError(value: Record<string, unknown>): Record<string, unknown> {
+  return {
+    status: value.status,
+    method: value.method,
+    tail_counts: value.tail_counts,
+    warnings: value.warnings
+  };
+}
+
+function compactStability(value: Record<string, unknown>): Record<string, unknown> {
+  return {
+    status: value.status,
+    seed_runs: value.seed_runs,
+    simulations_per_seed: value.simulations_per_seed,
+    directional_stability: value.directional_stability,
+    bias_stability_label: value.bias_stability_label
+  };
+}
+
+function archiveIdFromPayload(payload: Record<string, unknown>): string | null {
+  const archive = objectValue(payload.archive);
+  const provenance = objectValue(payload.provenance_summary);
+  return stringOrNull(archive.archive_id) || stringOrNull(provenance.archive_id);
+}
+
+function countFromD1(result: D1Result<unknown>): number {
+  const first = objectValue(result.results?.[0]);
+  return Number(first.count || 0);
+}
+
+function parseStoredJsonArray(value: unknown): unknown[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 async function warmRenderBitgetBridge(env: Env): Promise<void> {

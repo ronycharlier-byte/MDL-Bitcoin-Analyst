@@ -37,11 +37,9 @@ This repo includes `render.yaml`.
 
 Render free services can sleep. Use Render only for the full Python/Docker engine when sleeping is acceptable or when the service is on a paid no-sleep plan.
 
-Optional production environment variables:
+Optional Render production environment variables:
 
 ```text
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=...
 EXTERNAL_ARCHIVE_WEBHOOK_URL=https://your-storage-webhook.example.com
 CLIENT_KEY_HASH_SECRET=long-random-secret
 STRIPE_SECRET_KEY=sk_live_or_test_...
@@ -54,6 +52,23 @@ ALERT_EMAIL_WEBHOOK_URL=https://your-email-provider-webhook.example.com
 ```
 
 If these are absent, the API still runs and returns explicit `absent` statuses instead of fabricating storage, payment or alert delivery.
+
+Cloudflare D1 is the default free durable store for the Worker. It is configured in `cloudflare-worker/wrangler.toml`:
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "quant-btc-model-lite-db"
+database_id = "db04fd15-f1ac-46c7-9a08-755757849a24"
+migrations_dir = "migrations"
+```
+
+Apply D1 migrations:
+
+```powershell
+cd cloudflare-worker
+npx wrangler d1 migrations apply quant-btc-model-lite-db --remote
+```
 
 ## Cloudflare Worker no-sleep option
 

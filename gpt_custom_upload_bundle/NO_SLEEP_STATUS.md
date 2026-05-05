@@ -28,9 +28,10 @@ Status:
 - Deployed and publicly reachable over HTTPS.
 - TypeScript check passes.
 - GPT Action schema generated and copied into `gpt_custom_upload_bundle/`.
-- `/health`, `/version`, `/status`, `/audit`, `/latest`, `/run`, and `/multi-run` tested successfully.
-- Worker version: `1.11.0`.
-- Backend API target version: `1.7.0`.
+- `/health`, `/version`, `/status`, `/audit`, `/latest`, `/run`, `/multi-run`, `/d1/status`, `/history`, `/billing/plans`, `/clients/me`, and `/backtest-summary` tested successfully.
+- Worker version: `1.14.0`.
+- Backend API target version: `1.9.0`.
+- Cloudflare D1 durable storage: configured as `quant-btc-model-lite-db`.
 - User-facing timestamp policy: cite UTC and Europe/Paris for report, archive, cache, audit, and spot timestamps.
 
 Public endpoint:
@@ -62,6 +63,7 @@ Live data note:
 - The Worker bridges `/run`, `/multi-run`, and `/latest` to the Render Bitget-backed API.
 - No non-Bitget exchange fallback is used for live model conclusions. If the bridge fails, live output is absent.
 - Cloudflare Cron warms the Render bridge every 5 minutes.
+- D1 stores compact run metadata, usage logs, client metadata, and alert subscriptions without raw simulation arrays.
 - Public run endpoints have a best-effort per-IP rate limit and simulation caps for safety.
 
 Important limitation:
