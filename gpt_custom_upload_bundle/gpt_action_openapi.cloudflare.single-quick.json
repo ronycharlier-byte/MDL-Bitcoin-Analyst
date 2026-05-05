@@ -1,0 +1,80 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model GPT single quick",
+    "version": "1.15.6-single-quick",
+    "description": "Single-run isolation schema for GPT Actions. BTC is implicit. Probabilistic outputs only."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "healthQuick",
+        "summary": "Health check",
+        "description": "Check Worker availability.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/run-quick": {
+      "get": {
+        "operationId": "runQuantBtcQuickOnly",
+        "summary": "Run quick BTC preset",
+        "description": "Run quick BTC preset",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BasicResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "archive_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "report_markdown": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
