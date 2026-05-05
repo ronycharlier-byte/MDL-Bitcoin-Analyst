@@ -43,14 +43,16 @@
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -90,14 +92,16 @@
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -137,14 +141,16 @@
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -206,22 +212,26 @@
                     },
                     "fundamental_snapshot": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "latest_runtime_archive": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "version": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -264,27 +274,32 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     },
                     "provenance_summary": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "archive": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -339,31 +354,37 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     },
                     "provenance_summary": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "fundamental_inputs": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "archive": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -410,7 +431,8 @@
                     },
                     "analysis_preset": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "horizons": {
                       "type": "array",
@@ -422,23 +444,27 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     },
                     "archive": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -485,7 +511,8 @@
                     },
                     "analysis_preset": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "horizons": {
                       "type": "array",
@@ -497,23 +524,27 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     },
                     "archive": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -560,7 +591,8 @@
                     },
                     "analysis_preset": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "horizons": {
                       "type": "array",
@@ -572,23 +604,27 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     },
                     "archive": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -634,14 +670,16 @@
                     },
                     "cloudflare_bridge": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     },
                     "data_status": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -668,15 +706,17 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     },
                     "durable_storage": {
                       "type": "object",
-                      "additionalProperties": true
+                      "additionalProperties": {},
+                      "properties": {}
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -709,11 +749,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -740,11 +781,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -771,11 +813,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": {},
+                        "properties": {}
                       }
                     }
                   },
-                  "additionalProperties": true
+                  "additionalProperties": {}
                 }
               }
             }

@@ -1,4 +1,4 @@
-﻿openapi: 3.1.0
+openapi: 3.1.0
 info:
   title: Quant BTC Model Bitget Bridge Worker
   version: 1.15.0
@@ -34,11 +34,13 @@ paths:
                     type: string
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
   /version:
     get:
       operationId: getQuantBtcLiteVersion
@@ -65,11 +67,13 @@ paths:
                     type: string
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
   /status:
     get:
       operationId: getQuantBtcLiteStatus
@@ -96,11 +100,13 @@ paths:
                     type: string
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
   /audit:
     get:
       operationId: auditQuantBtcLiteSystem
@@ -145,17 +151,21 @@ paths:
                     type: string
                   fundamental_snapshot:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   latest_runtime_archive:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   version:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
   /run:
     get:
       operationId: runQuantBtcModel
@@ -188,20 +198,25 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
                   provenance_summary:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   archive:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
         '500':
           description: Bitget bridge run failed JSON.
         '429':
@@ -243,23 +258,29 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
                   provenance_summary:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   fundamental_inputs:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   archive:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
         '500':
           description: Bitget bridge run failed JSON.
         '429':
@@ -294,7 +315,8 @@ paths:
                     type: string
                   analysis_preset:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   horizons:
                     type: array
                     items:
@@ -303,17 +325,21 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
                   archive:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
         '500':
           description: Bitget bridge run failed JSON.
         '429':
@@ -347,7 +373,8 @@ paths:
                     type: string
                   analysis_preset:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   horizons:
                     type: array
                     items:
@@ -356,17 +383,21 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
                   archive:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
         '500':
           description: Bitget bridge run failed JSON.
         '429':
@@ -401,7 +432,8 @@ paths:
                     type: string
                   analysis_preset:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   horizons:
                     type: array
                     items:
@@ -410,17 +442,21 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
                   archive:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
         '500':
           description: Bitget bridge run failed JSON.
         '429':
@@ -452,11 +488,13 @@ paths:
                     type: string
                   cloudflare_bridge:
                     type: object
-                    additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
                   data_status:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
   /history:
     get:
       operationId: getQuantBtcRunHistory
@@ -475,11 +513,13 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
                   durable_storage:
                     type: object
-                    additionalProperties: true
-                additionalProperties: true
+                    additionalProperties: {}
+                    properties: {}
+                additionalProperties: {}
   /compare-runs:
     get:
       operationId: compareQuantBtcRuns
@@ -502,8 +542,9 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
-                additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
+                additionalProperties: {}
   /alerts:
     get:
       operationId: getQuantBtcAlerts
@@ -522,8 +563,9 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
-                additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
+                additionalProperties: {}
   /backtest-summary:
     get:
       operationId: getQuantBtcBacktestSummary
@@ -542,8 +584,9 @@ paths:
                     type: array
                     items:
                       type: object
-                      additionalProperties: true
-                additionalProperties: true
+                      additionalProperties: {}
+                      properties: {}
+                additionalProperties: {}
 components:
   schemas:
     Placeholder:
