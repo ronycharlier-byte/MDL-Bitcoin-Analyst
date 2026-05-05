@@ -1,0 +1,362 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model GPT Fast Final Schema",
+    "version": "1.19.1-fast-final-no-params",
+    "description": "Stable GPT Action schema. No parameters. /analyze uses quick preset and recent cache by default to avoid long loading. Outputs are probabilistic only."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "btcFastHealth",
+        "summary": "Health check",
+        "description": "Check Quant BTC Worker availability.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "worker_version": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze": {
+      "get": {
+        "operationId": "btcFastAnalyze",
+        "summary": "Run fast BTC probabilistic analysis",
+        "description": "Run BTC probabilistic analysis using the default quick preset and recent cache when available. No parameters required.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "report_date_paris": {
+                      "type": "string"
+                    },
+                    "reference_spot": {
+                      "type": "string"
+                    },
+                    "reference_spot_timestamp_utc": {
+                      "type": "string"
+                    },
+                    "reference_spot_timestamp_paris": {
+                      "type": "string"
+                    },
+                    "reference_spot_source": {
+                      "type": "string"
+                    },
+                    "frames_count": {
+                      "type": "integer"
+                    },
+                    "response_type": {
+                      "type": "string"
+                    },
+                    "cache": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string"
+                        },
+                        "cached_at_utc": {
+                          "type": "string"
+                        },
+                        "cached_at_paris": {
+                          "type": "string"
+                        },
+                        "max_age_seconds": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "versions": {
+                      "type": "object",
+                      "properties": {
+                        "worker_version": {
+                          "type": "string"
+                        },
+                        "worker_schema_version": {
+                          "type": "string"
+                        },
+                        "render_api_version": {
+                          "type": "string"
+                        },
+                        "render_model_version": {
+                          "type": "string"
+                        },
+                        "render_schema_version": {
+                          "type": "string"
+                        },
+                        "render_git_commit": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "data_status": {
+                      "type": "object",
+                      "properties": {
+                        "market_prices": {
+                          "type": "string"
+                        },
+                        "simulation_outputs": {
+                          "type": "string"
+                        },
+                        "risk_metrics": {
+                          "type": "string"
+                        },
+                        "fundamental_variables": {
+                          "type": "string"
+                        },
+                        "bitget_required": {
+                          "type": "string"
+                        },
+                        "non_bitget_market_fallback": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "horizons": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "run_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "frames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "horizon": {
+                            "type": "integer"
+                          },
+                          "run_id": {
+                            "type": "string"
+                          },
+                          "distribution": {
+                            "type": "object",
+                            "properties": {
+                              "p10_return": {
+                                "type": "number"
+                              },
+                              "median_return": {
+                                "type": "number"
+                              },
+                              "p90_return": {
+                                "type": "number"
+                              },
+                              "p10_price": {
+                                "type": "number"
+                              },
+                              "median_price": {
+                                "type": "number"
+                              },
+                              "p90_price": {
+                                "type": "number"
+                              },
+                              "prob_up": {
+                                "type": "number"
+                              },
+                              "prob_down_10": {
+                                "type": "number"
+                              },
+                              "prob_down_30": {
+                                "type": "number"
+                              },
+                              "prob_up_30": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "regime_distribution": {
+                            "type": "object",
+                            "properties": {
+                              "bull": {
+                                "type": "number"
+                              },
+                              "bear": {
+                                "type": "number"
+                              },
+                              "range": {
+                                "type": "number"
+                              },
+                              "non_classified_transition": {
+                                "type": "number"
+                              },
+                              "is_complete": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          "risk_metrics": {
+                            "type": "object",
+                            "properties": {
+                              "var_95": {
+                                "type": "number"
+                              },
+                              "cvar_95": {
+                                "type": "number"
+                              },
+                              "var_99": {
+                                "type": "number"
+                              },
+                              "cvar_99": {
+                                "type": "number"
+                              },
+                              "expected_max_drawdown": {
+                                "type": "number"
+                              },
+                              "median_max_drawdown": {
+                                "type": "number"
+                              },
+                              "p95_max_drawdown": {
+                                "type": "number"
+                              },
+                              "worst_sample_drawdown": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "confidence": {
+                            "type": "object",
+                            "properties": {
+                              "score": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "alerts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "level": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "horizon": {
+                            "type": "integer"
+                          },
+                          "value": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    },
+                    "backtest_diagnostics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "horizon_days": {
+                            "type": "integer"
+                          },
+                          "hit_rate": {
+                            "type": "number"
+                          },
+                          "brier_score": {
+                            "type": "number"
+                          },
+                          "calibration_error": {
+                            "type": "number"
+                          },
+                          "var95_breach_rate": {
+                            "type": "number"
+                          },
+                          "expected_var95_breach_rate": {
+                            "type": "number"
+                          },
+                          "observations": {
+                            "type": "integer"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "statut": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "limitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {}
+  }
+}
