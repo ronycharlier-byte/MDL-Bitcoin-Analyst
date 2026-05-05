@@ -1,0 +1,72 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Cached Analyze V1191",
+    "version": "1.19.1-unique-3.1.0",
+    "description": "Single stable GPT Action. Calls /analyze with quick cached default. No parameters."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/analyze": {
+      "get": {
+        "operationId": "btcCachedAnalyzeV1191",
+        "summary": "Analyze BTC with cached fast mode",
+        "description": "Run fast BTC probabilistic analysis using server default quick mode and recent cache. No parameters.",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "report_date_paris": {
+                      "type": "string"
+                    },
+                    "reference_spot": {
+                      "type": "string"
+                    },
+                    "reference_spot_timestamp_utc": {
+                      "type": "string"
+                    },
+                    "frames_count": {
+                      "type": "integer"
+                    },
+                    "response_type": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

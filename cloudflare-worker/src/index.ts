@@ -62,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.19.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.19.0";
+const WORKER_VERSION = "1.19.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.19.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -328,6 +328,18 @@ export default {
           render_operation_path: "/multi-run",
           analysis_preset: preset.name
         };
+        if (result.error) {
+          const staleCached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), 24 * 60 * 60, "stale_fallback");
+          if (staleCached) {
+            staleCached.warning = "Render returned an error, so a stale D1 cache fallback is returned. Do not present it as a fresh live run.";
+            staleCached.render_error = {
+              error: result.error,
+              message: result.message,
+              render_status: result.render_status
+            };
+            return json(staleCached);
+          }
+        }
         result.cloudflare_d1 = result.error
           ? { status: "skipped", target: "cloudflare_d1", reason: "engine_error_or_absent_live_output" }
           : queueD1RunPersist(result, "/analyze", body, env, ctx);
@@ -947,14 +959,15 @@ async function latestCachedAnalyzeResponse(
   env: Env,
   body: Record<string, unknown>,
   presetPath: string,
-  rateLimit: Record<string, unknown>
+  rateLimit: Record<string, unknown>,
+  maxAgeSeconds = 10 * 60,
+  cacheStatus = "hit"
 ): Promise<Record<string, unknown> | null> {
   if (!env.DB) {
     return null;
   }
   const asset = normalizeAsset(body.asset);
   const requestedHorizons = Array.isArray(body.horizons) ? body.horizons.map(Number) : [];
-  const maxAgeSeconds = 10 * 60;
   try {
     const { results } = await env.DB.prepare(`
       SELECT payload_json, created_at_utc
@@ -981,7 +994,7 @@ async function latestCachedAnalyzeResponse(
       if (!stringOrNull(payload.archive_id) || frames.length === 0 || !objectValue(frames[0]).reference_spot_timestamp_utc) {
         continue;
       }
-      return compactCachedAnalyzeResponse(payload, presetPath, rateLimit, createdAt, maxAgeSeconds);
+      return compactCachedAnalyzeResponse(payload, presetPath, rateLimit, createdAt, maxAgeSeconds, cacheStatus);
     }
   } catch {
     return null;
@@ -994,7 +1007,8 @@ function compactCachedAnalyzeResponse(
   presetPath: string,
   rateLimit: Record<string, unknown>,
   cachedAtUtc: string,
-  maxAgeSeconds: number
+  maxAgeSeconds: number,
+  cacheStatus: string
 ): Record<string, unknown> {
   const version = objectValue(payload.version);
   const bridge = objectValue(payload.cloudflare_bridge);
@@ -1023,13 +1037,15 @@ function compactCachedAnalyzeResponse(
       render_schema_version: version.schema_version,
       render_git_commit: version.git_commit
     },
-    response_type: "cached_recent_d1_payload",
+    response_type: cacheStatus === "hit" ? "cached_recent_d1_payload" : "cached_stale_d1_fallback_payload",
     cache: {
-      status: "hit",
+      status: cacheStatus,
       cached_at_utc: cachedAtUtc,
       cached_at_paris: parisIso(new Date(cachedAtUtc)),
       max_age_seconds: maxAgeSeconds,
-      note: "Recent Cloudflare D1 cache used to avoid long GPT Action loading. Ask for fresh=true to force a new Render calculation."
+      note: cacheStatus === "hit"
+        ? "Recent Cloudflare D1 cache used to avoid long GPT Action loading. Ask for fresh=true to force a new Render calculation."
+        : "Stale Cloudflare D1 fallback used because the Render engine failed. This is not a fresh live run."
     },
     response_policy: {
       numeric_traceability_required: true,
