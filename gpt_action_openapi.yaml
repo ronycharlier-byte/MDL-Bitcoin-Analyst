@@ -15,6 +15,30 @@ paths:
       responses:
         '200':
           description: Service health.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+                  warning:
+                    type: string
+                  report_markdown:
+                    type: string
+                  dashboard_markdown:
+                    type: string
+                  timezone_policy:
+                    type: string
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
   /version:
     get:
       operationId: getQuantBtcVersion
@@ -23,6 +47,30 @@ paths:
         '200':
           description: Version metadata including api_version, model_version, schema_version,
             git_commit, runtime limits and default frames.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+                  warning:
+                    type: string
+                  report_markdown:
+                    type: string
+                  dashboard_markdown:
+                    type: string
+                  timezone_policy:
+                    type: string
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
   /status:
     get:
       operationId: getQuantBtcStatus
@@ -31,6 +79,30 @@ paths:
         '200':
           description: Public status metadata including data sources, runtime controls,
             limitations, default frames and version.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+                  warning:
+                    type: string
+                  report_markdown:
+                    type: string
+                  dashboard_markdown:
+                    type: string
+                  timezone_policy:
+                    type: string
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
   /audit:
     get:
       operationId: auditQuantBtcSystem
@@ -281,6 +353,30 @@ paths:
         '200':
           description: Latest stored report and dashboard markdown. This is not guaranteed
             to be fresh; call POST /run for real-time calculation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+                  warning:
+                    type: string
+                  report_markdown:
+                    type: string
+                  dashboard_markdown:
+                    type: string
+                  timezone_policy:
+                    type: string
+                  cloudflare_bridge:
+                    type: object
+                    additionalProperties: true
+                  data_status:
+                    type: object
+                    additionalProperties: true
+                additionalProperties: true
   /history:
     get:
       operationId: getQuantBtcRunHistory
