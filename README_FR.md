@@ -43,6 +43,13 @@ GET /alerts?asset=BTC
 GET /backtest-summary?asset=BTC
 GET /dashboard
 GET /pdf-report
+GET /billing/plans
+POST /billing/checkout
+POST /clients/register
+GET /clients/me
+GET /usage-summary
+POST /alerts/subscribe
+GET /alerts/subscriptions
 ```
 
 Flux recommandé pour un GPT Custom :
@@ -77,6 +84,15 @@ Ajouts de robustesse :
 - Alertes : VaR élevée, confidence faible, transition de régime, données stale.
 - Dashboard web simple et export PDF.
 - Contexte premium best-effort : carnet Bitget, options/vol implicite, tendances ETF et explainability heuristique.
+
+Couche produit ajoutee :
+
+- Cles client pour quotas et logs d'usage.
+- Plans Free, Analyst et Pro exposes par l'API.
+- Checkout Stripe actif seulement si `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ANALYST` et `STRIPE_PRICE_PRO` sont configures.
+- Stockage durable externe via `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` ou `EXTERNAL_ARCHIVE_WEBHOOK_URL`.
+- Alertes webhook, Discord, Telegram ou email en best-effort.
+- Backtests visibles : hit rate, Brier, calibration, couverture P10/P90, breaches VaR et benchmark random walk.
 
 ## Gouvernance Importante
 

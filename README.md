@@ -128,9 +128,16 @@ Additional production diagnostics:
 - `GET /history`: recent runtime archives plus durable-storage status.
 - `GET /compare-runs`: latest archive vs previous archive deltas for spot, VaR/CVaR, regimes and confidence.
 - `GET /alerts`: stale data, VaR, confidence and transition-regime alerts.
+- `POST /alerts/subscribe`: register webhook, Discord, Telegram or email alert targets.
+- `GET /alerts/subscriptions`: list stored alert subscriptions.
 - `GET /backtest-summary`: visible walk-forward baseline diagnostics.
 - `GET /dashboard`: simple live web dashboard, also mirrored at `reports/dashboard.html`.
 - `GET /pdf-report`: lightweight timestamped PDF export for the latest archive.
+- `POST /clients/register`: create a client key for quota and usage tracking.
+- `GET /clients/me`: inspect the current client key and quota.
+- `GET /usage-summary`: recent usage logs for public or keyed access.
+- `GET /billing/plans`: public plan, quota and Stripe readiness metadata.
+- `POST /billing/checkout`: create a Stripe subscription Checkout Session when Stripe env vars are configured.
 
 Every live multi-frame response now includes:
 
@@ -142,6 +149,14 @@ Every live multi-frame response now includes:
 - options/implied volatility context when reachable;
 - ETF flow 1d/7d/30d trend diagnostics when reachable;
 - heuristic explainability by momentum, volatility, macro, derivatives and ETF context.
+
+Productization layer:
+
+- Client keys are lightweight access tokens for quota tracking and usage logs.
+- Plans are defined in the API as Free, Analyst and Pro; Stripe checkout is inactive until `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ANALYST` and `STRIPE_PRICE_PRO` are configured.
+- Durable off-host storage can be enabled with `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY`, or with `EXTERNAL_ARCHIVE_WEBHOOK_URL`.
+- Alert delivery is best-effort: webhook/Discord use HTTPS targets, Telegram requires `TELEGRAM_BOT_TOKEN`, and email requires `ALERT_EMAIL_WEBHOOK_URL`.
+- Public backtests expose hit rate, Brier score, calibration error, P10/P90 coverage, VaR breach rates and random-walk benchmark fields.
 
 GitHub Actions monitoring:
 

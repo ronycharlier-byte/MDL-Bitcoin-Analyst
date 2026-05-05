@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quant BTC Model Bitget Bridge Worker",
-    "version": "1.12.2",
+    "version": "1.13.0",
     "description": "Always-awake Cloudflare Worker facade for the Render Bitget-backed probabilistic BTC model. Outputs are probabilistic and must never be presented as certainty. Report and spot timestamps must be displayed as UTC and Europe/Paris."
   },
   "servers": [
@@ -554,6 +554,18 @@
                 }
               }
             }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Placeholder": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
           }
         }
       }

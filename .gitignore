@@ -16,6 +16,7 @@ knowledge_base/claims/*.jsonl
 logs/*
 reports/archive/*
 !reports/archive/README.md
+external_archive/runtime_events/*
 *.zip
 *.sqlite
 *.db

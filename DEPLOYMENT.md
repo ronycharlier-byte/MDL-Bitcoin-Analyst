@@ -37,6 +37,24 @@ This repo includes `render.yaml`.
 
 Render free services can sleep. Use Render only for the full Python/Docker engine when sleeping is acceptable or when the service is on a paid no-sleep plan.
 
+Optional production environment variables:
+
+```text
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=...
+EXTERNAL_ARCHIVE_WEBHOOK_URL=https://your-storage-webhook.example.com
+CLIENT_KEY_HASH_SECRET=long-random-secret
+STRIPE_SECRET_KEY=sk_live_or_test_...
+STRIPE_PRICE_ANALYST=price_...
+STRIPE_PRICE_PRO=price_...
+BILLING_SUCCESS_URL=https://your-site.example.com/success
+BILLING_CANCEL_URL=https://your-site.example.com/cancel
+TELEGRAM_BOT_TOKEN=...
+ALERT_EMAIL_WEBHOOK_URL=https://your-email-provider-webhook.example.com
+```
+
+If these are absent, the API still runs and returns explicit `absent` statuses instead of fabricating storage, payment or alert delivery.
+
 ## Cloudflare Worker no-sleep option
 
 Use this for the GPT Custom endpoint when the backend must not sleep and must stay free.
@@ -81,6 +99,18 @@ Manual path after deployment:
 4. For Render with `QUANT_API_KEY`, configure API key auth with the same value.
 
 For a public no-sleep GPT Action, prefer `cloudflare-worker/gpt_action_openapi.cloudflare.yaml`.
+
+The Cloudflare Worker also proxies the SaaS helper routes:
+
+```text
+GET /billing/plans
+POST /billing/checkout
+POST /clients/register
+GET /clients/me
+GET /usage-summary
+POST /alerts/subscribe
+GET /alerts/subscriptions
+```
 
 ## Other Docker Platforms
 

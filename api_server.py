@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import hashlib
+import hmac
 import math
 import os
 import sqlite3
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
@@ -43,9 +45,12 @@ MAX_FUNDAMENTAL_AGE_SECONDS = int(os.getenv("MAX_FUNDAMENTAL_AGE_SECONDS", "2160
 MAX_RUN_AGE_SECONDS = int(os.getenv("MAX_RUN_AGE_SECONDS", "21600"))
 MULTI_SEED_RUNS = max(1, int(os.getenv("MULTI_SEED_RUNS", "5")))
 MULTI_SEED_SIMULATIONS = max(100, int(os.getenv("MULTI_SEED_SIMULATIONS", "250")))
-API_VERSION = "1.8.1"
+API_VERSION = "1.9.0"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.8.1"
+SCHEMA_VERSION = "gpt_action_schema_v1.9.0"
+CLIENT_KEY_PREFIX = "qbtc"
+BILLING_SUCCESS_URL = os.getenv("BILLING_SUCCESS_URL", "https://chat.openai.com/")
+BILLING_CANCEL_URL = os.getenv("BILLING_CANCEL_URL", "https://chat.openai.com/")
 SOURCE_POLICY = "bitget_required_no_exchange_fallback"
 USER_DISPLAY_TIMEZONE = "Europe/Paris"
 PARIS_TZ = ZoneInfo(USER_DISPLAY_TIMEZONE)
@@ -65,6 +70,11 @@ REQUIRED_AUDIT_REAL_FIELDS = [
     "nasdaq",
 ]
 ALLOWED_AUDIT_ABSENT_FIELDS = ["liquidations"]
+BILLING_PLANS = {
+    "free": {"name": "Free", "price_eur": 0, "monthly_run_quota": 25, "features": ["public GPT action", "limited run history"]},
+    "analyst": {"name": "Analyst", "price_eur": 49, "monthly_run_quota": 500, "features": ["multi-frame runs", "alerts", "PDF exports", "run comparison"]},
+    "pro": {"name": "Pro", "price_eur": 149, "monthly_run_quota": 2500, "features": ["higher quotas", "client keys", "webhooks", "durable archives"]},
+}
 
 
 def resolve_git_commit() -> str:
@@ -108,6 +118,7 @@ from risk_metrics import compute_risk_metrics  # noqa: E402
 from simulation_utils import seed_for, summarize_simulation  # noqa: E402
 from stress_tests import run_stress_tests  # noqa: E402
 from backtest import run_backtest  # noqa: E402
+from durable_store import persist_run, persist_usage, storage_status  # noqa: E402
 
 
 FAST_MODEL_REGISTRY = {
@@ -185,6 +196,51 @@ def init_runtime_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_response_cache_expires ON response_cache (expires_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_run_archive_created_at ON run_archive (created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_run_archive_asset ON run_archive (asset, created_at)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_clients (
+                client_id TEXT PRIMARY KEY,
+                client_key_hash TEXT NOT NULL UNIQUE,
+                email TEXT,
+                plan TEXT NOT NULL,
+                status TEXT NOT NULL,
+                quota_runs_per_month INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id TEXT,
+                endpoint TEXT NOT NULL,
+                asset TEXT,
+                model TEXT,
+                horizons_json TEXT,
+                simulations INTEGER,
+                archive_id TEXT,
+                status TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_subscriptions (
+                subscription_id TEXT PRIMARY KEY,
+                client_id TEXT,
+                channel TEXT NOT NULL,
+                target TEXT NOT NULL,
+                min_level TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_client_time ON usage_events (client_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_subscriptions_client ON alert_subscriptions (client_id, status)")
         conn.commit()
 
 
@@ -244,9 +300,28 @@ class RunResponse(BaseModel):
     version: dict[str, Any]
     archive: dict[str, Any] | None = None
     cache: dict[str, Any] | None = None
+    durable_storage: dict[str, Any] | None = None
+    client_usage: dict[str, Any] | None = None
     report_markdown: str
     dashboard_markdown: str
     warning: str
+
+
+class ClientRegisterRequest(BaseModel):
+    email: str | None = Field(default=None, max_length=240)
+    plan: str = Field(default="free", pattern="^(free|analyst|pro)$")
+
+
+class AlertSubscriptionRequest(BaseModel):
+    channel: str = Field(default="webhook", pattern="^(webhook|discord|telegram|email)$")
+    target: str = Field(..., min_length=3, max_length=600)
+    min_level: str = Field(default="warning", pattern="^(info|warning|blocker)$")
+
+
+class BillingCheckoutRequest(BaseModel):
+    plan: str = Field(default="analyst", pattern="^(analyst|pro)$")
+    email: str | None = Field(default=None, max_length=240)
+    client_id: str | None = Field(default=None, max_length=80)
 
 
 def normalized_horizons(horizons: list[int]) -> list[int]:
@@ -389,6 +464,468 @@ def require_rate_limit(request: Request) -> None:
             )
         bucket.append(monotonic_now)
         _RATE_LIMIT_BUCKETS[key] = bucket
+
+
+def hash_client_key(client_key: str) -> str:
+    secret = os.getenv("CLIENT_KEY_HASH_SECRET") or os.getenv("QUANT_API_KEY") or "quant_btc_default_client_hash_secret"
+    return hmac.new(secret.encode("utf-8"), client_key.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def make_client_key() -> str:
+    return f"{CLIENT_KEY_PREFIX}_{uuid.uuid4().hex}_{uuid.uuid4().hex[:12]}"
+
+
+def get_client_from_key(client_key: str | None) -> dict[str, Any] | None:
+    if not client_key:
+        return None
+    key_hash = hash_client_key(client_key.strip())
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT client_id, email, plan, status, quota_runs_per_month, created_at, updated_at
+                FROM api_clients
+                WHERE client_key_hash = ?
+                """,
+                (key_hash,),
+            ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def client_usage_this_month(client_id: str) -> int:
+    now = utc_now()
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            return int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM usage_events WHERE client_id = ? AND created_at >= ? AND endpoint IN ('/run','/multi-run')",
+                    (client_id, month_start),
+                ).fetchone()[0]
+            )
+    except Exception:
+        return 0
+
+
+def client_context(x_client_key: str | None = Header(default=None)) -> dict[str, Any]:
+    client = get_client_from_key(x_client_key)
+    if not client:
+        return {"authenticated": False, "client_id": None, "plan": "public", "quota_remaining": None}
+    usage = client_usage_this_month(client["client_id"])
+    quota = int(client.get("quota_runs_per_month") or 0)
+    if client.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Client key is not active.")
+    if quota > 0 and usage >= quota:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "client_quota_exceeded",
+                "client_id": client["client_id"],
+                "plan": client["plan"],
+                "usage_this_month": usage,
+                "quota_runs_per_month": quota,
+                "billing_endpoint": "/billing/checkout",
+            },
+        )
+    return {
+        "authenticated": True,
+        "client_id": client["client_id"],
+        "email": client.get("email"),
+        "plan": client["plan"],
+        "usage_this_month": usage,
+        "quota_runs_per_month": quota,
+        "quota_remaining": max(0, quota - usage) if quota > 0 else None,
+    }
+
+
+def record_usage_event(
+    *,
+    endpoint: str,
+    status: str,
+    client: dict[str, Any] | None = None,
+    asset: str | None = None,
+    model: str | None = None,
+    horizons: list[int] | None = None,
+    simulations: int | None = None,
+    archive_id: str | None = None,
+) -> None:
+    row = {
+        "client_id": (client or {}).get("client_id"),
+        "endpoint": endpoint,
+        "asset": asset,
+        "model": model,
+        "horizons_json": json.dumps(horizons or [], ensure_ascii=True),
+        "simulations": simulations,
+        "archive_id": archive_id,
+        "status": status,
+        "created_at": time.time(),
+    }
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            conn.execute(
+                """
+                INSERT INTO usage_events (
+                    client_id, endpoint, asset, model, horizons_json,
+                    simulations, archive_id, status, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["client_id"],
+                    row["endpoint"],
+                    row["asset"],
+                    row["model"],
+                    row["horizons_json"],
+                    row["simulations"],
+                    row["archive_id"],
+                    row["status"],
+                    row["created_at"],
+                ),
+            )
+            conn.commit()
+    except Exception:
+        pass
+    try:
+        persist_usage(row)
+    except Exception:
+        pass
+
+
+def client_usage_snapshot(client: dict[str, Any] | None) -> dict[str, Any]:
+    if not client or not client.get("authenticated"):
+        return {
+            "authenticated": False,
+            "plan": "public",
+            "usage_this_month": None,
+            "quota_runs_per_month": None,
+            "quota_remaining": None,
+        }
+    usage = client_usage_this_month(str(client["client_id"]))
+    quota = int(client.get("quota_runs_per_month") or 0)
+    return {
+        "authenticated": True,
+        "client_id": client.get("client_id"),
+        "email": client.get("email"),
+        "plan": client.get("plan"),
+        "usage_this_month": usage,
+        "quota_runs_per_month": quota,
+        "quota_remaining": max(0, quota - usage) if quota > 0 else None,
+    }
+
+
+def create_client(payload: ClientRegisterRequest) -> dict[str, Any]:
+    plan = payload.plan if payload.plan in BILLING_PLANS else "free"
+    plan_info = BILLING_PLANS[plan]
+    now = time.time()
+    client_id = f"client_{uuid.uuid4().hex[:16]}"
+    client_secret = make_client_key()
+    with sqlite3.connect(API_RUNTIME_DB) as conn:
+        conn.execute(
+            """
+            INSERT INTO api_clients (
+                client_id, client_key_hash, email, plan, status,
+                quota_runs_per_month, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                client_id,
+                hash_client_key(client_secret),
+                payload.email,
+                plan,
+                "active",
+                int(plan_info["monthly_run_quota"]),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    return {
+        "status": "ok",
+        "client_id": client_id,
+        "client_key": client_secret,
+        "client_key_status": "shown_once_store_securely",
+        "plan": plan,
+        "quota_runs_per_month": int(plan_info["monthly_run_quota"]),
+        "created_at_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+        "created_at_paris": paris_iso(datetime.fromtimestamp(now, tz=timezone.utc)),
+        "usage": {
+            "usage_this_month": 0,
+            "quota_remaining": int(plan_info["monthly_run_quota"]),
+        },
+        "warning": "Client keys protect quota tracking only; outputs remain probabilistic and are not financial advice.",
+    }
+
+
+def billing_plans_payload() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "currency": "EUR",
+        "plans": BILLING_PLANS,
+        "stripe": {
+            "status": "configured" if os.getenv("STRIPE_SECRET_KEY") else "absent",
+            "required_env": ["STRIPE_SECRET_KEY", "STRIPE_PRICE_ANALYST", "STRIPE_PRICE_PRO"],
+            "checkout_endpoint": "/billing/checkout",
+        },
+        "version": version_payload(),
+    }
+
+
+def stripe_price_id(plan: str) -> str | None:
+    env_key = {
+        "analyst": "STRIPE_PRICE_ANALYST",
+        "pro": "STRIPE_PRICE_PRO",
+    }.get(plan)
+    return os.getenv(env_key or "") if env_key else None
+
+
+def create_checkout_session(payload: BillingCheckoutRequest) -> dict[str, Any]:
+    secret = os.getenv("STRIPE_SECRET_KEY")
+    price_id = stripe_price_id(payload.plan)
+    if not secret or not price_id:
+        return {
+            "status": "absent",
+            "reason": "Stripe is not configured.",
+            "missing_env": [
+                name
+                for name, value in {
+                    "STRIPE_SECRET_KEY": secret,
+                    f"STRIPE_PRICE_{payload.plan.upper()}": price_id,
+                }.items()
+                if not value
+            ],
+            "manual_next_step": "Create Stripe subscription prices, then configure the listed environment variables.",
+            "plan": payload.plan,
+            "version": version_payload(),
+        }
+    form = {
+        "mode": "subscription",
+        "success_url": BILLING_SUCCESS_URL,
+        "cancel_url": BILLING_CANCEL_URL,
+        "line_items[0][price]": price_id,
+        "line_items[0][quantity]": "1",
+        "metadata[plan]": payload.plan,
+    }
+    if payload.email:
+        form["customer_email"] = payload.email
+    if payload.client_id:
+        form["client_reference_id"] = payload.client_id
+        form["metadata[client_id]"] = payload.client_id
+    body = urllib.parse.urlencode(form).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.stripe.com/v1/checkout/sessions",
+        data=body,
+        method="POST",
+        headers={
+            "authorization": f"Bearer {secret}",
+            "content-type": "application/x-www-form-urlencoded",
+            "stripe-version": "2026-02-25.clover",
+            "user-agent": "quant-btc-model/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        return {
+            "status": "ok",
+            "checkout_session_id": result.get("id"),
+            "checkout_url": result.get("url"),
+            "plan": payload.plan,
+            "mode": result.get("mode"),
+            "version": version_payload(),
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": str(exc),
+            "plan": payload.plan,
+            "warning": "Checkout was not created; no payment was taken.",
+            "version": version_payload(),
+        }
+
+
+def list_alert_subscriptions(client_id: str | None = None) -> list[dict[str, Any]]:
+    try:
+        query = """
+            SELECT subscription_id, client_id, channel, target, min_level, status, created_at
+            FROM alert_subscriptions
+        """
+        params: list[Any] = []
+        if client_id:
+            query += " WHERE client_id = ?"
+            params.append(client_id)
+        query += " ORDER BY created_at DESC LIMIT 100"
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            {
+                "subscription_id": row[0],
+                "client_id": row[1],
+                "channel": row[2],
+                "target": row[3],
+                "min_level": row[4],
+                "status": row[5],
+                "created_at_utc": datetime.fromtimestamp(float(row[6]), tz=timezone.utc).isoformat(),
+                "created_at_paris": paris_iso(datetime.fromtimestamp(float(row[6]), tz=timezone.utc)),
+            }
+            for row in rows
+        ]
+    except Exception:
+        return []
+
+
+def create_alert_subscription(payload: AlertSubscriptionRequest, client: dict[str, Any] | None) -> dict[str, Any]:
+    if payload.channel in {"webhook", "discord"} and not payload.target.lower().startswith("https://"):
+        raise HTTPException(status_code=400, detail="Webhook and Discord alert targets must be HTTPS URLs.")
+    if payload.channel == "email" and "@" not in payload.target:
+        raise HTTPException(status_code=400, detail="Email alert target must be an email address.")
+    now = time.time()
+    subscription_id = f"alert_{uuid.uuid4().hex[:16]}"
+    client_id = (client or {}).get("client_id") if client and client.get("authenticated") else None
+    with sqlite3.connect(API_RUNTIME_DB) as conn:
+        conn.execute(
+            """
+            INSERT INTO alert_subscriptions (
+                subscription_id, client_id, channel, target, min_level, status, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (subscription_id, client_id, payload.channel, payload.target, payload.min_level, "active", now),
+        )
+        conn.commit()
+    return {
+        "status": "ok",
+        "subscription_id": subscription_id,
+        "client_id": client_id,
+        "channel": payload.channel,
+        "target": payload.target,
+        "min_level": payload.min_level,
+        "created_at_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+        "created_at_paris": paris_iso(datetime.fromtimestamp(now, tz=timezone.utc)),
+        "delivery_note": "Delivery is best-effort. Email requires ALERT_EMAIL_WEBHOOK_URL; Telegram requires TELEGRAM_BOT_TOKEN.",
+    }
+
+
+def alert_level_value(level: str) -> int:
+    return {"info": 1, "warning": 2, "blocker": 3}.get(level, 2)
+
+
+def send_json_webhook(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    body = json.dumps(payload, ensure_ascii=True, default=str).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"content-type": "application/json", "user-agent": "quant-btc-model-alerts/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=12) as response:
+        return {"status": "sent", "http_status": response.status}
+
+
+def dispatch_alerts_to_subscriptions(client: dict[str, Any] | None, alerts: list[dict[str, Any]], run_payload: dict[str, Any]) -> dict[str, Any]:
+    if not alerts:
+        return {"status": "skipped", "reason": "no_alerts"}
+    subscriptions = list_alert_subscriptions((client or {}).get("client_id") if client and client.get("authenticated") else None)
+    deliveries = []
+    for subscription in subscriptions:
+        if subscription.get("status") != "active":
+            continue
+        selected = [
+            alert
+            for alert in alerts
+            if alert_level_value(str(alert.get("level") or "warning")) >= alert_level_value(str(subscription.get("min_level") or "warning"))
+        ]
+        if not selected:
+            continue
+        message = {
+            "schema": "quant_btc_alert_delivery_v1",
+            "subscription_id": subscription["subscription_id"],
+            "archive_id": (run_payload.get("archive") or {}).get("archive_id"),
+            "asset": run_payload.get("asset"),
+            "report_date_utc": (run_payload.get("provenance_summary") or {}).get("report_date_utc"),
+            "alerts": selected,
+            "warning": "Probabilistic risk alert only; not investment advice.",
+        }
+        try:
+            if subscription["channel"] in {"webhook", "discord"}:
+                result = send_json_webhook(subscription["target"], message)
+            elif subscription["channel"] == "telegram":
+                token = os.getenv("TELEGRAM_BOT_TOKEN")
+                if not token:
+                    result = {"status": "absent", "reason": "TELEGRAM_BOT_TOKEN not configured"}
+                else:
+                    telegram_url = f"https://api.telegram.org/bot{token}/sendMessage"
+                    text = f"Quant BTC alert {message['archive_id']}: {len(selected)} alert(s)."
+                    result = send_json_webhook(telegram_url, {"chat_id": subscription["target"], "text": text})
+            elif subscription["channel"] == "email":
+                email_webhook = os.getenv("ALERT_EMAIL_WEBHOOK_URL")
+                if not email_webhook:
+                    result = {"status": "absent", "reason": "ALERT_EMAIL_WEBHOOK_URL not configured"}
+                else:
+                    result = send_json_webhook(email_webhook, {"to": subscription["target"], **message})
+            else:
+                result = {"status": "skipped", "reason": "unknown_channel"}
+        except Exception as exc:
+            result = {"status": "error", "error": str(exc)}
+        deliveries.append({"subscription_id": subscription["subscription_id"], "channel": subscription["channel"], **result})
+    return {
+        "status": "sent_or_attempted" if deliveries else "skipped",
+        "deliveries": deliveries,
+        "subscription_count": len(subscriptions),
+    }
+
+
+def usage_summary_payload(client: dict[str, Any] | None = None) -> dict[str, Any]:
+    client_id = (client or {}).get("client_id") if client and client.get("authenticated") else None
+    try:
+        if client_id:
+            where_sql = "client_id = ?"
+            params: tuple[Any, ...] = (client_id,)
+        else:
+            where_sql = "client_id IS NULL"
+            params = ()
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM usage_events WHERE {where_sql}",
+                params,
+            ).fetchone()[0]
+            recent_rows = conn.execute(
+                f"""
+                SELECT endpoint, asset, model, horizons_json, simulations, archive_id, status, created_at
+                FROM usage_events
+                WHERE {where_sql}
+                ORDER BY created_at DESC
+                LIMIT 25
+                """,
+                params,
+            ).fetchall()
+        recent = [
+            {
+                "endpoint": row[0],
+                "asset": row[1],
+                "model": row[2],
+                "horizons": json.loads(row[3] or "[]"),
+                "simulations": row[4],
+                "archive_id": row[5],
+                "status": row[6],
+                "created_at_utc": datetime.fromtimestamp(float(row[7]), tz=timezone.utc).isoformat(),
+                "created_at_paris": paris_iso(datetime.fromtimestamp(float(row[7]), tz=timezone.utc)),
+            }
+            for row in recent_rows
+        ]
+    except Exception:
+        total = 0
+        recent = []
+    return {
+        "status": "ok",
+        "client_usage": client_usage_snapshot(client),
+        "usage_events_total": int(total),
+        "recent_events": recent,
+        "version": version_payload(),
+    }
 
 
 def pydantic_payload(model: BaseModel) -> dict[str, Any]:
@@ -884,6 +1421,14 @@ def attach_archive(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
             conn.commit()
     except Exception as exc:
         archive.update({"status": "failed", "error": str(exc)})
+    try:
+        payload["durable_storage"] = persist_run(payload)
+    except Exception as exc:
+        payload["durable_storage"] = {
+            "status": "error",
+            "error": str(exc),
+            "note": "Runtime archive was attempted, but durable external persistence failed.",
+        }
     return archive
 
 
@@ -1123,11 +1668,29 @@ def backtest_summary_payload(asset: str = "BTC") -> dict[str, Any]:
             "status": "ok",
             "asset": asset.upper(),
             "rows": rows,
-            "benchmark": "rolling_normal_random_walk_style_baseline",
-            "metrics": ["hit_rate", "brier_score", "calibration_error", "mean_absolute_error", "interval_coverage"],
+            "benchmark": "rolling_normal_vs_random_walk_baseline",
+            "public_backtest_metrics": [
+                "hit_rate",
+                "brier_score",
+                "calibration_error",
+                "mean_absolute_error",
+                "p10_p90_coverage",
+                "var95_breach_rate",
+                "var99_breach_rate",
+                "random_walk_hit_rate",
+                "random_walk_brier_score",
+                "brier_skill_vs_random_walk",
+                "mae_skill_vs_random_walk",
+            ],
+            "expected_coverage": {
+                "p10_p90_coverage": 0.80,
+                "var95_breach_rate": 0.05,
+                "var99_breach_rate": 0.01,
+            },
             "limitations": [
                 "Backtest summary is a visible baseline diagnostic, not proof of future calibration.",
                 "Full model walk-forward calibration should be expanded before institutional use.",
+                "Random walk benchmark is intentionally simple and should be beaten before treating model outputs as premium-grade.",
             ],
             "version": version_payload(),
         }
@@ -1136,6 +1699,9 @@ def backtest_summary_payload(asset: str = "BTC") -> dict[str, Any]:
 
 
 def dashboard_html() -> str:
+    dashboard_file = ROOT / "reports" / "dashboard.html"
+    if dashboard_file.exists():
+        return dashboard_file.read_text(encoding="utf-8", errors="ignore")
     return """<!doctype html>
 <html lang="fr">
 <head>
@@ -1454,8 +2020,12 @@ def version_payload() -> dict[str, Any]:
             "expanded_drawdown_metrics",
             "compare_runs",
             "alerts",
+            "alert_subscriptions",
             "dashboard_html",
             "pdf_report",
+            "client_keys_quotas_usage_logs",
+            "stripe_checkout_when_configured",
+            "durable_storage_supabase_or_webhook",
             "liquidity_options_etf_explainability_diagnostics",
         ],
     }
@@ -1951,6 +2521,11 @@ def status() -> dict[str, Any]:
             "backtest_summary": "/backtest-summary",
             "dashboard": "/dashboard",
             "pdf_report": "/pdf-report",
+            "billing_plans": "/billing/plans",
+            "billing_checkout": "/billing/checkout",
+            "register_client": "/clients/register",
+            "client_usage": "/usage-summary",
+            "subscribe_alerts": "/alerts/subscribe",
             "latest_artifact": "/latest",
             "version": "/version",
             "audit": "/audit",
@@ -1995,7 +2570,14 @@ def status() -> dict[str, Any]:
             "Fundamental coverage is partial unless user-supplied audited data are connected.",
             "Spot freshness is enforced for live Bitget runs; stale spot blocks the run.",
             "Runtime archive files on free hosts may be ephemeral; GitHub archive workflow stores compact durable snapshots.",
+            "Client login and payments are lightweight API primitives; production identity should be handled by the storefront or member platform.",
         ],
+        "productization": {
+            "billing_plans": BILLING_PLANS,
+            "durable_storage": storage_status(),
+            "client_key_scope": "quota_tracking_and_usage_logs",
+            "alert_channels": ["webhook", "discord", "telegram", "email"],
+        },
         "version": version_payload(),
     }
 
@@ -2006,24 +2588,57 @@ def audit() -> dict[str, Any]:
 
 
 @app.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key), Depends(require_rate_limit)])
-def run_model(payload: RunRequest) -> RunResponse:
+def run_model(payload: RunRequest, client: dict[str, Any] = Depends(client_context)) -> RunResponse:
     key = cache_key_for("/run", pydantic_payload(payload))
     cached = cache_get(key)
     if cached:
+        record_usage_event(
+            endpoint="/run",
+            status="cache_hit",
+            client=client,
+            asset=payload.asset.upper(),
+            model=payload.model,
+            horizons=[payload.horizon],
+            simulations=payload.simulations,
+            archive_id=(cached.get("archive") or {}).get("archive_id"),
+        )
+        cached["client_usage"] = client_usage_snapshot(client)
         return cached
     response = build_run_response(payload)
     response_payload = response.model_dump() if hasattr(response, "model_dump") else response.dict()
     attach_archive("/run", response_payload)
+    record_usage_event(
+        endpoint="/run",
+        status=str(response_payload.get("status") or "ok"),
+        client=client,
+        asset=payload.asset.upper(),
+        model=payload.model,
+        horizons=[payload.horizon],
+        simulations=payload.simulations,
+        archive_id=(response_payload.get("archive") or {}).get("archive_id"),
+    )
+    response_payload["client_usage"] = client_usage_snapshot(client)
     cache_set(key, response_payload)
     return response_payload
 
 
 @app.post("/multi-run", dependencies=[Depends(require_api_key), Depends(require_rate_limit)])
-def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
+def run_multi_frame(payload: MultiFrameRunRequest, client: dict[str, Any] = Depends(client_context)) -> dict[str, Any]:
     horizons = normalized_horizons(payload.horizons)
     key = cache_key_for("/multi-run", {**pydantic_payload(payload), "horizons": horizons})
     cached = cache_get(key)
     if cached:
+        record_usage_event(
+            endpoint="/multi-run",
+            status="cache_hit",
+            client=client,
+            asset=payload.asset.upper(),
+            model=payload.model,
+            horizons=horizons,
+            simulations=payload.simulations,
+            archive_id=(cached.get("archive") or {}).get("archive_id"),
+        )
+        cached["client_usage"] = client_usage_snapshot(client)
         return cached
     spot_snapshot = None if payload.no_online else fetch_realtime_spot_snapshot(payload.asset)
     spot_freshness = freshness_status("bitget_spot_snapshot", (spot_snapshot or {}).get("timestamp"), MAX_SPOT_AGE_SECONDS)
@@ -2118,6 +2733,18 @@ def run_multi_frame(payload: MultiFrameRunRequest) -> dict[str, Any]:
     }
     response_payload["alerts"] = build_alerts_from_payload(response_payload)
     attach_archive("/multi-run", response_payload)
+    response_payload["alert_delivery"] = dispatch_alerts_to_subscriptions(client, response_payload["alerts"], response_payload)
+    record_usage_event(
+        endpoint="/multi-run",
+        status=str(response_payload.get("status") or "ok"),
+        client=client,
+        asset=payload.asset.upper(),
+        model=payload.model,
+        horizons=horizons,
+        simulations=payload.simulations,
+        archive_id=(response_payload.get("archive") or {}).get("archive_id"),
+    )
+    response_payload["client_usage"] = client_usage_snapshot(client)
     cache_set(key, response_payload)
     return response_payload
 
@@ -2129,14 +2756,7 @@ def history(asset: str = "BTC", limit: int = 10) -> dict[str, Any]:
         "status": "ok",
         "asset": asset.upper(),
         "archives": archives,
-        "durable_storage": {
-            "runtime_sqlite": "present",
-            "local_json_archive": "present",
-            "github_external_archive": "present_when_archive_workflow_commits_snapshots",
-            "supabase_postgres": "absent_not_configured",
-            "cloudflare_d1_r2": "absent_not_configured",
-            "note": "Runtime files may be ephemeral on free hosts; GitHub archive workflow provides compact durable snapshots.",
-        },
+        "durable_storage": storage_status(),
         "version": version_payload(),
     }
 
@@ -2193,6 +2813,55 @@ def alerts(asset: str = "BTC") -> dict[str, Any]:
 @app.get("/backtest-summary", dependencies=[Depends(require_api_key)])
 def backtest_summary(asset: str = "BTC") -> dict[str, Any]:
     return backtest_summary_payload(asset=asset)
+
+
+@app.get("/billing/plans", dependencies=[Depends(require_api_key)])
+def billing_plans() -> dict[str, Any]:
+    return billing_plans_payload()
+
+
+@app.post("/billing/checkout", dependencies=[Depends(require_api_key)])
+def billing_checkout(payload: BillingCheckoutRequest) -> dict[str, Any]:
+    return create_checkout_session(payload)
+
+
+@app.post("/clients/register", dependencies=[Depends(require_api_key)])
+def clients_register(payload: ClientRegisterRequest) -> dict[str, Any]:
+    return create_client(payload)
+
+
+@app.get("/clients/me", dependencies=[Depends(require_api_key)])
+def clients_me(client: dict[str, Any] = Depends(client_context)) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "client_usage": client_usage_snapshot(client),
+        "billing_plans": BILLING_PLANS,
+        "version": version_payload(),
+    }
+
+
+@app.get("/usage-summary", dependencies=[Depends(require_api_key)])
+def usage_summary(client: dict[str, Any] = Depends(client_context)) -> dict[str, Any]:
+    return usage_summary_payload(client)
+
+
+@app.post("/alerts/subscribe", dependencies=[Depends(require_api_key)])
+def alerts_subscribe(
+    payload: AlertSubscriptionRequest,
+    client: dict[str, Any] = Depends(client_context),
+) -> dict[str, Any]:
+    return create_alert_subscription(payload, client)
+
+
+@app.get("/alerts/subscriptions", dependencies=[Depends(require_api_key)])
+def alerts_subscriptions(client: dict[str, Any] = Depends(client_context)) -> dict[str, Any]:
+    client_id = client.get("client_id") if client.get("authenticated") else None
+    return {
+        "status": "ok",
+        "client_usage": client_usage_snapshot(client),
+        "subscriptions": list_alert_subscriptions(client_id),
+        "version": version_payload(),
+    }
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

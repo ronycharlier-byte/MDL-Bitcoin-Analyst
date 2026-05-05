@@ -58,11 +58,11 @@ const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type"
+  "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.12.2";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.12.2";
+const WORKER_VERSION = "1.13.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.13.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -123,7 +123,10 @@ export default {
             "alerts",
             "backtest_summary",
             "dashboard_redirect",
-            "pdf_report_redirect"
+            "pdf_report_redirect",
+            "client_keys_quotas_usage_logs",
+            "billing_plans_checkout_bridge",
+            "alert_subscriptions"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -142,7 +145,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest", "/history", "/compare-runs", "/alerts", "/backtest-summary", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: clampInt(parseNumber(env.MAX_SIMULATIONS, 5000), 100, 5000),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, 5000),
@@ -198,18 +201,23 @@ export default {
       }
 
       if (url.pathname === "/latest" && request.method === "GET") {
-        const result = await proxyRenderGet("/latest", env);
+        const result = await proxyRenderGet("/latest", env, request);
         return json(withBridgeMetadata(result, "/latest", env));
       }
 
       if (url.pathname === "/audit" && request.method === "GET") {
-        const result = await proxyRenderGet("/audit", env);
+        const result = await proxyRenderGet("/audit", env, request);
         return json(withBridgeMetadata(result, "/audit", env));
       }
 
-      if (["/history", "/compare-runs", "/alerts", "/backtest-summary"].includes(url.pathname) && request.method === "GET") {
-        const result = await proxyRenderGet(`${url.pathname}${url.search}`, env);
+      if (["/history", "/compare-runs", "/alerts", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/clients/me", "/usage-summary"].includes(url.pathname) && request.method === "GET") {
+        const result = await proxyRenderGet(`${url.pathname}${url.search}`, env, request);
         return json(withBridgeMetadata(result, url.pathname, env));
+      }
+
+      if (["/clients/register", "/alerts/subscribe", "/billing/checkout"].includes(url.pathname) && request.method === "POST") {
+        const result = await proxyRenderPost(url.pathname, await readJson(request), env, request);
+        return json(result);
       }
 
       if (url.pathname === "/dashboard" && request.method === "GET") {
@@ -228,11 +236,11 @@ export default {
         const input = await readInput(request, url);
         if (shouldRouteRunAsMultiFrame(input)) {
           const body = normalizeRenderMultiRunPayload(input, env);
-          const result = await proxyRenderPost("/multi-run", body, env);
+          const result = await proxyRenderPost("/multi-run", body, env, request);
           return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
         }
         const body = normalizeRenderRunPayload(input, env);
-        const result = await proxyRenderPost("/run", body, env);
+        const result = await proxyRenderPost("/run", body, env, request);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
@@ -242,7 +250,7 @@ export default {
           return json(rateLimitResponse(rateLimit), 429);
         }
         const body = normalizeRenderMultiRunPayload(await readInput(request, url), env);
-        const result = await proxyRenderPost("/multi-run", body, env);
+        const result = await proxyRenderPost("/multi-run", body, env, request);
         return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
       }
 
@@ -354,26 +362,34 @@ function shouldRouteRunAsMultiFrame(input: Record<string, unknown>): boolean {
   return false;
 }
 
-async function proxyRenderGet(path: string, env: Env): Promise<Record<string, unknown>> {
+function renderProxyHeaders(request?: Request, includeJson = false): HeadersInit {
+  const headers: Record<string, string> = {
+    "accept": "application/json",
+    "user-agent": "quant-btc-model-cloudflare-bitget-bridge/1.0"
+  };
+  if (includeJson) {
+    headers["content-type"] = "application/json";
+  }
+  const clientKey = request?.headers.get("x-client-key");
+  if (clientKey) {
+    headers["x-client-key"] = clientKey;
+  }
+  return headers;
+}
+
+async function proxyRenderGet(path: string, env: Env, request?: Request): Promise<Record<string, unknown>> {
   const response = await fetch(renderUrl(path, env), {
     method: "GET",
-    headers: {
-      "accept": "application/json",
-      "user-agent": "quant-btc-model-cloudflare-bitget-bridge/1.0"
-    },
+    headers: renderProxyHeaders(request),
     cf: { cacheTtl: 0, cacheEverything: false }
   });
   return await parseRenderResponse(response, path);
 }
 
-async function proxyRenderPost(path: string, payload: Record<string, unknown>, env: Env): Promise<Record<string, unknown>> {
+async function proxyRenderPost(path: string, payload: Record<string, unknown>, env: Env, request?: Request): Promise<Record<string, unknown>> {
   const response = await fetch(renderUrl(path, env), {
     method: "POST",
-    headers: {
-      "accept": "application/json",
-      "content-type": "application/json",
-      "user-agent": "quant-btc-model-cloudflare-bitget-bridge/1.0"
-    },
+    headers: renderProxyHeaders(request, true),
     body: JSON.stringify(payload),
     cf: { cacheTtl: 0, cacheEverything: false }
   });
