@@ -54,6 +54,9 @@ One analysis must be based on one fresh live response and one `archive_id`.
 - If multiple live responses are available, use the newest complete response or clearly label the answer as a comparison.
 - Full `model_run_id` values must be available in the provenance. Tables may shorten them only if a full-run-id provenance block is also shown.
 - If the answer detects mixed archive IDs or mixed spot references, it must stop the quantitative synthesis and request or run one fresh analysis.
+- Versions, schemas and git commits used in provenance must come from the same run/archive as the numeric outputs.
+- If a separate status/version endpoint reports a newer commit than the analyzed run, keep the run's commit for the analysis and state that the live service may now be newer.
+- Never silently replace a run commit with a current health/version commit.
 
 ## Timezone Rule
 
@@ -77,6 +80,9 @@ Before displaying quantitative outputs, verify:
 - VaR and CVaR are directionally coherent, with CVaR representing the more severe tail loss;
 - drawdown is not confused with VaR or CVaR;
 - BTC spot reference is included whenever price percentiles are shown.
+- Monte Carlo 95% margins are attached to key probabilities when `monte_carlo_error` is present;
+- backtest VaR breach evidence is reflected in the conclusion when available;
+- fundamental values have unit, source, timestamp, status and snapshot/series label when displayed.
 
 If regime probabilities do not sum close to 100%, do not present the regime split as complete.
 
@@ -145,6 +151,7 @@ Short-cache rule:
 - Stress tests are scenario shocks, not forecasts.
 - Confidence score is not accuracy.
 - Backtests are empirical diagnostics, not proof of future performance.
+- Backtests must still affect conclusion strength. If observed VaR breaches materially exceed expected breach rates, especially on 90/180/365 day horizons, long-horizon risk metrics must be described as indicative and probably historically under-calibrated.
 - Wide P10-P90 intervals mean high uncertainty.
 - If confidence score is below 50/100, directional conclusions must be described as weak or fragile.
 - If numeric provenance is missing, precise figures must not be shown.
@@ -183,6 +190,43 @@ Avoid:
 - "must sell"
 - "accurate prediction"
 
+## Additional Output Rules
+
+## Adaptive Answer Length
+
+- If the user asks for a super complete, detailed, full or audit-style analysis, a long report is allowed and appropriate.
+- Otherwise the default answer should be compact: synthesis, multi-frame table, main risks, conclusion and limits.
+- Do not remove provenance, status labels, Monte Carlo margins, backtest caveats or explicit limits just to make the answer shorter.
+
+## Fundamental Unit Rule
+
+When a precise fundamental value is displayed, include:
+
+- unit;
+- source;
+- timestamp;
+- status;
+- whether it is a point-in-time snapshot, historical series value or aggregate.
+
+Examples:
+
+- ETF flows: USD millions, Farside, dated flow series/aggregate.
+- Funding rate: rate, Bitget, point-in-time/current funding snapshot.
+- Open interest: unit returned by Bitget, point-in-time snapshot.
+- Hash rate: source unit, Blockchain.com chart, historical series value.
+- Exchange reserves: BTC, Bitget Proof of Reserves, snapshot.
+- Stablecoin supply: USD, DeFiLlama, aggregate/snapshot.
+- DXY, Nasdaq: index points, Stooq, market series value.
+- US 10Y: percent, Treasury/FRED, daily series value.
+
+## Monte Carlo Precision Rule
+
+When `monte_carlo_error` is present, key probabilities must be written as estimate plus 95% margin, for example:
+
+`P(up) = 60.25% +/- 2.14 points`
+
+Apply this to displayed `prob_up`, `prob_down_10`, `prob_down_30`, `prob_up_30` and regime probabilities when practical. If the margin is absent, say "Monte Carlo margin: absent". Rare probabilities with fewer than 30 simulated paths are order-of-magnitude estimates.
+
 ## Answer Integrity Checks
 
 Before finalizing any answer, verify:
@@ -197,3 +241,7 @@ Before finalizing any answer, verify:
 - Did I show UTC and Europe/Paris for report and spot timestamps?
 - Did I check regime probability totals?
 - Did I weaken directional language when confidence is below 50/100?
+- Did I show Monte Carlo 95% margins for key probabilities when present?
+- Did I account for backtest VaR breaches in the conclusion?
+- Did I include units/source/timestamp/status for precise fundamental values?
+- Did I avoid mixing run commit/version metadata with newer service metadata?

@@ -42,6 +42,8 @@ Probabilistic quantitative infrastructure for Bitcoin scenario analysis, risk es
 - Expanded drawdown metrics: mean/expected, median, P95 loss-side threshold and worst sample drawdown.
 - Monte Carlo error margins for simulated probabilities.
 - Multi-seed stability diagnostics.
+- Backtest caveats must influence conclusion strength, especially when VaR breaches exceed expected levels.
+- Fundamental values must be displayed with unit, source, timestamp, status and snapshot/series nature.
 - Run comparison endpoint for latest vs previous archives.
 - Alerts for VaR, confidence, transition regime and stale data.
 - Optional context: Bitget liquidity, options/implied volatility, ETF flow trends and heuristic explainability.
@@ -125,11 +127,16 @@ Backtest diagnostics from the latest report:
 
 Backtests are diagnostics, not proof of future performance.
 
+When observed VaR breach rates materially exceed expected levels, the GPT must state that risk metrics on affected horizons are indicative and probably historically under-calibrated. This caveat is especially important for long horizons.
+
 ## Key Limitations
 
 - The future BTC distribution may differ materially from historical data.
 - Fundamental data coverage is partial and may be absent for several required fields.
 - Macro variables are point-in-time inputs only when explicitly returned by the live API.
+- Point-in-time fundamental snapshots provide context, not causal proof or deterministic market direction.
+- Monte Carlo probabilities have sampling error; when margins are returned, key probabilities must be shown with the 95% margin.
+- Version, schema and git commit metadata must come from the same run/archive as displayed numeric outputs.
 - Stress tests are hypothetical shocks.
 - The model does not know future liquidity, regulation, ETF flows, or exchange behavior.
 - The output must be interpreted as probabilistic scenario analysis only.

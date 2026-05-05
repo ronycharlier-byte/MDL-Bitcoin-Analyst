@@ -89,6 +89,33 @@ Latest export status: partial_real_absent.
 
 GPT rule: do not invent or estimate absent fundamental fields unless clearly labelled as a hypothetical assumption. Treat partial online fundamentals as point-in-time snapshots, not complete historical series.
 
+## Fundamental Display Requirements
+
+When the GPT displays any precise fundamental value, it must include:
+
+- unit;
+- source;
+- timestamp;
+- status;
+- whether the value is a point-in-time snapshot, historical series value, or aggregate.
+
+Recommended unit wording:
+
+| Field | Unit to display | Nature |
+|---|---|---|
+| etf_flows | USD millions | Dated flow series / aggregate window |
+| funding_rate | Rate or percent, matching API convention | Point-in-time/current funding snapshot |
+| open_interest | Unit returned by Bitget, plus source label | Point-in-time derivatives snapshot |
+| liquidations | Quote coin/USDT amount when observed | Live observation window snapshot |
+| hash_rate | Source-provided hash-rate unit | Historical network series value |
+| exchange_reserves | BTC | Proof-of-reserves snapshot |
+| stablecoins_supply | USD | Aggregate liquidity snapshot |
+| dxy | Index points | Market series value |
+| us_rates | Percent | Daily rate series value |
+| nasdaq | Index points | Market series value |
+
+If the unit is not explicit in the live response, state "unit: source convention" rather than inventing a conversion.
+
 ## Risk Metrics
 
 Latest status: inferred from simulations and historical returns.
@@ -173,3 +200,28 @@ VaR and CVaR in this export should be explained as simulated losses:
 - CVaR 95 as average loss in scenarios worse than VaR 95.
 
 If another convention uses negative returns, explicitly state that convention.
+
+## Monte Carlo Error Wording
+
+When `monte_carlo_error` is available, key displayed probabilities should include:
+
+- estimate;
+- 95% margin;
+- sample size if useful;
+- rare-tail warning if `tail_counts` is below 30.
+
+Example:
+
+```text
+P(up) = 60.25% +/- 2.14 points, status inferred_sampling_error.
+```
+
+If a probability is shown without an available margin, write "Monte Carlo margin: absent".
+
+## Backtest Caveat Wording
+
+Backtest diagnostics must modify the conclusion when available. If observed VaR breaches are materially above expected breach levels, especially at 90/180/365 days, use:
+
+```text
+Long-horizon risk metrics are indicative and probably historically under-calibrated because observed VaR breaches exceed the expected breach rate.
+```
