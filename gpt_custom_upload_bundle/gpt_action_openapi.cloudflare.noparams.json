@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Quant BTC Model Worker No-Param Action Schema",
-    "version": "1.15.0-noparams",
-    "description": "Ultra-compatible GPT Actions schema. No parameters are required; BTC is implicit on all run endpoints. Outputs are probabilistic, not deterministic predictions."
+    "title": "Quant BTC Model Worker Strict GPT Action Schema",
+    "version": "1.15.1-strict200",
+    "description": "Ultra-compatible GPT Actions schema. No parameters, no refs, no non-200 response schemas. BTC is implicit on all run endpoints. Outputs are probabilistic, not deterministic predictions."
   },
   "servers": [
     {
@@ -18,7 +18,7 @@
         "description": "Check Worker availability.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -33,13 +33,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -60,7 +75,7 @@
         "description": "Return Worker/schema/version metadata and preset information.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -75,13 +90,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -102,7 +132,7 @@
         "description": "Return endpoints, runtime limits, source policy and limitations.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -117,13 +147,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -144,7 +189,7 @@
         "description": "Preflight governance audit before live BTC analysis.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -159,13 +204,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -186,7 +246,7 @@
         "description": "Default live BTC run. BTC is implicit. Returns standard multi-frame result.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -201,13 +261,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -217,12 +292,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Public endpoint rate limit reached JSON."
-          },
-          "500": {
-            "description": "Bitget bridge or backend call failed JSON."
           }
         }
       }
@@ -234,7 +303,7 @@
         "description": "BTC is implicit. Standard frames: 7/30/90/180/365.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -249,13 +318,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -265,12 +349,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Public endpoint rate limit reached JSON."
-          },
-          "500": {
-            "description": "Bitget bridge or backend call failed JSON."
           }
         }
       }
@@ -282,7 +360,7 @@
         "description": "BTC is implicit. Quick preset: 7/30/90/180/365 with 2000 simulations per horizon.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -297,13 +375,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -313,12 +406,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Public endpoint rate limit reached JSON."
-          },
-          "500": {
-            "description": "Bitget bridge or backend call failed JSON."
           }
         }
       }
@@ -330,7 +417,7 @@
         "description": "BTC is implicit. Tactical preset: 1/3/7/14/30 with 5000 simulations per horizon.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -345,13 +432,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -361,12 +463,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Public endpoint rate limit reached JSON."
-          },
-          "500": {
-            "description": "Bitget bridge or backend call failed JSON."
           }
         }
       }
@@ -375,10 +471,10 @@
       "get": {
         "operationId": "runQuantBtcDeep",
         "summary": "Run deep BTC preset",
-        "description": "BTC is implicit. Deep preset: 1/3/7/14/30/90/180/365 with up to 10000 simulations per horizon.",
+        "description": "BTC is implicit. Deep preset: 1/3/7/14/30/90/180/365 with 10000 simulations per horizon.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -393,13 +489,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -409,12 +520,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Public endpoint rate limit reached JSON."
-          },
-          "500": {
-            "description": "Bitget bridge or backend call failed JSON."
           }
         }
       }
@@ -422,11 +527,11 @@
     "/latest": {
       "get": {
         "operationId": "latestQuantBtcReport",
-        "summary": "Get latest stored report",
-        "description": "Return latest stored report artifact; not a fresh run.",
+        "summary": "Get latest stored BTC report",
+        "description": "Return the latest stored report artifact. This is not necessarily a fresh run.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -441,13 +546,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -463,12 +583,12 @@
     },
     "/history": {
       "get": {
-        "operationId": "getQuantBtcRunHistory",
-        "summary": "Get run history",
-        "description": "Return recent archived runs and D1 status.",
+        "operationId": "getQuantBtcHistory",
+        "summary": "Get stored BTC run history",
+        "description": "Return recent archived run metadata.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -483,13 +603,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -506,11 +641,11 @@
     "/compare-runs": {
       "get": {
         "operationId": "compareQuantBtcRuns",
-        "summary": "Compare latest runs",
-        "description": "Compare latest run against previous archived run.",
+        "summary": "Compare recent BTC runs",
+        "description": "Compare latest run against previous stored run when available.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -525,13 +660,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -548,11 +698,11 @@
     "/alerts": {
       "get": {
         "operationId": "getQuantBtcAlerts",
-        "summary": "Get latest alerts",
-        "description": "Return latest quality and risk alerts.",
+        "summary": "Get BTC alert status",
+        "description": "Return current alert diagnostics when available.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -567,13 +717,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
@@ -590,11 +755,11 @@
     "/backtest-summary": {
       "get": {
         "operationId": "getQuantBtcBacktestSummary",
-        "summary": "Get backtest summary",
-        "description": "Return visible baseline backtest diagnostics.",
+        "summary": "Get BTC backtest summary",
+        "description": "Return visible backtest diagnostics when available.",
         "responses": {
           "200": {
-            "description": "JSON response from Quant BTC Model Worker.",
+            "description": "Successful JSON response from Quant BTC Model Worker.",
             "content": {
               "application/json": {
                 "schema": {
@@ -609,13 +774,28 @@
                     "asset": {
                       "type": "string"
                     },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_utc": {
+                      "type": "string"
+                    },
+                    "timestamp_paris": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
                     "message": {
                       "type": "string"
                     },
                     "warning": {
-                      "type": "string"
-                    },
-                    "archive_id": {
                       "type": "string"
                     },
                     "report_markdown": {
