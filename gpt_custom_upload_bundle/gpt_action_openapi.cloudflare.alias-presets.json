@@ -1,0 +1,127 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model GPT Alias Presets Schema",
+    "version": "1.16.0-alias-presets",
+    "description": "GPT Actions schema using short alias endpoints. BTC is implicit. Outputs are probabilistic scenarios only."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "btcHealthAlias",
+        "summary": "Health check",
+        "description": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/quick": {
+      "get": {
+        "operationId": "btcQuickAnalysis",
+        "summary": "Run quick BTC analysis",
+        "description": "Run quick BTC analysis",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tactical": {
+      "get": {
+        "operationId": "btcTacticalAnalysis",
+        "summary": "Run tactical BTC analysis",
+        "description": "Run tactical BTC analysis",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deep": {
+      "get": {
+        "operationId": "btcDeepAnalysis",
+        "summary": "Run deep BTC analysis",
+        "description": "Run deep BTC analysis",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BasicResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "archive_id": {
+            "type": "string"
+          },
+          "report_date_utc": {
+            "type": "string"
+          },
+          "timestamp_utc": {
+            "type": "string"
+          },
+          "timestamp_paris": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "report_markdown": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

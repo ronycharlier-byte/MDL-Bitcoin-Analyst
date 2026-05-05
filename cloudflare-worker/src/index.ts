@@ -62,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.15.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.15.0";
+const WORKER_VERSION = "1.16.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.16.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -89,6 +89,27 @@ const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: 
     horizons: [1, 3, 7, 14, 30, 90, 180, 365],
     simulations: 10000,
     description: "Higher-power full-frame analysis for detailed reports, Monte Carlo margins and long-horizon caveats."
+  },
+  "/quick": {
+    name: "quick",
+    label: "Quick multi-frame",
+    horizons: [7, 30, 90, 180, 365],
+    simulations: 2000,
+    description: "Short alias for the standard 7/30/90/180/365 GPT analysis."
+  },
+  "/tactical": {
+    name: "tactical",
+    label: "Tactical short-frame",
+    horizons: [1, 3, 7, 14, 30],
+    simulations: 5000,
+    description: "Short alias for the 1/3/7/14/30 day tactical GPT analysis."
+  },
+  "/deep": {
+    name: "deep",
+    label: "Deep full-frame",
+    horizons: [1, 3, 7, 14, 30, 90, 180, 365],
+    simulations: 10000,
+    description: "Short alias for the high-power full-frame GPT analysis."
   }
 };
 const USER_DISPLAY_TIMEZONE = "Europe/Paris";
@@ -173,7 +194,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
