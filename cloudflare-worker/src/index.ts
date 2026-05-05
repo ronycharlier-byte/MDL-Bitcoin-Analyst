@@ -7,6 +7,13 @@
   RATE_LIMIT_RUNS_PER_MINUTE?: string;
   RATE_LIMIT_WINDOW_SECONDS?: string;
   RENDER_API_BASE?: string;
+  DEEP_RATE_LIMIT_RUNS_PER_MINUTE?: string;
+  DEEP_RATE_LIMIT_WINDOW_SECONDS?: string;
+  QUICK_CACHE_MAX_SECONDS?: string;
+  STALE_CACHE_MAX_SECONDS?: string;
+  OPS_ALERT_WEBHOOK_URL?: string;
+  DISCORD_WEBHOOK_URL?: string;
+  OPS_MONITOR_ALERT_COOLDOWN_SECONDS?: string;
 }
 
 interface RunRequest {
@@ -62,12 +69,15 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.20.1";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.20.1";
+const WORKER_VERSION = "1.21.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.21.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
 const SIMULATION_HARD_CAP = 10000;
+const QUICK_CACHE_MAX_SECONDS_DEFAULT = 10 * 60;
+const STALE_CACHE_MAX_SECONDS_DEFAULT = 60 * 60;
+const OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT = 15 * 60;
 const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
   "/run-quick": {
     name: "quick",
@@ -119,6 +129,7 @@ const rateLimitBuckets = new Map<string, number[]>();
 export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(warmRenderBitgetBridge(env));
+    ctx.waitUntil(runOperationalMonitor(env));
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -176,7 +187,11 @@ export default {
             "alert_subscriptions",
             "cloudflare_d1_free_durable_storage",
             "analysis_presets_quick_tactical_deep",
-            "dedicated_cached_deep_action"
+            "dedicated_cached_deep_action",
+            "ops_monitoring",
+            "strict_cache_policy",
+            "deep_compute_quota",
+            "optional_webhook_alerting"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -195,7 +210,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -203,7 +218,10 @@ export default {
             default_horizons: parseHorizons(env.DEFAULT_HORIZONS, DEFAULT_MULTI_HORIZONS),
             analysis_presets: publicAnalysisPresets(env),
             rate_limit_runs_per_minute: getRateLimit(env).limit,
-            rate_limit_window_seconds: getRateLimit(env).windowSeconds
+            rate_limit_window_seconds: getRateLimit(env).windowSeconds,
+            deep_compute_rate_limit_runs_per_minute: getDeepRateLimit(env).limit,
+            deep_compute_rate_limit_window_seconds: getDeepRateLimit(env).windowSeconds,
+            cache_policy: cachePolicy(env)
           },
           data_sources: {
             primary_market_source: "bitget_via_render_full_engine",
@@ -230,8 +248,14 @@ export default {
           durable_storage: {
             cloudflare_d1: env.DB ? "configured" : "absent",
             database_name: "quant-btc-model-lite-db",
-            free_tier_role: "durable run, usage, client and alert metadata storage",
+            free_tier_role: "durable run, usage, client, alert and ops metadata storage",
             render_runtime_storage: "secondary"
+          },
+          ops_monitoring: {
+            scheduled_check: "every_5_minutes",
+            alert_webhook: getOpsAlertWebhook(env) ? "configured" : "absent",
+            cache_policy: cachePolicy(env),
+            deep_compute_quota: getDeepRateLimit(env)
           },
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
@@ -269,6 +293,15 @@ export default {
 
       if (url.pathname === "/d1/status" && request.method === "GET") {
         return json(await d1Status(env));
+      }
+
+      if (url.pathname === "/ops/status" && request.method === "GET") {
+        return json(await buildOpsStatus(env));
+      }
+
+      if (url.pathname === "/ops/monitor" && request.method === "GET") {
+        const status = await runOperationalMonitor(env, true);
+        return json(status, status.status === "ok" ? 200 : 503);
       }
 
       if (["/history", "/compare-runs", "/alerts", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/clients/me", "/usage-summary"].includes(url.pathname) && request.method === "GET") {
@@ -312,10 +345,20 @@ export default {
         const preset = ANALYSIS_PRESETS[presetPath];
         const body = normalizeRenderPresetPayload(input, env, preset);
         if (!wantsFreshRun(input)) {
-          const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), 10 * 60, "hit", "/analyze-deep");
+          const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), cachePolicy(env).fresh_seconds, "hit", "/analyze-deep");
           if (cached) {
             return json(cached);
           }
+        }
+        const deepRateLimit = checkDeepRateLimit(request, env);
+        if (!deepRateLimit.allowed) {
+          const staleCached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), cachePolicy(env).warning_seconds, "stale_fallback", "/analyze-deep");
+          if (staleCached) {
+            staleCached.warning = "Deep compute quota is exhausted, so a warning-age D1 cache fallback is returned. Do not present it as a fresh live run.";
+            staleCached.deep_compute_rate_limit = publicRateLimit(deepRateLimit);
+            return json(staleCached);
+          }
+          return json(deepRateLimitResponse(deepRateLimit), 429);
         }
         const result = await proxyRenderPost("/multi-run", body, env, request);
         result.analysis_preset = {
@@ -330,9 +373,9 @@ export default {
           analysis_preset: preset.name
         };
         if (result.error) {
-          const staleCached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), 24 * 60 * 60, "stale_fallback", "/analyze-deep");
+          const staleCached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), cachePolicy(env).warning_seconds, "stale_fallback", "/analyze-deep");
           if (staleCached) {
-            staleCached.warning = "Render returned an error, so a stale D1 deep cache fallback is returned. Do not present it as a fresh live run.";
+            staleCached.warning = "Render returned an error, so a warning-age D1 deep cache fallback is returned. Do not present it as a fresh live run.";
             staleCached.render_error = {
               error: result.error,
               message: result.message,
@@ -357,7 +400,7 @@ export default {
         const preset = ANALYSIS_PRESETS[presetPath];
         const body = normalizeRenderPresetPayload(input, env, preset);
         if (!wantsFreshRun(input)) {
-          const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit));
+          const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), cachePolicy(env).fresh_seconds);
           if (cached) {
             return json(cached);
           }
@@ -375,9 +418,9 @@ export default {
           analysis_preset: preset.name
         };
         if (result.error) {
-          const staleCached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), 24 * 60 * 60, "stale_fallback");
+          const staleCached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), cachePolicy(env).warning_seconds, "stale_fallback");
           if (staleCached) {
-            staleCached.warning = "Render returned an error, so a stale D1 cache fallback is returned. Do not present it as a fresh live run.";
+            staleCached.warning = "Render returned an error, so a warning-age D1 cache fallback is returned. Do not present it as a fresh live run.";
             staleCached.render_error = {
               error: result.error,
               message: result.message,
@@ -537,6 +580,16 @@ function normalizeRenderPresetPayload(
 
 function getMaxSimulations(env: Env): number {
   return clampInt(parseNumber(env.MAX_SIMULATIONS, SIMULATION_HARD_CAP), 100, SIMULATION_HARD_CAP);
+}
+
+function cachePolicy(env: Env): Record<string, number> {
+  const freshSeconds = clampInt(parseNumber(env.QUICK_CACHE_MAX_SECONDS, QUICK_CACHE_MAX_SECONDS_DEFAULT), 60, 3600);
+  const warningSeconds = clampInt(parseNumber(env.STALE_CACHE_MAX_SECONDS, STALE_CACHE_MAX_SECONDS_DEFAULT), freshSeconds, 24 * 60 * 60);
+  return {
+    fresh_seconds: freshSeconds,
+    warning_seconds: warningSeconds,
+    hard_block_after_seconds: warningSeconds
+  };
 }
 
 function publicAnalysisPreset(path: string, env: Env): Record<string, unknown> {
@@ -928,6 +981,306 @@ async function listD1Runs(env: Env, asset: string, limit: number): Promise<Recor
   }
 }
 
+async function buildOpsStatus(env: Env): Promise<Record<string, unknown>> {
+  const now = new Date();
+  const policy = cachePolicy(env);
+  const [renderHealth, d1, quickCache, deepCache] = await Promise.all([
+    checkRenderHealth(env),
+    d1Status(env),
+    latestD1CacheSummary(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons),
+    latestD1CacheSummary(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons)
+  ]);
+  const quickCheck = classifyCacheSummary(quickCache, policy);
+  const deepCheck = classifyCacheSummary(deepCache, policy);
+  const warnings: string[] = [];
+  const blockers: string[] = [];
+
+  if (renderHealth.status !== "ok") {
+    blockers.push(`Render health ${renderHealth.status}`);
+  }
+  if (d1.status !== "ok") {
+    blockers.push(`Cloudflare D1 ${d1.status}`);
+  }
+  collectOpsIssue(quickCheck, "quick cache", warnings, blockers);
+  collectOpsIssue(deepCheck, "deep cache", warnings, blockers);
+
+  const status = blockers.length > 0 ? "degraded" : warnings.length > 0 ? "warning" : "ok";
+  return {
+    status,
+    service: "quant-btc-model-lite-worker",
+    worker_version: WORKER_VERSION,
+    schema_version: SCHEMA_VERSION,
+    checked_at_utc: now.toISOString(),
+    checked_at_paris: parisIso(now),
+    checks: {
+      worker: {
+        status: "ok",
+        quick_domain: "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev",
+        deep_domain: "https://quant-btc-model-deep.mdl-bitcoin-analyst.workers.dev"
+      },
+      render_health: renderHealth,
+      cloudflare_d1: d1,
+      quick_cache: quickCheck,
+      deep_cache: deepCheck
+    },
+    cache_policy: policy,
+    deep_compute_quota: getDeepRateLimit(env),
+    alerting: {
+      webhook: getOpsAlertWebhook(env) ? "configured" : "absent",
+      cooldown_seconds: clampInt(parseNumber(env.OPS_MONITOR_ALERT_COOLDOWN_SECONDS, OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60)
+    },
+    warnings,
+    blockers,
+    operational_policy: [
+      "Cache age <= fresh_seconds: analysis allowed as recent cache.",
+      "Cache age <= warning_seconds after Render failure or quota exhaustion: analysis allowed only with explicit warning-age fallback.",
+      "Cache age > warning_seconds: analysis blocked; do not present stale numbers.",
+      "Deep live computation has a separate quota; cache is preferred before compute."
+    ]
+  };
+}
+
+async function runOperationalMonitor(env: Env, manual = false): Promise<Record<string, unknown>> {
+  const status = await buildOpsStatus(env);
+  if (status.status !== "ok") {
+    const warnings = Array.isArray(status.warnings) ? status.warnings.join("; ") : "";
+    const blockers = Array.isArray(status.blockers) ? status.blockers.join("; ") : "";
+    const message = blockers || warnings || "Quant BTC operational monitor detected a degraded state.";
+    const fingerprint = `ops:${status.status}:${message}`;
+    await persistOpsEventToD1(env, {
+      kind: manual ? "manual_monitor" : "scheduled_monitor",
+      status: String(status.status),
+      severity: String(status.status) === "degraded" ? "critical" : "warning",
+      message,
+      fingerprint,
+      payload: status
+    });
+    await sendOpsAlertIfNeeded(env, fingerprint, message, status);
+  }
+  return status;
+}
+
+function collectOpsIssue(check: Record<string, unknown>, label: string, warnings: string[], blockers: string[]): void {
+  const status = stringOrNull(check.status) || "unknown";
+  if (status === "error" || status === "blocked" || status === "absent") {
+    blockers.push(`${label}: ${stringOrNull(check.message) || status}`);
+  } else if (status === "warning") {
+    warnings.push(`${label}: ${stringOrNull(check.message) || status}`);
+  }
+}
+
+async function checkRenderHealth(env: Env): Promise<Record<string, unknown>> {
+  const started = Date.now();
+  try {
+    const response = await fetchWithTimeout(renderUrl("/health", env), {
+      method: "GET",
+      headers: {
+        "accept": "application/json",
+        "user-agent": "quant-btc-model-cloudflare-ops-monitor/1.0"
+      },
+      cf: { cacheTtl: 0, cacheEverything: false }
+    }, 8000);
+    const text = await response.text();
+    let body: unknown = {};
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = { raw_response: text.slice(0, 500) };
+    }
+    return {
+      status: response.ok ? "ok" : "error",
+      http_status: response.status,
+      latency_ms: Date.now() - started,
+      body: objectValue(body)
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      latency_ms: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function latestD1CacheSummary(env: Env, asset: string, requestedHorizons: number[]): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 binding is absent" };
+  }
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT archive_id, horizons_json, report_date_utc, reference_spot, created_at_utc, payload_json
+      FROM quant_runs
+      WHERE asset = ?
+      ORDER BY created_at_utc DESC
+      LIMIT 20
+    `).bind(asset).all();
+    for (const row of results || []) {
+      const horizons = parseStoredJsonArray(row.horizons_json).map(Number);
+      if (!sameNumberArray(horizons, requestedHorizons)) {
+        continue;
+      }
+      const createdAt = stringOrNull(row.created_at_utc);
+      const payload = stringOrNull(row.payload_json) ? objectValue(JSON.parse(String(row.payload_json))) : {};
+      const firstFrame = objectValue(Array.isArray(payload.frames) ? payload.frames[0] : {});
+      return {
+        status: "present",
+        archive_id: row.archive_id,
+        horizons,
+        report_date_utc: row.report_date_utc,
+        report_date_paris: typeof row.report_date_utc === "string" ? parisIso(new Date(row.report_date_utc)) : null,
+        reference_spot: row.reference_spot,
+        reference_spot_timestamp_utc: firstFrame.reference_spot_timestamp_utc,
+        reference_spot_timestamp_paris: firstFrame.reference_spot_timestamp_paris,
+        created_at_utc: createdAt,
+        created_at_paris: createdAt ? parisIso(new Date(createdAt)) : null,
+        age_seconds: createdAt ? Math.max(0, Math.round((Date.now() - new Date(createdAt).getTime()) / 1000)) : null
+      };
+    }
+    return {
+      status: "absent",
+      message: `No D1 cache found for horizons ${requestedHorizons.join(",")}`
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function classifyCacheSummary(summary: Record<string, unknown>, policy: Record<string, number>): Record<string, unknown> {
+  if (summary.status !== "present") {
+    return {
+      ...summary,
+      status: summary.status === "error" ? "error" : "absent",
+      cache_decision: "analysis_blocked_until_fresh_run",
+      message: stringOrNull(summary.message) || "No matching D1 cache is available"
+    };
+  }
+  const age = numberOrNull(summary.age_seconds);
+  const freshSeconds = Number(policy.fresh_seconds);
+  const warningSeconds = Number(policy.warning_seconds);
+  if (age === null) {
+    return {
+      ...summary,
+      status: "error",
+      cache_decision: "analysis_blocked_until_fresh_run",
+      message: "Cache age is unavailable"
+    };
+  }
+  if (age <= freshSeconds) {
+    return {
+      ...summary,
+      status: "ok",
+      freshness_label: "fresh",
+      cache_decision: "analysis_allowed_recent_cache",
+      message: `Cache age ${age}s is within fresh threshold ${freshSeconds}s`
+    };
+  }
+  if (age <= warningSeconds) {
+    return {
+      ...summary,
+      status: "warning",
+      freshness_label: "warning_age",
+      cache_decision: "analysis_allowed_only_with_warning",
+      message: `Cache age ${age}s exceeds fresh threshold ${freshSeconds}s but remains below hard block ${warningSeconds}s`
+    };
+  }
+  return {
+    ...summary,
+    status: "blocked",
+    freshness_label: "stale_blocked",
+    cache_decision: "analysis_blocked_stale_cache",
+    message: `Cache age ${age}s exceeds hard block threshold ${warningSeconds}s`
+  };
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function getOpsAlertWebhook(env: Env): string | null {
+  return stringOrNull(env.OPS_ALERT_WEBHOOK_URL) || stringOrNull(env.DISCORD_WEBHOOK_URL);
+}
+
+async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: string, status: Record<string, unknown>): Promise<void> {
+  const webhook = getOpsAlertWebhook(env);
+  if (!webhook) {
+    return;
+  }
+  const cooldown = clampInt(parseNumber(env.OPS_MONITOR_ALERT_COOLDOWN_SECONDS, OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60);
+  if (!(await shouldSendOpsAlert(env, fingerprint, cooldown))) {
+    return;
+  }
+  try {
+    await fetch(webhook, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        content: `Quant BTC ops ${String(status.status).toUpperCase()}: ${message}`,
+        embeds: [
+          {
+            title: "Quant BTC operational monitor",
+            description: message,
+            color: status.status === "degraded" ? 15158332 : 16776960,
+            timestamp: new Date().toISOString()
+          }
+        ]
+      })
+    });
+  } catch {
+    // Alert delivery is best-effort; /ops/status remains the source of truth.
+  }
+}
+
+async function shouldSendOpsAlert(env: Env, fingerprint: string, cooldownSeconds: number): Promise<boolean> {
+  if (!env.DB) {
+    return true;
+  }
+  try {
+    const since = new Date(Date.now() - cooldownSeconds * 1000).toISOString();
+    const { results } = await env.DB.prepare(`
+      SELECT COUNT(*) AS count
+      FROM ops_events
+      WHERE fingerprint = ? AND created_at_utc >= ?
+    `).bind(fingerprint, since).all();
+    const first = objectValue(results?.[0]);
+    return Number(first.count || 0) === 0;
+  } catch {
+    return true;
+  }
+}
+
+async function persistOpsEventToD1(env: Env, event: { kind: string; status: string; severity: string; message: string; fingerprint: string; payload: Record<string, unknown> }): Promise<void> {
+  if (!env.DB) {
+    return;
+  }
+  try {
+    await env.DB.prepare(`
+      INSERT INTO ops_events (
+        kind, status, severity, message, fingerprint, payload_json, created_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      event.kind,
+      event.status,
+      event.severity,
+      event.message,
+      event.fingerprint,
+      JSON.stringify(event.payload),
+      new Date().toISOString()
+    ).run();
+  } catch {
+    // Ops logging is best-effort and must never block analysis endpoints.
+  }
+}
+
 function compactRunPayload(result: Record<string, unknown>): Record<string, unknown> {
   const archive = objectValue(result.archive);
   const provenance = objectValue(result.provenance_summary);
@@ -1062,6 +1415,8 @@ function compactCachedAnalyzeResponse(
   const bridge = objectValue(payload.cloudflare_bridge);
   const firstFrame = objectValue(Array.isArray(payload.frames) ? payload.frames[0] : {});
   const preset = ANALYSIS_PRESETS[presetPath];
+  const ageSeconds = Math.max(0, Math.round((Date.now() - new Date(cachedAtUtc).getTime()) / 1000));
+  const cacheLabel = cacheStatus === "hit" ? "fresh" : "warning_age";
   return {
     status: "ok",
     asset: stringOrNull(payload.asset) || "BTC",
@@ -1088,12 +1443,15 @@ function compactCachedAnalyzeResponse(
     response_type: cacheStatus === "hit" ? "cached_recent_d1_payload" : "cached_stale_d1_fallback_payload",
     cache: {
       status: cacheStatus,
+      freshness_label: cacheLabel,
       cached_at_utc: cachedAtUtc,
       cached_at_paris: parisIso(new Date(cachedAtUtc)),
+      age_seconds: ageSeconds,
       max_age_seconds: maxAgeSeconds,
+      hard_block_after_seconds: maxAgeSeconds,
       note: cacheStatus === "hit"
         ? "Recent Cloudflare D1 cache used to avoid long GPT Action loading. Ask for fresh=true to force a new Render calculation."
-        : "Stale Cloudflare D1 fallback used because the Render engine failed. This is not a fresh live run."
+        : "Warning-age Cloudflare D1 fallback used because the Render engine failed or deep compute quota was exhausted. This is not a fresh live run."
     },
     response_policy: {
       numeric_traceability_required: true,
@@ -1479,11 +1837,28 @@ function getRateLimit(env: Env) {
 
 function checkRateLimit(request: Request, env: Env): RateLimitResult {
   const { limit, windowSeconds } = getRateLimit(env);
+  return checkRateLimitWithPolicy(request, limit, windowSeconds, "public");
+}
+
+function getDeepRateLimit(env: Env) {
+  return {
+    limit: clampInt(parseNumber(env.DEEP_RATE_LIMIT_RUNS_PER_MINUTE, 2), 1, 30),
+    windowSeconds: clampInt(parseNumber(env.DEEP_RATE_LIMIT_WINDOW_SECONDS, 60), 10, 3600)
+  };
+}
+
+function checkDeepRateLimit(request: Request, env: Env): RateLimitResult {
+  const { limit, windowSeconds } = getDeepRateLimit(env);
+  return checkRateLimitWithPolicy(request, limit, windowSeconds, "deep_compute");
+}
+
+function checkRateLimitWithPolicy(request: Request, limit: number, windowSeconds: number, scope: string): RateLimitResult {
   const now = Date.now();
   const windowMs = windowSeconds * 1000;
-  const key = request.headers.get("cf-connecting-ip")
+  const clientKey = request.headers.get("cf-connecting-ip")
     || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
     || "unknown-client";
+  const key = `${scope}:${clientKey}`;
   const existing = rateLimitBuckets.get(key) || [];
   const recent = existing.filter((timestamp) => now - timestamp < windowMs);
   const allowed = recent.length < limit;
@@ -2099,6 +2474,24 @@ function getMarketSpotSnapshot(market: MarketCandles) {
     timestamp_paris: timestamp ? parisIso(timestamp) : null,
     source: market.source,
     status: "real"
+  };
+}
+
+function deepRateLimitResponse(rateLimit: RateLimitResult) {
+  return {
+    error: "deep_compute_rate_limited",
+    message: "Deep BTC computation quota reached. Use the recent cache, wait for the reset, or request the quick analysis.",
+    rate_limit: publicRateLimit(rateLimit),
+    cache_policy: {
+      fresh_cache: "accepted",
+      warning_age_cache: "accepted only with explicit stale/fallback warning",
+      stale_over_limit: "analysis blocked"
+    },
+    data_status: {
+      model_output: "absent",
+      market_data: "absent"
+    },
+    warning: "No deterministic prediction was produced."
   };
 }
 
