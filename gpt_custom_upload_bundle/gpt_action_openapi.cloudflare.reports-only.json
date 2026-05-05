@@ -1,0 +1,156 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model GPT reports-only",
+    "version": "1.15.5-reports-only",
+    "description": "Quant BTC Model GPT Action schema. BTC is implicit. Probabilistic outputs only."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Health check",
+        "description": "Check Worker availability.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/latest": {
+      "get": {
+        "operationId": "latestQuantBtcReport",
+        "summary": "Get latest stored BTC report",
+        "description": "Return latest stored report.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/history": {
+      "get": {
+        "operationId": "getQuantBtcHistory",
+        "summary": "Get BTC run history",
+        "description": "Return recent archived runs.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compare-runs": {
+      "get": {
+        "operationId": "compareQuantBtcRuns",
+        "summary": "Compare recent BTC runs",
+        "description": "Compare latest and previous runs.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/alerts": {
+      "get": {
+        "operationId": "getQuantBtcAlerts",
+        "summary": "Get BTC alert status",
+        "description": "Return alert diagnostics.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backtest-summary": {
+      "get": {
+        "operationId": "getQuantBtcBacktestSummary",
+        "summary": "Get BTC backtest summary",
+        "description": "Return backtest diagnostics.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BasicResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "archive_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "report_markdown": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

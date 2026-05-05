@@ -1,0 +1,118 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model GPT diag-only",
+    "version": "1.15.5-diag-only",
+    "description": "Quant BTC Model GPT Action schema. BTC is implicit. Probabilistic outputs only."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Health check",
+        "description": "Check Worker availability.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "operationId": "getQuantBtcLiteVersion",
+        "summary": "Get Worker version",
+        "description": "Return Worker/schema/version metadata.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "operationId": "getQuantBtcLiteStatus",
+        "summary": "Get runtime status",
+        "description": "Return runtime status.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "operationId": "auditQuantBtcLiteSystem",
+        "summary": "Audit system readiness",
+        "description": "Preflight governance audit.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BasicResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "archive_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "report_markdown": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

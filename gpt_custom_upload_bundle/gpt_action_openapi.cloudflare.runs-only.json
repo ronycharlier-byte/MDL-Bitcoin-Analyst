@@ -1,0 +1,118 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model GPT runs-only",
+    "version": "1.15.5-runs-only",
+    "description": "Quant BTC Model GPT Action schema. BTC is implicit. Probabilistic outputs only."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Health check",
+        "description": "Check Worker availability.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/run-quick": {
+      "get": {
+        "operationId": "runQuantBtcQuick",
+        "summary": "Run quick BTC preset",
+        "description": "Quick BTC preset.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/run-tactical": {
+      "get": {
+        "operationId": "runQuantBtcTactical",
+        "summary": "Run tactical BTC preset",
+        "description": "Tactical BTC preset.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/run-deep": {
+      "get": {
+        "operationId": "runQuantBtcDeep",
+        "summary": "Run deep BTC preset",
+        "description": "Deep BTC preset.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BasicResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BasicResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "archive_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "report_markdown": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
