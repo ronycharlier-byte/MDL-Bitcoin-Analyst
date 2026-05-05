@@ -2,40 +2,46 @@ openapi: 3.1.0
 info:
   title: Quant BTC Model API
   version: 1.8.1
-  description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions. Numeric outputs include UTC and Europe/Paris provenance fields when available.
+  description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions.
+    Numeric outputs include UTC and Europe/Paris provenance fields when available.
 servers:
-  - url: https://quant-btc-model-api.onrender.com
-    description: Render deployment.
+- url: https://quant-btc-model-api.onrender.com
+  description: Render deployment.
 paths:
   /health:
     get:
       operationId: health
       summary: Health check
       responses:
-        "200":
+        '200':
           description: Service health.
   /version:
     get:
       operationId: getQuantBtcVersion
       summary: Return API, model, schema and git version metadata
       responses:
-        "200":
-          description: Version metadata including api_version, model_version, schema_version, git_commit, runtime limits and default frames.
+        '200':
+          description: Version metadata including api_version, model_version, schema_version,
+            git_commit, runtime limits and default frames.
   /status:
     get:
       operationId: getQuantBtcStatus
       summary: Return public API status, sources, limits and runtime controls
       responses:
-        "200":
-          description: Public status metadata including data sources, runtime controls, limitations, default frames and version.
+        '200':
+          description: Public status metadata including data sources, runtime controls,
+            limitations, default frames and version.
   /audit:
     get:
       operationId: auditQuantBtcSystem
       summary: Audit API health, provenance, source policy and latest archive readiness
-      description: Preflight governance audit. Use before live analysis. This endpoint does not produce model forecasts; it reports whether the system is ready for a fresh probabilistic run.
+      description: Preflight governance audit. Use before live analysis. This endpoint
+        does not produce model forecasts; it reports whether the system is ready for
+        a fresh probabilistic run.
       responses:
-        "200":
-          description: Audit JSON with readiness, blockers, warnings, source policy, latest archive metadata, fundamental field status and version.
+        '200':
+          description: Audit JSON with readiness, blockers, warnings, source policy,
+            latest archive metadata, fundamental field status and version.
           content:
             application/json:
               schema:
@@ -81,7 +87,10 @@ paths:
     post:
       operationId: runQuantBtcModel
       summary: Run the probabilistic BTC model
-      description: Runs a fresh calculation at call time. The API reloads online BTC market data by default, appends the latest Bitget BTCUSDT spot ticker as the reference price, then produces probabilities, distributions, risk metrics, stress tests and provenance. Never returns deterministic advice.
+      description: Runs a fresh calculation at call time. The API reloads online BTC
+        market data by default, appends the latest Bitget BTCUSDT spot ticker as the
+        reference price, then produces probabilities, distributions, risk metrics,
+        stress tests and provenance. Never returns deterministic advice.
       requestBody:
         required: true
         content:
@@ -89,10 +98,10 @@ paths:
             schema:
               type: object
               required:
-                - asset
-                - horizon
-                - simulations
-                - model
+              - asset
+              - horizon
+              - simulations
+              - model
               properties:
                 asset:
                   type: string
@@ -108,29 +117,33 @@ paths:
                   default: 5000
                   minimum: 100
                   maximum: 250000
-                  description: Default is optimized for GPT Action latency. Increase only when the user explicitly asks for a deeper run.
+                  description: Default is optimized for GPT Action latency. Increase
+                    only when the user explicitly asks for a deeper run.
                 model:
                   type: string
                   default: ensemble
                   enum:
-                    - ensemble
-                    - monte_carlo
-                    - student_t
-                    - jump_diffusion
-                    - garch
-                    - regime_switching
-                    - liquidation
-                    - correlation
+                  - ensemble
+                  - monte_carlo
+                  - student_t
+                  - jump_diffusion
+                  - garch
+                  - regime_switching
+                  - liquidation
+                  - correlation
                 skip_corpus:
                   type: boolean
                   default: true
                 no_online:
                   type: boolean
                   default: false
-                  description: Keep false for real-time runs. If true, the API will not fetch online candles or the live Bitget spot ticker.
+                  description: Keep false for real-time runs. If true, the API will
+                    not fetch online candles or the live Bitget spot ticker.
       responses:
-        "200":
-          description: Fresh probabilistic model result with run_id, report_date UTC/Europe-Paris, reference_spot, reference_spot_timestamp UTC/Europe-Paris, source statuses, report_markdown, dashboard_markdown, distribution, risk metrics and warning.
+        '200':
+          description: Fresh probabilistic model result with run_id, report_date UTC/Europe-Paris,
+            reference_spot, reference_spot_timestamp UTC/Europe-Paris, source statuses,
+            report_markdown, dashboard_markdown, distribution, risk metrics and warning.
           content:
             application/json:
               schema:
@@ -154,17 +167,21 @@ paths:
                     type: object
                     additionalProperties: true
                 additionalProperties: true
-        "401":
+        '401':
           description: Missing or invalid API key.
-        "429":
+        '429':
           description: Public rate limit exceeded.
-        "500":
+        '500':
           description: Model run failed.
   /multi-run:
     post:
       operationId: runQuantBtcMultiFrame
       summary: Run fresh BTC model across multiple timeframes
-      description: Runs fresh fast in-memory probabilistic calculations for several horizons in one server call. Use this for multi-frame analysis such as 7, 30, 90, 180 and 365 days. The API captures one shared Bitget BTCUSDT spot ticker snapshot and applies it to every frame so horizon comparisons use the same reference price. Identical requests may be served from a short cache.
+      description: Runs fresh fast in-memory probabilistic calculations for several
+        horizons in one server call. Use this for multi-frame analysis such as 7,
+        30, 90, 180 and 365 days. The API captures one shared Bitget BTCUSDT spot
+        ticker snapshot and applies it to every frame so horizon comparisons use the
+        same reference price. Identical requests may be served from a short cache.
       requestBody:
         required: true
         content:
@@ -172,10 +189,10 @@ paths:
             schema:
               type: object
               required:
-                - asset
-                - horizons
-                - simulations
-                - model
+              - asset
+              - horizons
+              - simulations
+              - model
               properties:
                 asset:
                   type: string
@@ -189,25 +206,27 @@ paths:
                     type: integer
                     minimum: 1
                     maximum: 3650
-                  description: Timeframes in days. Use [7, 30, 90, 180, 365] for the standard multi-frame view.
+                  description: Timeframes in days. Use [7, 30, 90, 180, 365] for the
+                    standard multi-frame view.
                 simulations:
                   type: integer
                   default: 2000
                   minimum: 100
                   maximum: 250000
-                  description: Simulations per horizon. Default is optimized for GPT Action latency.
+                  description: Simulations per horizon. Default is optimized for GPT
+                    Action latency.
                 model:
                   type: string
                   default: ensemble
                   enum:
-                    - ensemble
-                    - monte_carlo
-                    - student_t
-                    - jump_diffusion
-                    - garch
-                    - regime_switching
-                    - liquidation
-                    - correlation
+                  - ensemble
+                  - monte_carlo
+                  - student_t
+                  - jump_diffusion
+                  - garch
+                  - regime_switching
+                  - liquidation
+                  - correlation
                 skip_corpus:
                   type: boolean
                   default: true
@@ -216,8 +235,10 @@ paths:
                   default: false
                   description: Keep false for real-time multi-frame runs.
       responses:
-        "200":
-          description: Fresh multi-frame probabilistic result with one frame per horizon, single archive_id, shared spot provenance, UTC/Europe-Paris timestamps, source statuses, distributions and risks.
+        '200':
+          description: Fresh multi-frame probabilistic result with one frame per horizon,
+            single archive_id, shared spot provenance, UTC/Europe-Paris timestamps,
+            source statuses, distributions and risks.
           content:
             application/json:
               schema:
@@ -246,32 +267,26 @@ paths:
                     type: object
                     additionalProperties: true
                 additionalProperties: true
-        "401":
+        '401':
           description: Missing or invalid API key.
-        "429":
+        '429':
           description: Public rate limit exceeded.
-        "500":
+        '500':
           description: All multi-frame model runs failed.
   /latest:
     get:
       operationId: latestQuantBtcReport
       summary: Return latest generated report artifacts
       responses:
-        "200":
-          description: Latest stored report and dashboard markdown. This is not guaranteed to be fresh; call POST /run for real-time calculation.
+        '200':
+          description: Latest stored report and dashboard markdown. This is not guaranteed
+            to be fresh; call POST /run for real-time calculation.
   /history:
     get:
       operationId: getQuantBtcRunHistory
       summary: Return recent archived live runs and storage status
-      parameters:
-        - name: asset
-          in: query
-          required: false
-          schema:
-            type: string
-            default: BTC
       responses:
-        "200":
+        '200':
           description: Recent archive metadata and durable storage status.
           content:
             application/json:
@@ -293,15 +308,8 @@ paths:
     get:
       operationId: compareQuantBtcRuns
       summary: Compare latest run against previous archived run
-      parameters:
-        - name: asset
-          in: query
-          required: false
-          schema:
-            type: string
-            default: BTC
       responses:
-        "200":
+        '200':
           description: Run-to-run changes in spot, VaR/CVaR, regimes and confidence.
           content:
             application/json:
@@ -320,15 +328,8 @@ paths:
     get:
       operationId: getQuantBtcAlerts
       summary: Return latest stale-data, risk and confidence alerts
-      parameters:
-        - name: asset
-          in: query
-          required: false
-          schema:
-            type: string
-            default: BTC
       responses:
-        "200":
+        '200':
           description: Alert list generated from latest archive.
           content:
             application/json:
@@ -347,16 +348,10 @@ paths:
     get:
       operationId: getQuantBtcBacktestSummary
       summary: Return baseline walk-forward backtest diagnostics
-      parameters:
-        - name: asset
-          in: query
-          required: false
-          schema:
-            type: string
-            default: BTC
       responses:
-        "200":
-          description: Backtest diagnostics such as hit rate, Brier score, calibration and interval coverage.
+        '200':
+          description: Backtest diagnostics such as hit rate, Brier score, calibration
+            and interval coverage.
           content:
             application/json:
               schema:

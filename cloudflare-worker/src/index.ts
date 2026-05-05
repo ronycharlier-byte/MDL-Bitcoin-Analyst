@@ -61,8 +61,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type"
 };
 
-const WORKER_VERSION = "1.12.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.12.0";
+const WORKER_VERSION = "1.12.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.12.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];

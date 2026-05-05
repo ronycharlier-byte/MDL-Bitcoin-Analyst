@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model Bitget Bridge Worker
-  version: 1.12.0
+  version: 1.12.1
   description: Always-awake Cloudflare Worker facade for the Render Bitget-backed
     probabilistic BTC model. Outputs are probabilistic and must never be presented
     as certainty. Report and spot timestamps must be displayed as UTC and Europe/Paris.
@@ -33,10 +33,13 @@ paths:
     get:
       operationId: auditQuantBtcLiteSystem
       summary: Audit Cloudflare bridge and Render model readiness
-      description: Preflight governance audit. Call this before live analysis; it reports readiness, source policy, latest archive status and fundamental field status. It does not return forecasts.
+      description: Preflight governance audit. Call this before live analysis; it
+        reports readiness, source policy, latest archive status and fundamental field
+        status. It does not return forecasts.
       responses:
         '200':
-          description: Audit JSON with readiness, blockers, warnings, source policy, latest archive metadata, fundamental field status and bridge metadata.
+          description: Audit JSON with readiness, blockers, warnings, source policy,
+            latest archive metadata, fundamental field status and bridge metadata.
           content:
             application/json:
               schema:
@@ -97,8 +100,9 @@ paths:
           default: BTC
       responses:
         '200':
-          description: Probabilistic Bitget-backed JSON result with provenance, UTC/Europe-Paris timestamps, statuses,
-            distribution, regime residual, risk metrics, confidence, archive_id and warnings.
+          description: Probabilistic Bitget-backed JSON result with provenance, UTC/Europe-Paris
+            timestamps, statuses, distribution, regime residual, risk metrics, confidence,
+            archive_id and warnings.
           content:
             application/json:
               schema:
@@ -134,7 +138,9 @@ paths:
     get:
       operationId: runQuantBtcMultiFrame
       summary: Run the default Bitget-backed BTC multi-frame analysis
-      description: Multi-frame analysis operation. Send asset=BTC. The backend returns the standard five-frame BTC analysis [7,30,90,180,365]. No horizons parameter is required.
+      description: Multi-frame analysis operation. Send asset=BTC. The backend returns
+        the standard five-frame BTC analysis [7,30,90,180,365]. No horizons parameter
+        is required.
       parameters:
       - name: asset
         in: query
@@ -145,7 +151,9 @@ paths:
           default: BTC
       responses:
         '200':
-          description: Probabilistic multi-frame JSON result with one frame per horizon, one archive_id, UTC/Europe-Paris provenance, statuses, risk metrics, confidence and warnings.
+          description: Probabilistic multi-frame JSON result with one frame per horizon,
+            one archive_id, UTC/Europe-Paris provenance, statuses, risk metrics, confidence
+            and warnings.
           content:
             application/json:
               schema:
@@ -196,13 +204,6 @@ paths:
     get:
       operationId: getQuantBtcRunHistory
       summary: Return recent archived live runs
-      parameters:
-      - name: asset
-        in: query
-        required: false
-        schema:
-          type: string
-          default: BTC
       responses:
         '200':
           description: Recent runtime archives and durable storage status.
@@ -226,13 +227,6 @@ paths:
     get:
       operationId: compareQuantBtcRuns
       summary: Compare latest run against the previous archived run
-      parameters:
-      - name: asset
-        in: query
-        required: false
-        schema:
-          type: string
-          default: BTC
       responses:
         '200':
           description: Run-to-run deltas for spot, VaR/CVaR, regimes and confidence.
@@ -257,13 +251,6 @@ paths:
     get:
       operationId: getQuantBtcAlerts
       summary: Return latest quality and risk alerts
-      parameters:
-      - name: asset
-        in: query
-        required: false
-        schema:
-          type: string
-          default: BTC
       responses:
         '200':
           description: Current alerts for stale data, VaR, confidence and regime transition.
@@ -284,13 +271,6 @@ paths:
     get:
       operationId: getQuantBtcBacktestSummary
       summary: Return visible baseline backtest diagnostics
-      parameters:
-      - name: asset
-        in: query
-        required: false
-        schema:
-          type: string
-          default: BTC
       responses:
         '200':
           description: Hit rate, Brier, calibration, absolute error and coverage diagnostics.
