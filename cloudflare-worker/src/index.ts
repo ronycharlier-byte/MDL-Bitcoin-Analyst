@@ -62,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.18.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.18.0";
+const WORKER_VERSION = "1.18.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.18.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -919,12 +919,36 @@ function compactAnalyzeResponse(
   const frames = Array.isArray(result.frames)
     ? result.frames.map((item) => compactAnalyzeFrame(objectValue(item)))
     : [];
+  const firstFrame = objectValue(frames[0]);
+  const archiveId = stringOrNull(archive.archive_id) || archiveIdFromPayload(result);
+  const reportDateUtc = stringOrNull(archive.report_date_utc) || stringOrNull(archive.report_date);
+  const reportDateParis = stringOrNull(archive.report_date_paris);
+  const runIds = Array.isArray(archive.run_ids)
+    ? archive.run_ids
+    : frames.map((frame) => objectValue(frame).run_id).filter(Boolean);
   return {
     status: stringOrNull(result.status) || "ok",
     asset: stringOrNull(result.asset) || "BTC",
     model: stringOrNull(result.model) || "ensemble",
     horizons: Array.isArray(result.horizons) ? result.horizons : frames.map((frame) => frame.horizon),
     simulations_per_horizon: numberOrNull(result.simulations_per_horizon) || numberOrNull(preset.simulations_per_horizon),
+    archive_id: archiveId,
+    report_date_utc: reportDateUtc,
+    report_date_paris: reportDateParis,
+    reference_spot: archive.reference_spot || firstFrame.reference_spot,
+    reference_spot_timestamp_utc: firstFrame.reference_spot_timestamp_utc,
+    reference_spot_timestamp_paris: firstFrame.reference_spot_timestamp_paris,
+    reference_spot_source: firstFrame.reference_spot_source,
+    frames_count: frames.length,
+    run_ids: runIds,
+    versions: {
+      worker_version: WORKER_VERSION,
+      worker_schema_version: SCHEMA_VERSION,
+      render_api_version: version.api_version,
+      render_model_version: version.model_version,
+      render_schema_version: version.schema_version,
+      render_git_commit: version.git_commit
+    },
     response_type: "compact_gpt_action_payload",
     response_policy: {
       numeric_traceability_required: true,
@@ -944,12 +968,15 @@ function compactAnalyzeResponse(
     },
     provenance: {
       source: "cloudflare_worker_analyze_compact",
-      archive_id: stringOrNull(archive.archive_id) || archiveIdFromPayload(result),
+      archive_id: archiveId,
       archive_status: archive.status,
-      report_date_utc: stringOrNull(archive.report_date_utc) || stringOrNull(archive.report_date),
-      report_date_paris: stringOrNull(archive.report_date_paris),
-      reference_spot: archive.reference_spot,
-      run_ids: archive.run_ids,
+      report_date_utc: reportDateUtc,
+      report_date_paris: reportDateParis,
+      reference_spot: archive.reference_spot || firstFrame.reference_spot,
+      reference_spot_timestamp_utc: firstFrame.reference_spot_timestamp_utc,
+      reference_spot_timestamp_paris: firstFrame.reference_spot_timestamp_paris,
+      reference_spot_source: firstFrame.reference_spot_source,
+      run_ids: runIds,
       worker_version: WORKER_VERSION,
       worker_schema_version: SCHEMA_VERSION,
       render_api_version: version.api_version,

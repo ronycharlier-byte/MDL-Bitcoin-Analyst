@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quant BTC Model GPT Compact Analyze Schema",
-    "version": "1.18.0-compact-analyze-param",
+    "version": "1.18.1-compact-analyze-param",
     "description": "Minimal GPT Action schema for Quant BTC Model. One compact analysis endpoint, probabilistic outputs only."
   },
   "servers": [
@@ -27,22 +27,22 @@
                     "status": {
                       "type": "string"
                     },
-                    "asset": {
+                    "service": {
                       "type": "string"
                     },
-                    "model": {
+                    "worker_version": {
                       "type": "string"
                     },
-                    "response_type": {
+                    "mode": {
                       "type": "string"
                     },
-                    "warning": {
+                    "timestamp_utc": {
                       "type": "string"
                     },
-                    "generated_at_utc": {
+                    "timestamp_paris": {
                       "type": "string"
                     },
-                    "generated_at_paris": {
+                    "timezone_policy": {
                       "type": "string"
                     }
                   }
@@ -75,11 +75,568 @@
                     "model": {
                       "type": "string"
                     },
+                    "horizons": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "simulations_per_horizon": {
+                      "type": "integer"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "report_date_paris": {
+                      "type": "string"
+                    },
+                    "reference_spot": {
+                      "type": "string"
+                    },
+                    "reference_spot_timestamp_utc": {
+                      "type": "string"
+                    },
+                    "reference_spot_timestamp_paris": {
+                      "type": "string"
+                    },
+                    "reference_spot_source": {
+                      "type": "string"
+                    },
+                    "frames_count": {
+                      "type": "integer"
+                    },
+                    "run_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "versions": {
+                      "type": "object",
+                      "properties": {
+                        "worker_version": {
+                          "type": "string"
+                        },
+                        "worker_schema_version": {
+                          "type": "string"
+                        },
+                        "render_api_version": {
+                          "type": "string"
+                        },
+                        "render_model_version": {
+                          "type": "string"
+                        },
+                        "render_schema_version": {
+                          "type": "string"
+                        },
+                        "render_git_commit": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "response_type": {
                       "type": "string"
                     },
+                    "response_policy": {
+                      "type": "object",
+                      "properties": {
+                        "numeric_traceability_required": {
+                          "type": "boolean"
+                        },
+                        "deterministic_prediction_forbidden": {
+                          "type": "boolean"
+                        },
+                        "use_archive_for_full_detail": {
+                          "type": "boolean"
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "analysis_preset": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "endpoint": {
+                          "type": "string"
+                        },
+                        "requested_endpoint": {
+                          "type": "string"
+                        },
+                        "requested_preset": {
+                          "type": "string"
+                        },
+                        "horizons": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "simulations_per_horizon": {
+                          "type": "integer"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "provenance": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string"
+                        },
+                        "archive_id": {
+                          "type": "string"
+                        },
+                        "archive_status": {
+                          "type": "string"
+                        },
+                        "report_date_utc": {
+                          "type": "string"
+                        },
+                        "report_date_paris": {
+                          "type": "string"
+                        },
+                        "reference_spot": {
+                          "type": "string"
+                        },
+                        "reference_spot_timestamp_utc": {
+                          "type": "string"
+                        },
+                        "reference_spot_timestamp_paris": {
+                          "type": "string"
+                        },
+                        "reference_spot_source": {
+                          "type": "string"
+                        },
+                        "run_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "worker_version": {
+                          "type": "string"
+                        },
+                        "worker_schema_version": {
+                          "type": "string"
+                        },
+                        "render_api_version": {
+                          "type": "string"
+                        },
+                        "render_model_version": {
+                          "type": "string"
+                        },
+                        "render_schema_version": {
+                          "type": "string"
+                        },
+                        "render_git_commit": {
+                          "type": "string"
+                        },
+                        "operation_path": {
+                          "type": "string"
+                        },
+                        "render_operation_path": {
+                          "type": "string"
+                        },
+                        "bridge_timestamp_utc": {
+                          "type": "string"
+                        },
+                        "bridge_timestamp_paris": {
+                          "type": "string"
+                        },
+                        "timezone_policy": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "data_status": {
+                      "type": "object",
+                      "properties": {
+                        "market_prices": {
+                          "type": "string"
+                        },
+                        "simulation_outputs": {
+                          "type": "string"
+                        },
+                        "risk_metrics": {
+                          "type": "string"
+                        },
+                        "fundamental_variables": {
+                          "type": "string"
+                        },
+                        "bitget_required": {
+                          "type": "string"
+                        },
+                        "cloudflare_direct_bitget": {
+                          "type": "string"
+                        },
+                        "non_bitget_market_fallback": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "frames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "horizon": {
+                            "type": "integer"
+                          },
+                          "run_id": {
+                            "type": "string"
+                          },
+                          "report_date_utc": {
+                            "type": "string"
+                          },
+                          "report_date_paris": {
+                            "type": "string"
+                          },
+                          "reference_spot": {
+                            "type": "string"
+                          },
+                          "reference_spot_timestamp_utc": {
+                            "type": "string"
+                          },
+                          "reference_spot_timestamp_paris": {
+                            "type": "string"
+                          },
+                          "reference_spot_source": {
+                            "type": "string"
+                          },
+                          "data_status": {
+                            "type": "object",
+                            "properties": {
+                              "market_prices": {
+                                "type": "string"
+                              },
+                              "simulation_outputs": {
+                                "type": "string"
+                              },
+                              "risk_metrics": {
+                                "type": "string"
+                              },
+                              "fundamental_variables": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "distribution": {
+                            "type": "object",
+                            "properties": {
+                              "p10_return": {
+                                "type": "number"
+                              },
+                              "median_return": {
+                                "type": "number"
+                              },
+                              "p90_return": {
+                                "type": "number"
+                              },
+                              "p10_price": {
+                                "type": "number"
+                              },
+                              "median_price": {
+                                "type": "number"
+                              },
+                              "p90_price": {
+                                "type": "number"
+                              },
+                              "prob_up": {
+                                "type": "number"
+                              },
+                              "prob_down_10": {
+                                "type": "number"
+                              },
+                              "prob_down_30": {
+                                "type": "number"
+                              },
+                              "prob_up_30": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "regime_distribution": {
+                            "type": "object",
+                            "properties": {
+                              "bull": {
+                                "type": "number"
+                              },
+                              "bear": {
+                                "type": "number"
+                              },
+                              "range": {
+                                "type": "number"
+                              },
+                              "classified_total": {
+                                "type": "number"
+                              },
+                              "non_classified_transition": {
+                                "type": "number"
+                              },
+                              "is_complete": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          "risk_metrics": {
+                            "type": "object",
+                            "properties": {
+                              "var_95": {
+                                "type": "number"
+                              },
+                              "cvar_95": {
+                                "type": "number"
+                              },
+                              "var_99": {
+                                "type": "number"
+                              },
+                              "cvar_99": {
+                                "type": "number"
+                              },
+                              "expected_max_drawdown": {
+                                "type": "number"
+                              },
+                              "median_max_drawdown": {
+                                "type": "number"
+                              },
+                              "p95_max_drawdown": {
+                                "type": "number"
+                              },
+                              "worst_sample_drawdown": {
+                                "type": "number"
+                              },
+                              "conditional_volatility": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "monte_carlo_error": {
+                            "type": "object",
+                            "properties": {
+                              "status": {
+                                "type": "string"
+                              },
+                              "method": {
+                                "type": "string"
+                              },
+                              "warnings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "multi_seed_stability": {
+                            "type": "object",
+                            "properties": {
+                              "status": {
+                                "type": "string"
+                              },
+                              "seed_runs": {
+                                "type": "integer"
+                              },
+                              "directional_stability": {
+                                "type": "number"
+                              },
+                              "bias_stability_label": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "confidence": {
+                            "type": "object",
+                            "properties": {
+                              "score": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "alerts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "level": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "horizon": {
+                            "type": "integer"
+                          },
+                          "value": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    },
+                    "backtest_diagnostics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "horizon_days": {
+                            "type": "integer"
+                          },
+                          "hit_rate": {
+                            "type": "number"
+                          },
+                          "brier_score": {
+                            "type": "number"
+                          },
+                          "calibration_error": {
+                            "type": "number"
+                          },
+                          "interval_coverage": {
+                            "type": "number"
+                          },
+                          "var95_breach_rate": {
+                            "type": "number"
+                          },
+                          "expected_var95_breach_rate": {
+                            "type": "number"
+                          },
+                          "random_walk_hit_rate": {
+                            "type": "number"
+                          },
+                          "brier_skill_vs_random_walk": {
+                            "type": "number"
+                          },
+                          "observations": {
+                            "type": "integer"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "statut": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "context": {
+                      "type": "object",
+                      "properties": {
+                        "liquidity": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "timestamp_utc": {
+                              "type": "string"
+                            },
+                            "timestamp_paris": {
+                              "type": "string"
+                            },
+                            "best_bid": {
+                              "type": "number"
+                            },
+                            "best_ask": {
+                              "type": "number"
+                            },
+                            "spread_bps": {
+                              "type": "number"
+                            },
+                            "order_book_imbalance_1pct": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "options": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "timestamp_utc": {
+                              "type": "string"
+                            },
+                            "timestamp_paris": {
+                              "type": "string"
+                            },
+                            "implied_volatility_mean": {
+                              "type": "number"
+                            },
+                            "implied_volatility_median": {
+                              "type": "number"
+                            },
+                            "put_call_volume_ratio": {
+                              "type": "number"
+                            },
+                            "put_call_open_interest_ratio": {
+                              "type": "number"
+                            },
+                            "max_pain_status": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "etf_flow_trends": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "timestamp_utc": {
+                              "type": "string"
+                            },
+                            "timestamp_paris": {
+                              "type": "string"
+                            },
+                            "latest_1d_usd_m": {
+                              "type": "number"
+                            },
+                            "flow_7d_usd_m": {
+                              "type": "number"
+                            },
+                            "flow_30d_usd_m": {
+                              "type": "number"
+                            },
+                            "flow_7d_acceleration_usd_m": {
+                              "type": "number"
+                            },
+                            "unit": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
                     "warning": {
                       "type": "string"
+                    },
+                    "limitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "generated_at_utc": {
                       "type": "string"
