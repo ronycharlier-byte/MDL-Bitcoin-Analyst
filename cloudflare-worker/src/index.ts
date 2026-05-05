@@ -62,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.18.1";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.18.1";
+const WORKER_VERSION = "1.19.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.19.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -310,6 +310,12 @@ export default {
         const presetPath = analysisPresetPathFromInput(input);
         const preset = ANALYSIS_PRESETS[presetPath];
         const body = normalizeRenderPresetPayload(input, env, preset);
+        if (!wantsFreshRun(input)) {
+          const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit));
+          if (cached) {
+            return json(cached);
+          }
+        }
         const result = await proxyRenderPost("/multi-run", body, env, request);
         result.analysis_preset = {
           ...publicAnalysisPreset(presetPath, env),
@@ -322,7 +328,9 @@ export default {
           render_operation_path: "/multi-run",
           analysis_preset: preset.name
         };
-        result.cloudflare_d1 = queueD1RunPersist(result, "/analyze", body, env, ctx);
+        result.cloudflare_d1 = result.error
+          ? { status: "skipped", target: "cloudflare_d1", reason: "engine_error_or_absent_live_output" }
+          : queueD1RunPersist(result, "/analyze", body, env, ctx);
         return json(compactAnalyzeResponse(result, publicRateLimit(rateLimit), env));
       }
 
@@ -493,7 +501,7 @@ function publicAnalysisPresets(env: Env): Record<string, unknown>[] {
 }
 
 function analysisPresetPathFromInput(input: Record<string, unknown>): string {
-  const preset = String(input.preset || input.mode || "deep").trim().toLowerCase();
+  const preset = String(input.preset || input.mode || "quick").trim().toLowerCase();
   if (preset === "quick" || preset === "standard" || preset === "default") {
     return "/quick";
   }
@@ -501,6 +509,17 @@ function analysisPresetPathFromInput(input: Record<string, unknown>): string {
     return "/tactical";
   }
   return "/deep";
+}
+
+function wantsFreshRun(input: Record<string, unknown>): boolean {
+  const value = input.fresh ?? input.live ?? input.force_fresh;
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "fresh", "live"].includes(value.trim().toLowerCase());
+  }
+  return false;
 }
 
 function normalizeRenderModel(value: unknown): string {
@@ -857,9 +876,17 @@ function compactRunPayload(result: Record<string, unknown>): Record<string, unkn
   const referenceSpots = Array.isArray(provenance.reference_spots) ? provenance.reference_spots : [];
   const frames = Array.isArray(result.frames) ? result.frames.map((item) => {
     const frame = objectValue(item);
+    const frameProvenance = objectValue(frame.provenance);
     return {
       horizon: frame.horizon,
       run_id: frame.run_id,
+      report_date_utc: frameProvenance.report_date_utc || frameProvenance.report_date,
+      report_date_paris: frameProvenance.report_date_paris,
+      reference_spot: frameProvenance.reference_spot,
+      reference_spot_timestamp_utc: frameProvenance.reference_spot_timestamp_utc,
+      reference_spot_timestamp_paris: frameProvenance.reference_spot_timestamp_paris,
+      reference_spot_source: frameProvenance.reference_spot_source,
+      data_status: frame.data_status,
       distribution: frame.distribution,
       regime_distribution: frame.regime_distribution,
       risk_metrics: frame.risk_metrics,
@@ -878,8 +905,17 @@ function compactRunPayload(result: Record<string, unknown>): Record<string, unkn
     report_date_utc: stringOrNull(provenance.report_date_utc) || stringOrNull(provenance.report_date),
     report_date_paris: stringOrNull(provenance.report_date_paris),
     reference_spot: referenceSpots.length ? referenceSpots[0] : null,
+    reference_spot_timestamp_utc: objectValue(frames[0]).reference_spot_timestamp_utc,
+    reference_spot_timestamp_paris: objectValue(frames[0]).reference_spot_timestamp_paris,
+    reference_spot_source: objectValue(frames[0]).reference_spot_source,
     data_status: result.data_status,
     alerts: result.alerts,
+    backtest_diagnostics: result.backtest_diagnostics,
+    context: {
+      liquidity: result.liquidity,
+      options: result.options,
+      etf_flow_trends: result.etf_flow_trends
+    },
     version: result.version,
     cloudflare_bridge: result.cloudflare_bridge,
     frames,
@@ -907,6 +943,148 @@ function compactStability(value: Record<string, unknown>): Record<string, unknow
   };
 }
 
+async function latestCachedAnalyzeResponse(
+  env: Env,
+  body: Record<string, unknown>,
+  presetPath: string,
+  rateLimit: Record<string, unknown>
+): Promise<Record<string, unknown> | null> {
+  if (!env.DB) {
+    return null;
+  }
+  const asset = normalizeAsset(body.asset);
+  const requestedHorizons = Array.isArray(body.horizons) ? body.horizons.map(Number) : [];
+  const maxAgeSeconds = 10 * 60;
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT payload_json, created_at_utc
+      FROM quant_runs
+      WHERE asset = ?
+      ORDER BY created_at_utc DESC
+      LIMIT 10
+    `).bind(asset).all();
+    for (const row of results || []) {
+      const createdAt = stringOrNull(objectValue(row).created_at_utc);
+      if (!createdAt || (Date.now() - new Date(createdAt).getTime()) / 1000 > maxAgeSeconds) {
+        continue;
+      }
+      const payloadRaw = stringOrNull(objectValue(row).payload_json);
+      if (!payloadRaw) {
+        continue;
+      }
+      const payload = objectValue(JSON.parse(payloadRaw));
+      const cachedHorizons = Array.isArray(payload.horizons) ? payload.horizons.map(Number) : [];
+      if (!sameNumberArray(cachedHorizons, requestedHorizons)) {
+        continue;
+      }
+      const frames = Array.isArray(payload.frames) ? payload.frames.map((item) => objectValue(item)) : [];
+      if (!stringOrNull(payload.archive_id) || frames.length === 0 || !objectValue(frames[0]).reference_spot_timestamp_utc) {
+        continue;
+      }
+      return compactCachedAnalyzeResponse(payload, presetPath, rateLimit, createdAt, maxAgeSeconds);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function compactCachedAnalyzeResponse(
+  payload: Record<string, unknown>,
+  presetPath: string,
+  rateLimit: Record<string, unknown>,
+  cachedAtUtc: string,
+  maxAgeSeconds: number
+): Record<string, unknown> {
+  const version = objectValue(payload.version);
+  const bridge = objectValue(payload.cloudflare_bridge);
+  const firstFrame = objectValue(Array.isArray(payload.frames) ? payload.frames[0] : {});
+  const preset = ANALYSIS_PRESETS[presetPath];
+  return {
+    status: "ok",
+    asset: stringOrNull(payload.asset) || "BTC",
+    model: stringOrNull(payload.model) || "ensemble",
+    horizons: Array.isArray(payload.horizons) ? payload.horizons : preset.horizons,
+    simulations_per_horizon: preset.simulations,
+    archive_id: payload.archive_id,
+    report_date_utc: payload.report_date_utc,
+    report_date_paris: payload.report_date_paris,
+    reference_spot: payload.reference_spot || firstFrame.reference_spot,
+    reference_spot_timestamp_utc: payload.reference_spot_timestamp_utc || firstFrame.reference_spot_timestamp_utc,
+    reference_spot_timestamp_paris: payload.reference_spot_timestamp_paris || firstFrame.reference_spot_timestamp_paris,
+    reference_spot_source: payload.reference_spot_source || firstFrame.reference_spot_source,
+    frames_count: Array.isArray(payload.frames) ? payload.frames.length : 0,
+    run_ids: payload.run_ids,
+    versions: {
+      worker_version: WORKER_VERSION,
+      worker_schema_version: SCHEMA_VERSION,
+      render_api_version: version.api_version,
+      render_model_version: version.model_version,
+      render_schema_version: version.schema_version,
+      render_git_commit: version.git_commit
+    },
+    response_type: "cached_recent_d1_payload",
+    cache: {
+      status: "hit",
+      cached_at_utc: cachedAtUtc,
+      cached_at_paris: parisIso(new Date(cachedAtUtc)),
+      max_age_seconds: maxAgeSeconds,
+      note: "Recent Cloudflare D1 cache used to avoid long GPT Action loading. Ask for fresh=true to force a new Render calculation."
+    },
+    response_policy: {
+      numeric_traceability_required: true,
+      deterministic_prediction_forbidden: true,
+      use_archive_for_full_detail: true,
+      note: "Cached recent response; cite archive_id and report timestamp."
+    },
+    analysis_preset: {
+      name: preset.name,
+      label: preset.label,
+      endpoint: presetPath,
+      requested_endpoint: "/analyze",
+      requested_preset: preset.name,
+      horizons: preset.horizons,
+      simulations_per_horizon: preset.simulations,
+      status: "cached_recent"
+    },
+    provenance: {
+      source: "cloudflare_d1_recent_cache",
+      archive_id: payload.archive_id,
+      report_date_utc: payload.report_date_utc,
+      report_date_paris: payload.report_date_paris,
+      reference_spot: payload.reference_spot || firstFrame.reference_spot,
+      reference_spot_timestamp_utc: payload.reference_spot_timestamp_utc || firstFrame.reference_spot_timestamp_utc,
+      reference_spot_timestamp_paris: payload.reference_spot_timestamp_paris || firstFrame.reference_spot_timestamp_paris,
+      reference_spot_source: payload.reference_spot_source || firstFrame.reference_spot_source,
+      run_ids: payload.run_ids,
+      worker_version: WORKER_VERSION,
+      worker_schema_version: SCHEMA_VERSION,
+      render_api_version: version.api_version,
+      render_model_version: version.model_version,
+      render_schema_version: version.schema_version,
+      render_git_commit: version.git_commit,
+      operation_path: "/analyze",
+      render_operation_path: bridge.render_operation_path || "/multi-run",
+      timezone_policy: TIMEZONE_POLICY
+    },
+    data_status: payload.data_status,
+    frames: payload.frames,
+    alerts: compactAlerts(payload.alerts),
+    backtest_diagnostics: compactBacktests(payload.backtest_diagnostics),
+    context: payload.context || {},
+    rate_limit: rateLimit,
+    warning: "Recent cached probabilistic scenario distribution, not a deterministic forecast.",
+    limitations: [
+      "Recent D1 cache is used for speed; force fresh=true for a new Render calculation.",
+      "Every number must be cited with archive_id, report date, run_id when frame-specific, reference spot and real/inferred/absent status.",
+      "If confidence is below 50/100, directional conclusions must be described as weak or fragile.",
+      "VaR and CVaR are simulated loss metrics, not guaranteed maximum losses."
+    ],
+    generated_at_utc: new Date().toISOString(),
+    generated_at_paris: parisIso(new Date())
+  };
+}
+
 function compactAnalyzeResponse(
   result: Record<string, unknown>,
   rateLimit: Record<string, unknown>,
@@ -923,11 +1101,20 @@ function compactAnalyzeResponse(
   const archiveId = stringOrNull(archive.archive_id) || archiveIdFromPayload(result);
   const reportDateUtc = stringOrNull(archive.report_date_utc) || stringOrNull(archive.report_date);
   const reportDateParis = stringOrNull(archive.report_date_paris);
+  const hasEngineError = Boolean(result.error);
+  const status = hasEngineError
+    ? "error"
+    : frames.length === 0
+      ? "absent"
+      : stringOrNull(result.status) || "ok";
   const runIds = Array.isArray(archive.run_ids)
     ? archive.run_ids
     : frames.map((frame) => objectValue(frame).run_id).filter(Boolean);
   return {
-    status: stringOrNull(result.status) || "ok",
+    status,
+    error: result.error,
+    message: result.message,
+    render_status: result.render_status,
     asset: stringOrNull(result.asset) || "BTC",
     model: stringOrNull(result.model) || "ensemble",
     horizons: Array.isArray(result.horizons) ? result.horizons : frames.map((frame) => frame.horizon),
@@ -1186,6 +1373,13 @@ function parseStoredJsonArray(value: unknown): unknown[] {
   } catch {
     return [];
   }
+}
+
+function sameNumberArray(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
 }
 
 function stringOrNull(value: unknown): string | null {
