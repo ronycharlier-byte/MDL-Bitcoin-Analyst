@@ -1,4 +1,4 @@
-openapi: "3.1.0"
+﻿openapi: "3.1.0"
 info:
   title: "Quant BTC Model Worker Strict GPT Action Schema"
   version: "1.15.1-strict200"
@@ -13,7 +13,7 @@ paths:
       summary: "Health check"
       description: "Check Worker availability."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -50,7 +50,7 @@ paths:
       summary: "Get Worker version"
       description: "Return Worker/schema/version metadata and preset information."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -87,7 +87,7 @@ paths:
       summary: "Get runtime status"
       description: "Return endpoints, runtime limits, source policy and limitations."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -124,7 +124,7 @@ paths:
       summary: "Audit system readiness"
       description: "Preflight governance audit before live BTC analysis."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -161,7 +161,7 @@ paths:
       summary: "Run default BTC model"
       description: "Default live BTC run. BTC is implicit. Returns standard multi-frame result."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -198,7 +198,7 @@ paths:
       summary: "Run standard multi-frame BTC model"
       description: "BTC is implicit. Standard frames: 7/30/90/180/365."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -235,7 +235,7 @@ paths:
       summary: "Run quick BTC preset"
       description: "BTC is implicit. Quick preset: 7/30/90/180/365 with 2000 simulations per horizon."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -272,7 +272,7 @@ paths:
       summary: "Run tactical BTC preset"
       description: "BTC is implicit. Tactical preset: 1/3/7/14/30 with 5000 simulations per horizon."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -309,7 +309,7 @@ paths:
       summary: "Run deep BTC preset"
       description: "BTC is implicit. Deep preset: 1/3/7/14/30/90/180/365 with 10000 simulations per horizon."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -346,7 +346,7 @@ paths:
       summary: "Get latest stored BTC report"
       description: "Return the latest stored report artifact. This is not necessarily a fresh run."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -383,7 +383,7 @@ paths:
       summary: "Get stored BTC run history"
       description: "Return recent archived run metadata."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -420,7 +420,7 @@ paths:
       summary: "Compare recent BTC runs"
       description: "Compare latest run against previous stored run when available."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -457,7 +457,7 @@ paths:
       summary: "Get BTC alert status"
       description: "Return current alert diagnostics when available."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -494,7 +494,7 @@ paths:
       summary: "Get BTC backtest summary"
       description: "Return visible backtest diagnostics when available."
       responses:
-        200:
+        "200":
           description: "Successful JSON response from Quant BTC Model Worker."
           content:
             application/json:
@@ -525,3 +525,4 @@ paths:
                     type: "string"
                   report_markdown:
                     type: "string"
+
