@@ -1,0 +1,60 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Quant BTC Model Minimal Action",
+    "version": "1.19.2-minimal-3.1.1",
+    "description": "Minimal GPT Action for fast BTC probabilistic analysis. No parameters."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/analyze": {
+      "get": {
+        "operationId": "btcAnalyze",
+        "summary": "Analyze BTC",
+        "description": "Run fast BTC probabilistic analysis using the default server settings.",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_date_utc": {
+                      "type": "string"
+                    },
+                    "reference_spot": {
+                      "type": "string"
+                    },
+                    "frames_count": {
+                      "type": "integer"
+                    },
+                    "response_type": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
