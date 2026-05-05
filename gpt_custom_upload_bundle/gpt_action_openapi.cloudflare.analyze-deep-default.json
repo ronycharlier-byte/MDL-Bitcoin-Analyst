@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Quant BTC Model GPT Analyze Schema Deep Default",
-    "version": "1.17.0-analyze-deep-default",
-    "description": "Minimal GPT Action schema for Quant BTC Model. One analysis endpoint, probabilistic outputs only."
+    "title": "Quant BTC Model GPT Compact Analyze Schema Deep Default",
+    "version": "1.18.0-compact-analyze-deep-default",
+    "description": "Minimal GPT Action schema for Quant BTC Model. One compact analysis endpoint, probabilistic outputs only."
   },
   "servers": [
     {
@@ -33,19 +33,16 @@
                     "model": {
                       "type": "string"
                     },
-                    "message": {
+                    "response_type": {
                       "type": "string"
                     },
                     "warning": {
                       "type": "string"
                     },
-                    "report_markdown": {
+                    "generated_at_utc": {
                       "type": "string"
                     },
-                    "timestamp_utc": {
-                      "type": "string"
-                    },
-                    "timestamp_paris": {
+                    "generated_at_paris": {
                       "type": "string"
                     }
                   }
@@ -59,8 +56,8 @@
     "/analyze": {
       "get": {
         "operationId": "btcAnalyze",
-        "summary": "Run BTC probabilistic analysis",
-        "description": "Run BTC probabilistic analysis. preset can be quick, tactical, or deep. Defaults to deep.",
+        "summary": "Run compact BTC probabilistic analysis",
+        "description": "Run compact BTC probabilistic analysis sized for GPT Actions. preset can be quick, tactical, or deep. Defaults to deep.",
         "responses": {
           "200": {
             "description": "OK",
@@ -78,19 +75,16 @@
                     "model": {
                       "type": "string"
                     },
-                    "message": {
+                    "response_type": {
                       "type": "string"
                     },
                     "warning": {
                       "type": "string"
                     },
-                    "report_markdown": {
+                    "generated_at_utc": {
                       "type": "string"
                     },
-                    "timestamp_utc": {
-                      "type": "string"
-                    },
-                    "timestamp_paris": {
+                    "generated_at_paris": {
                       "type": "string"
                     }
                   }

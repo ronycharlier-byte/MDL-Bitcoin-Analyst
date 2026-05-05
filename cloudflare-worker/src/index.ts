@@ -62,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.17.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.17.0";
+const WORKER_VERSION = "1.18.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.18.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -323,7 +323,7 @@ export default {
           analysis_preset: preset.name
         };
         result.cloudflare_d1 = queueD1RunPersist(result, "/analyze", body, env, ctx);
-        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+        return json(compactAnalyzeResponse(result, publicRateLimit(rateLimit), env));
       }
 
       if (ANALYSIS_PRESETS[url.pathname] && (request.method === "POST" || request.method === "GET")) {
@@ -904,6 +904,237 @@ function compactStability(value: Record<string, unknown>): Record<string, unknow
     simulations_per_seed: value.simulations_per_seed,
     directional_stability: value.directional_stability,
     bias_stability_label: value.bias_stability_label
+  };
+}
+
+function compactAnalyzeResponse(
+  result: Record<string, unknown>,
+  rateLimit: Record<string, unknown>,
+  env: Env
+): Record<string, unknown> {
+  const archive = objectValue(result.archive);
+  const version = objectValue(result.version);
+  const bridge = objectValue(result.cloudflare_bridge);
+  const preset = objectValue(result.analysis_preset);
+  const frames = Array.isArray(result.frames)
+    ? result.frames.map((item) => compactAnalyzeFrame(objectValue(item)))
+    : [];
+  return {
+    status: stringOrNull(result.status) || "ok",
+    asset: stringOrNull(result.asset) || "BTC",
+    model: stringOrNull(result.model) || "ensemble",
+    horizons: Array.isArray(result.horizons) ? result.horizons : frames.map((frame) => frame.horizon),
+    simulations_per_horizon: numberOrNull(result.simulations_per_horizon) || numberOrNull(preset.simulations_per_horizon),
+    response_type: "compact_gpt_action_payload",
+    response_policy: {
+      numeric_traceability_required: true,
+      deterministic_prediction_forbidden: true,
+      use_archive_for_full_detail: true,
+      note: "This compact response is designed for GPT Actions size limits. Full raw output remains archived by archive_id when provided."
+    },
+    analysis_preset: {
+      name: preset.name,
+      label: preset.label,
+      endpoint: preset.endpoint,
+      requested_endpoint: preset.requested_endpoint,
+      requested_preset: preset.requested_preset,
+      horizons: preset.horizons,
+      simulations_per_horizon: preset.simulations_per_horizon,
+      status: preset.status
+    },
+    provenance: {
+      source: "cloudflare_worker_analyze_compact",
+      archive_id: stringOrNull(archive.archive_id) || archiveIdFromPayload(result),
+      archive_status: archive.status,
+      report_date_utc: stringOrNull(archive.report_date_utc) || stringOrNull(archive.report_date),
+      report_date_paris: stringOrNull(archive.report_date_paris),
+      reference_spot: archive.reference_spot,
+      run_ids: archive.run_ids,
+      worker_version: WORKER_VERSION,
+      worker_schema_version: SCHEMA_VERSION,
+      render_api_version: version.api_version,
+      render_model_version: version.model_version,
+      render_schema_version: version.schema_version,
+      render_git_commit: version.git_commit,
+      operation_path: bridge.operation_path,
+      render_operation_path: bridge.render_operation_path,
+      bridge_timestamp_utc: bridge.bridge_timestamp_utc,
+      bridge_timestamp_paris: bridge.bridge_timestamp_paris,
+      timezone_policy: TIMEZONE_POLICY
+    },
+    data_status: result.data_status,
+    freshness: compactFreshness(objectValue(result.freshness)),
+    frames,
+    alerts: compactAlerts(result.alerts),
+    backtest_diagnostics: compactBacktests(result.backtest_diagnostics),
+    context: {
+      liquidity: compactLiquidity(objectValue(result.liquidity)),
+      options: compactOptions(objectValue(result.options)),
+      etf_flow_trends: compactEtfFlows(objectValue(result.etf_flow_trends))
+    },
+    cloudflare_d1: result.cloudflare_d1,
+    rate_limit: rateLimit,
+    warning: result.warning || "Probabilistic scenario distribution only; not financial advice.",
+    limitations: [
+      "Compact payload: raw simulation arrays and large nested diagnostics are intentionally excluded.",
+      "Every number must be cited with archive_id, report date, run_id when frame-specific, reference spot and real/inferred/absent status.",
+      "If confidence is below 50/100, directional conclusions must be described as weak or fragile.",
+      "VaR and CVaR are simulated loss metrics, not guaranteed maximum losses."
+    ],
+    generated_at_utc: new Date().toISOString(),
+    generated_at_paris: parisIso(new Date())
+  };
+}
+
+function compactAnalyzeFrame(frame: Record<string, unknown>): Record<string, unknown> {
+  const distribution = objectValue(frame.distribution);
+  const regime = objectValue(frame.regime_distribution);
+  const risk = objectValue(frame.risk_metrics);
+  const confidence = objectValue(frame.confidence);
+  const mc = objectValue(frame.monte_carlo_error);
+  const stability = objectValue(frame.multi_seed_stability);
+  const provenance = objectValue(frame.provenance);
+  return {
+    horizon: frame.horizon,
+    run_id: frame.run_id,
+    report_date_utc: provenance.report_date_utc || provenance.report_date,
+    report_date_paris: provenance.report_date_paris,
+    reference_spot: provenance.reference_spot,
+    reference_spot_timestamp_utc: provenance.reference_spot_timestamp_utc,
+    reference_spot_timestamp_paris: provenance.reference_spot_timestamp_paris,
+    reference_spot_source: provenance.reference_spot_source,
+    data_status: frame.data_status,
+    distribution: {
+      p10_return: distribution.p10_return,
+      median_return: distribution.median_return,
+      p90_return: distribution.p90_return,
+      p10_price: distribution.p10_price,
+      median_price: distribution.median_price,
+      p90_price: distribution.p90_price,
+      prob_up: distribution.prob_up ?? distribution.probability_positive_return,
+      prob_down_10: distribution.prob_down_10 ?? distribution.probability_loss_10_or_more,
+      prob_down_30: distribution.prob_down_30 ?? distribution.probability_loss_30_or_more,
+      prob_up_30: distribution.prob_up_30 ?? distribution.probability_gain_30_or_more
+    },
+    regime_distribution: {
+      bull: regime.bull,
+      bear: regime.bear,
+      range: regime.range,
+      classified_total: regime.classified_total ?? regime.sum_without_residual,
+      non_classified_transition: regime.non_classified_transition,
+      is_complete: regime.is_complete
+    },
+    risk_metrics: {
+      var_95: risk.var_95,
+      cvar_95: risk.cvar_95,
+      var_99: risk.var_99,
+      cvar_99: risk.cvar_99,
+      expected_max_drawdown: risk.expected_max_drawdown ?? risk.mean_simulated_max_drawdown ?? risk.max_drawdown,
+      median_max_drawdown: risk.median_max_drawdown,
+      p95_max_drawdown: risk.p95_max_drawdown,
+      worst_sample_drawdown: risk.worst_sample_drawdown,
+      conditional_volatility: risk.conditional_volatility
+    },
+    monte_carlo_error: {
+      status: mc.status,
+      method: mc.method,
+      warnings: mc.warnings
+    },
+    multi_seed_stability: {
+      status: stability.status,
+      seed_runs: stability.seed_runs,
+      directional_stability: stability.directional_stability,
+      bias_stability_label: stability.bias_stability_label
+    },
+    confidence: {
+      score: confidence.score
+    }
+  };
+}
+
+function compactAlerts(value: unknown): unknown[] {
+  return Array.isArray(value)
+    ? value.slice(0, 20).map((item) => {
+      const alert = objectValue(item);
+      return {
+        level: alert.level,
+        type: alert.type,
+        horizon: alert.horizon,
+        value: alert.value
+      };
+    })
+    : [];
+}
+
+function compactBacktests(value: unknown): unknown[] {
+  return Array.isArray(value)
+    ? value.map((item) => {
+      const row = objectValue(item);
+      return {
+        horizon_days: row.horizon_days,
+        hit_rate: row.hit_rate,
+        brier_score: row.brier_score,
+        calibration_error: row.calibration_error,
+        interval_coverage: row.interval_coverage ?? row.p10_p90_coverage,
+        var95_breach_rate: row.var95_breach_rate,
+        expected_var95_breach_rate: row.expected_var95_breach_rate,
+        random_walk_hit_rate: row.random_walk_hit_rate,
+        brier_skill_vs_random_walk: row.brier_skill_vs_random_walk,
+        observations: row.observations,
+        source: row.source,
+        statut: row.statut
+      };
+    })
+    : [];
+}
+
+function compactFreshness(value: Record<string, unknown>): Record<string, unknown> {
+  return {
+    status: value.status,
+    spot: value.spot,
+    fundamentals: value.fundamentals,
+    latest_runtime_archive: value.latest_runtime_archive
+  };
+}
+
+function compactLiquidity(value: Record<string, unknown>): Record<string, unknown> {
+  return {
+    status: value.status,
+    source: value.source,
+    timestamp_utc: value.timestamp_utc,
+    timestamp_paris: value.timestamp_paris,
+    best_bid: value.best_bid,
+    best_ask: value.best_ask,
+    spread_bps: value.spread_bps,
+    order_book_imbalance_1pct: value.order_book_imbalance_1pct
+  };
+}
+
+function compactOptions(value: Record<string, unknown>): Record<string, unknown> {
+  return {
+    status: value.status,
+    source: value.source,
+    timestamp_utc: value.timestamp_utc,
+    timestamp_paris: value.timestamp_paris,
+    implied_volatility_mean: value.implied_volatility_mean,
+    implied_volatility_median: value.implied_volatility_median,
+    put_call_volume_ratio: value.put_call_volume_ratio,
+    put_call_open_interest_ratio: value.put_call_open_interest_ratio,
+    max_pain_status: value.max_pain_status
+  };
+}
+
+function compactEtfFlows(value: Record<string, unknown>): Record<string, unknown> {
+  return {
+    status: value.status,
+    source: value.source,
+    timestamp_utc: value.timestamp_utc,
+    timestamp_paris: value.timestamp_paris,
+    latest_1d_usd_m: value.latest_1d_usd_m,
+    flow_7d_usd_m: value.flow_7d_usd_m,
+    flow_30d_usd_m: value.flow_30d_usd_m,
+    flow_7d_acceleration_usd_m: value.flow_7d_acceleration_usd_m,
+    unit: value.unit
   };
 }
 
@@ -1930,7 +2161,7 @@ function parisIso(date: Date): string {
 }
 
 function json(payload: unknown, status = 200): Response {
-  return new Response(JSON.stringify(payload, null, 2), {
+  return new Response(JSON.stringify(payload), {
     status,
     headers: JSON_HEADERS
   });
