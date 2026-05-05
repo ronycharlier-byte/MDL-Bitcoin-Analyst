@@ -62,8 +62,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.19.1";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.19.1";
+const WORKER_VERSION = "1.20.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.20.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -175,7 +175,8 @@ export default {
             "billing_plans_checkout_bridge",
             "alert_subscriptions",
             "cloudflare_d1_free_durable_storage",
-            "analysis_presets_quick_tactical_deep"
+            "analysis_presets_quick_tactical_deep",
+            "dedicated_cached_deep_action"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -194,7 +195,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -299,6 +300,51 @@ export default {
 
       if (url.pathname === "/pdf-report" && request.method === "GET") {
         return Response.redirect(renderUrl(`/pdf-report${url.search}`, env), 302);
+      }
+
+      if (url.pathname === "/analyze-deep" && (request.method === "POST" || request.method === "GET")) {
+        const rateLimit = checkRateLimit(request, env);
+        if (!rateLimit.allowed) {
+          return json(rateLimitResponse(rateLimit), 429);
+        }
+        const input = await readInput(request, url);
+        const presetPath = "/deep";
+        const preset = ANALYSIS_PRESETS[presetPath];
+        const body = normalizeRenderPresetPayload(input, env, preset);
+        if (!wantsFreshRun(input)) {
+          const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), 10 * 60, "hit", "/analyze-deep");
+          if (cached) {
+            return json(cached);
+          }
+        }
+        const result = await proxyRenderPost("/multi-run", body, env, request);
+        result.analysis_preset = {
+          ...publicAnalysisPreset(presetPath, env),
+          requested_endpoint: "/analyze-deep",
+          requested_preset: preset.name
+        };
+        result.cloudflare_bridge = {
+          ...objectValue(result.cloudflare_bridge),
+          operation_path: "/analyze-deep",
+          render_operation_path: "/multi-run",
+          analysis_preset: preset.name
+        };
+        if (result.error) {
+          const staleCached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), 24 * 60 * 60, "stale_fallback", "/analyze-deep");
+          if (staleCached) {
+            staleCached.warning = "Render returned an error, so a stale D1 deep cache fallback is returned. Do not present it as a fresh live run.";
+            staleCached.render_error = {
+              error: result.error,
+              message: result.message,
+              render_status: result.render_status
+            };
+            return json(staleCached);
+          }
+        }
+        result.cloudflare_d1 = result.error
+          ? { status: "skipped", target: "cloudflare_d1", reason: "engine_error_or_absent_live_output" }
+          : queueD1RunPersist(result, "/analyze-deep", body, env, ctx);
+        return json(compactAnalyzeResponse(result, publicRateLimit(rateLimit), env));
       }
 
       if (url.pathname === "/analyze" && (request.method === "POST" || request.method === "GET")) {
@@ -961,7 +1007,8 @@ async function latestCachedAnalyzeResponse(
   presetPath: string,
   rateLimit: Record<string, unknown>,
   maxAgeSeconds = 10 * 60,
-  cacheStatus = "hit"
+  cacheStatus = "hit",
+  requestedEndpoint = "/analyze"
 ): Promise<Record<string, unknown> | null> {
   if (!env.DB) {
     return null;
@@ -994,7 +1041,7 @@ async function latestCachedAnalyzeResponse(
       if (!stringOrNull(payload.archive_id) || frames.length === 0 || !objectValue(frames[0]).reference_spot_timestamp_utc) {
         continue;
       }
-      return compactCachedAnalyzeResponse(payload, presetPath, rateLimit, createdAt, maxAgeSeconds, cacheStatus);
+      return compactCachedAnalyzeResponse(payload, presetPath, rateLimit, createdAt, maxAgeSeconds, cacheStatus, requestedEndpoint);
     }
   } catch {
     return null;
@@ -1008,7 +1055,8 @@ function compactCachedAnalyzeResponse(
   rateLimit: Record<string, unknown>,
   cachedAtUtc: string,
   maxAgeSeconds: number,
-  cacheStatus: string
+  cacheStatus: string,
+  requestedEndpoint: string
 ): Record<string, unknown> {
   const version = objectValue(payload.version);
   const bridge = objectValue(payload.cloudflare_bridge);
@@ -1057,7 +1105,7 @@ function compactCachedAnalyzeResponse(
       name: preset.name,
       label: preset.label,
       endpoint: presetPath,
-      requested_endpoint: "/analyze",
+      requested_endpoint: requestedEndpoint,
       requested_preset: preset.name,
       horizons: preset.horizons,
       simulations_per_horizon: preset.simulations,
@@ -1079,7 +1127,7 @@ function compactCachedAnalyzeResponse(
       render_model_version: version.model_version,
       render_schema_version: version.schema_version,
       render_git_commit: version.git_commit,
-      operation_path: "/analyze",
+      operation_path: requestedEndpoint,
       render_operation_path: bridge.render_operation_path || "/multi-run",
       timezone_policy: TIMEZONE_POLICY
     },
