@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quant BTC Model API
-  version: 1.8.0
+  version: 1.8.1
   description: Probabilistic Bitcoin quantitative model endpoint for GPT Custom Actions. Numeric outputs include UTC and Europe/Paris provenance fields when available.
 servers:
   - url: https://quant-btc-model-api.onrender.com

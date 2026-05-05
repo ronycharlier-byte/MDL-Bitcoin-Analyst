@@ -62,7 +62,7 @@ def simulate(
 ) -> dict:
     model_names = list(MODEL_REGISTRY.keys())
     weights = weights_from_backtests(model_names, backtest_rows=backtest_rows)
-    sims_per_model = max(1000, int(np.ceil(simulations / len(model_names))))
+    sims_per_model = max(200, int(np.ceil(simulations / len(model_names))))
     component_results = {}
     for name in model_names:
         func = MODEL_REGISTRY[name]
