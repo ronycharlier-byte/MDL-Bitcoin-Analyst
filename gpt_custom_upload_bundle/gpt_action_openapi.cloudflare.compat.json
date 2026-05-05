@@ -1,0 +1,693 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model Worker Compatible Action Schema",
+    "version": "1.15.0-compat",
+    "description": "Minimal GPT-compatible schema for the always-awake Cloudflare Worker. Outputs are probabilistic, not deterministic predictions. Use audit first, then quick/tactical/deep as needed."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Health check",
+        "description": "Check Worker availability.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "operationId": "getQuantBtcLiteVersion",
+        "summary": "Get Worker version",
+        "description": "Return Worker/schema/version metadata and preset information.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "operationId": "getQuantBtcLiteStatus",
+        "summary": "Get runtime status",
+        "description": "Return endpoints, runtime limits, source policy and limitations.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "operationId": "auditQuantBtcLiteSystem",
+        "summary": "Audit system readiness",
+        "description": "Preflight governance audit before live BTC analysis.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/run": {
+      "get": {
+        "operationId": "runQuantBtcModel",
+        "summary": "Run default BTC model",
+        "description": "Default live BTC run. Returns the standard multi-frame result when only asset=BTC is supplied.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          },
+          "500": {
+            "description": "Bitget bridge or backend call failed JSON."
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ]
+      }
+    },
+    "/multi-run": {
+      "get": {
+        "operationId": "runQuantBtcMultiFrame",
+        "summary": "Run standard multi-frame BTC model",
+        "description": "Standard live BTC multi-frame run: 7/30/90/180/365.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          },
+          "500": {
+            "description": "Bitget bridge or backend call failed JSON."
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ]
+      }
+    },
+    "/run-quick": {
+      "get": {
+        "operationId": "runQuantBtcQuick",
+        "summary": "Run quick BTC preset",
+        "description": "Quick preset: 7/30/90/180/365 with 2000 simulations per horizon.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          },
+          "500": {
+            "description": "Bitget bridge or backend call failed JSON."
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ]
+      }
+    },
+    "/run-tactical": {
+      "get": {
+        "operationId": "runQuantBtcTactical",
+        "summary": "Run tactical BTC preset",
+        "description": "Tactical preset: 1/3/7/14/30 with 5000 simulations per horizon.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          },
+          "500": {
+            "description": "Bitget bridge or backend call failed JSON."
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ]
+      }
+    },
+    "/run-deep": {
+      "get": {
+        "operationId": "runQuantBtcDeep",
+        "summary": "Run deep BTC preset",
+        "description": "Deep preset: 1/3/7/14/30/90/180/365 with up to 10000 simulations per horizon.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Public endpoint rate limit reached JSON."
+          },
+          "500": {
+            "description": "Bitget bridge or backend call failed JSON."
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset",
+            "in": "query",
+            "required": true,
+            "description": "Asset symbol. Use BTC.",
+            "schema": {
+              "type": "string",
+              "default": "BTC"
+            }
+          }
+        ]
+      }
+    },
+    "/latest": {
+      "get": {
+        "operationId": "latestQuantBtcReport",
+        "summary": "Get latest stored report",
+        "description": "Return latest stored report artifact; not a fresh run.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/history": {
+      "get": {
+        "operationId": "getQuantBtcRunHistory",
+        "summary": "Get run history",
+        "description": "Return recent archived runs and D1 status.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compare-runs": {
+      "get": {
+        "operationId": "compareQuantBtcRuns",
+        "summary": "Compare latest runs",
+        "description": "Compare latest run against previous archived run.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/alerts": {
+      "get": {
+        "operationId": "getQuantBtcAlerts",
+        "summary": "Get latest alerts",
+        "description": "Return latest quality and risk alerts.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backtest-summary": {
+      "get": {
+        "operationId": "getQuantBtcBacktestSummary",
+        "summary": "Get backtest summary",
+        "description": "Return visible baseline backtest diagnostics.",
+        "responses": {
+          "200": {
+            "description": "JSON response from Quant BTC Model Worker.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "asset": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "archive_id": {
+                      "type": "string"
+                    },
+                    "report_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
