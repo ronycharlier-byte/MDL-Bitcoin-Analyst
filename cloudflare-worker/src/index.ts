@@ -16,6 +16,7 @@
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   OPS_MONITOR_ALERT_COOLDOWN_SECONDS?: string;
+  OPS_DAILY_SUMMARY_PARIS_HOUR?: string;
 }
 
 interface RunRequest {
@@ -71,8 +72,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.22.1";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.22.1";
+const WORKER_VERSION = "1.23.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.23.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -80,6 +81,7 @@ const SIMULATION_HARD_CAP = 10000;
 const QUICK_CACHE_MAX_SECONDS_DEFAULT = 10 * 60;
 const STALE_CACHE_MAX_SECONDS_DEFAULT = 60 * 60;
 const OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT = 15 * 60;
+const OPS_DAILY_SUMMARY_PARIS_HOUR_DEFAULT = 9;
 const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
   "/run-quick": {
     name: "quick",
@@ -132,6 +134,7 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(warmRenderBitgetBridge(env));
     ctx.waitUntil(runOperationalMonitor(env));
+    ctx.waitUntil(sendDailyOpsSummaryIfDue(env));
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -194,7 +197,8 @@ export default {
             "strict_cache_policy",
             "deep_compute_quota",
             "optional_webhook_alerting",
-            "telegram_ops_alerting"
+            "telegram_ops_alerting",
+            "telegram_daily_ops_summary"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -213,7 +217,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -258,7 +262,8 @@ export default {
             scheduled_check: "every_5_minutes",
             alert_channels: getOpsAlertChannels(env),
             cache_policy: cachePolicy(env),
-            deep_compute_quota: getDeepRateLimit(env)
+            deep_compute_quota: getDeepRateLimit(env),
+            daily_summary_paris_hour: getDailySummaryParisHour(env)
           },
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
@@ -309,6 +314,10 @@ export default {
 
       if (url.pathname === "/ops/test-alert" && request.method === "GET") {
         return json(await sendOpsTestAlert(env));
+      }
+
+      if (url.pathname === "/ops/test-summary" && request.method === "GET") {
+        return json(await sendDailyOpsSummary(env, true));
       }
 
       if (["/history", "/compare-runs", "/alerts", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/clients/me", "/usage-summary"].includes(url.pathname) && request.method === "GET") {
@@ -1034,7 +1043,8 @@ async function buildOpsStatus(env: Env): Promise<Record<string, unknown>> {
     deep_compute_quota: getDeepRateLimit(env),
     alerting: {
       channels: getOpsAlertChannels(env),
-      cooldown_seconds: clampInt(parseNumber(env.OPS_MONITOR_ALERT_COOLDOWN_SECONDS, OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60)
+      cooldown_seconds: clampInt(parseNumber(env.OPS_MONITOR_ALERT_COOLDOWN_SECONDS, OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60),
+      daily_summary_paris_hour: getDailySummaryParisHour(env)
     },
     warnings,
     blockers,
@@ -1065,6 +1075,73 @@ async function runOperationalMonitor(env: Env, manual = false): Promise<Record<s
     });
   }
   return status;
+}
+
+async function sendDailyOpsSummaryIfDue(env: Env): Promise<Record<string, unknown>> {
+  const now = new Date();
+  const paris = parisIso(now);
+  const hour = Number(paris.slice(11, 13));
+  const minute = Number(paris.slice(14, 16));
+  const targetHour = getDailySummaryParisHour(env);
+  if (hour !== targetHour || minute >= 10) {
+    return {
+      status: "skipped",
+      reason: "outside_daily_summary_window",
+      target_paris_hour: targetHour,
+      checked_at_utc: now.toISOString(),
+      checked_at_paris: paris
+    };
+  }
+  return await sendDailyOpsSummary(env, false);
+}
+
+async function sendDailyOpsSummary(env: Env, manual: boolean): Promise<Record<string, unknown>> {
+  const channels = getOpsAlertChannels(env);
+  if (channels.telegram !== "configured" && channels.discord_webhook !== "configured") {
+    return {
+      status: "not_configured",
+      channels,
+      message: "No alert channel is configured."
+    };
+  }
+  const now = new Date();
+  const dateKey = parisIso(now).slice(0, 10);
+  const fingerprint = manual
+    ? `ops:daily-summary-test:${now.toISOString()}`
+    : `ops:daily-summary:${dateKey}`;
+  if (!manual && !(await shouldSendOpsAlert(env, fingerprint, 36 * 60 * 60))) {
+    return {
+      status: "skipped",
+      reason: "daily_summary_already_sent",
+      date_paris: dateKey
+    };
+  }
+  const status = await buildOpsStatus(env);
+  const text = formatDailySummaryText(status, manual);
+  const [discord, telegram] = await Promise.all([
+    sendDiscordOpsAlert(env, manual ? "Quant BTC daily summary TEST" : "Quant BTC daily summary", text, status),
+    sendTelegramOpsAlert(env, text)
+  ]);
+  const sent = [discord, telegram].some((item) => objectValue(item).status === "sent");
+  await persistOpsEventToD1(env, {
+    kind: manual ? "manual_daily_summary" : "daily_summary",
+    status: sent ? "sent" : "error",
+    severity: "info",
+    message: manual ? "Manual daily summary test" : `Daily ops summary ${dateKey}`,
+    fingerprint,
+    payload: {
+      status,
+      delivery: { discord, telegram }
+    }
+  });
+  return {
+    status: sent ? "sent" : "error",
+    channels,
+    delivery: { discord, telegram },
+    date_paris: dateKey,
+    checked_at_utc: now.toISOString(),
+    checked_at_paris: parisIso(now)
+  };
 }
 
 function collectOpsIssue(check: Record<string, unknown>, label: string, warnings: string[], blockers: string[]): void {
@@ -1232,6 +1309,10 @@ function getTelegramConfig(env: Env): { token: string; chatId: string } | null {
   return { token, chatId };
 }
 
+function getDailySummaryParisHour(env: Env): number {
+  return clampInt(parseNumber(env.OPS_DAILY_SUMMARY_PARIS_HOUR, OPS_DAILY_SUMMARY_PARIS_HOUR_DEFAULT), 0, 23);
+}
+
 async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: string, status: Record<string, unknown>): Promise<void> {
   const hasDiscord = Boolean(getDiscordOpsWebhook(env));
   const hasTelegram = Boolean(getTelegramConfig(env));
@@ -1242,12 +1323,87 @@ async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: stri
   if (!(await shouldSendOpsAlert(env, fingerprint, cooldown))) {
     return;
   }
-  const title = `Quant BTC ops ${String(status.status).toUpperCase()}`;
-  const text = `${title}\n${message}\nUTC: ${new Date().toISOString()}`;
+  const title = `Quant BTC Ops ${opsLevel(status)}`;
+  const text = formatOpsAlertText(status, message);
   await Promise.all([
     sendDiscordOpsAlert(env, title, message, status),
     sendTelegramOpsAlert(env, text)
   ]);
+}
+
+function opsLevel(status: Record<string, unknown>): string {
+  const value = String(status.status || "unknown").toLowerCase();
+  if (value === "degraded") {
+    return "CRITICAL";
+  }
+  if (value === "warning") {
+    return "WARNING";
+  }
+  if (value === "ok") {
+    return "OK";
+  }
+  return value.toUpperCase();
+}
+
+function formatOpsAlertText(status: Record<string, unknown>, message: string): string {
+  const checks = objectValue(status.checks);
+  const render = objectValue(checks.render_health);
+  const d1 = objectValue(checks.cloudflare_d1);
+  const quick = objectValue(checks.quick_cache);
+  const deep = objectValue(checks.deep_cache);
+  return [
+    `Quant BTC Ops Alert`,
+    `Level: ${opsLevel(status)}`,
+    `Cause: ${message}`,
+    ``,
+    `Render: ${render.status || "unknown"}`,
+    `D1: ${d1.status || "unknown"}`,
+    cacheSummaryLine("Quick cache", quick),
+    cacheSummaryLine("Deep cache", deep),
+    ``,
+    `Worker: ${WORKER_VERSION}`,
+    `UTC: ${status.checked_at_utc || new Date().toISOString()}`,
+    `Paris: ${status.checked_at_paris || parisIso(new Date())}`
+  ].join("\n");
+}
+
+function formatDailySummaryText(status: Record<string, unknown>, manual: boolean): string {
+  const checks = objectValue(status.checks);
+  const render = objectValue(checks.render_health);
+  const d1 = objectValue(checks.cloudflare_d1);
+  const quick = objectValue(checks.quick_cache);
+  const deep = objectValue(checks.deep_cache);
+  const warnings = Array.isArray(status.warnings) ? status.warnings : [];
+  const blockers = Array.isArray(status.blockers) ? status.blockers : [];
+  const header = manual ? "Quant BTC Daily Summary TEST" : "Quant BTC Daily Summary";
+  return [
+    header,
+    `Status: ${opsLevel(status)}`,
+    `Render: ${render.status || "unknown"}`,
+    `D1: ${d1.status || "unknown"}`,
+    cacheSummaryLine("Quick cache", quick),
+    cacheSummaryLine("Deep cache", deep),
+    ``,
+    `Quick archive: ${quick.archive_id || "absent"}`,
+    `Deep archive: ${deep.archive_id || "absent"}`,
+    `Spot quick: ${quick.reference_spot || "absent"}`,
+    `Spot deep: ${deep.reference_spot || "absent"}`,
+    ``,
+    `Warnings: ${warnings.length ? warnings.join(" | ") : "none"}`,
+    `Blockers: ${blockers.length ? blockers.join(" | ") : "none"}`,
+    ``,
+    `Worker: ${WORKER_VERSION}`,
+    `UTC: ${status.checked_at_utc || new Date().toISOString()}`,
+    `Paris: ${status.checked_at_paris || parisIso(new Date())}`
+  ].join("\n");
+}
+
+function cacheSummaryLine(label: string, cache: Record<string, unknown>): string {
+  const status = cache.status || "unknown";
+  const age = numberOrNull(cache.age_seconds);
+  const ageText = age === null ? "age unknown" : `age ${Math.round(age / 60)} min`;
+  const decision = cache.cache_decision || "no decision";
+  return `${label}: ${status} (${ageText}, ${decision})`;
 }
 
 async function sendDiscordOpsAlert(env: Env, title: string, message: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
