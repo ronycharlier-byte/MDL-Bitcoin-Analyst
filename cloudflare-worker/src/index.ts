@@ -71,8 +71,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.22.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.22.0";
+const WORKER_VERSION = "1.22.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.22.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -1250,13 +1250,13 @@ async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: stri
   ]);
 }
 
-async function sendDiscordOpsAlert(env: Env, title: string, message: string, status: Record<string, unknown>): Promise<void> {
+async function sendDiscordOpsAlert(env: Env, title: string, message: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
   const webhook = getDiscordOpsWebhook(env);
   if (!webhook) {
-    return;
+    return { status: "absent" };
   }
   try {
-    await fetch(webhook, {
+    const response = await fetch(webhook, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -1271,18 +1271,26 @@ async function sendDiscordOpsAlert(env: Env, title: string, message: string, sta
         ]
       })
     });
-  } catch {
+    return {
+      status: response.ok ? "sent" : "error",
+      http_status: response.status
+    };
+  } catch (error) {
     // Discord delivery is best-effort; /ops/status remains the source of truth.
+    return {
+      status: "error",
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 }
 
-async function sendTelegramOpsAlert(env: Env, text: string): Promise<void> {
+async function sendTelegramOpsAlert(env: Env, text: string): Promise<Record<string, unknown>> {
   const config = getTelegramConfig(env);
   if (!config) {
-    return;
+    return { status: "absent" };
   }
   try {
-    await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+    const response = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -1291,8 +1299,25 @@ async function sendTelegramOpsAlert(env: Env, text: string): Promise<void> {
         disable_web_page_preview: true
       })
     });
-  } catch {
+    const textBody = await response.text();
+    let body: unknown = {};
+    try {
+      body = textBody ? JSON.parse(textBody) : {};
+    } catch {
+      body = { raw_response: textBody.slice(0, 500) };
+    }
+    return {
+      status: response.ok && objectValue(body).ok !== false ? "sent" : "error",
+      http_status: response.status,
+      telegram_ok: objectValue(body).ok,
+      description: objectValue(body).description
+    };
+  } catch (error) {
     // Telegram delivery is best-effort; /ops/status remains the source of truth.
+    return {
+      status: "error",
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 }
 
@@ -1314,13 +1339,18 @@ async function sendOpsTestAlert(env: Env): Promise<Record<string, unknown>> {
     checked_at_utc: now.toISOString(),
     checked_at_paris: parisIso(now)
   };
-  await Promise.all([
+  const [discord, telegram] = await Promise.all([
     sendDiscordOpsAlert(env, "Quant BTC ops TEST", "Test alert from Quant BTC Worker.", payload),
     sendTelegramOpsAlert(env, `Quant BTC ops TEST\nWorker: ${WORKER_VERSION}\nUTC: ${now.toISOString()}\nParis: ${parisIso(now)}`)
   ]);
+  const sent = [discord, telegram].some((item) => objectValue(item).status === "sent");
   return {
-    status: "sent",
+    status: sent ? "sent" : "error",
     channels,
+    delivery: {
+      discord,
+      telegram
+    },
     message: "Test alert sent to configured channels.",
     checked_at_utc: now.toISOString(),
     checked_at_paris: parisIso(now)
