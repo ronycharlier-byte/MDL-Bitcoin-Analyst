@@ -13,6 +13,8 @@
   STALE_CACHE_MAX_SECONDS?: string;
   OPS_ALERT_WEBHOOK_URL?: string;
   DISCORD_WEBHOOK_URL?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
   OPS_MONITOR_ALERT_COOLDOWN_SECONDS?: string;
 }
 
@@ -69,8 +71,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.21.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.21.0";
+const WORKER_VERSION = "1.22.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.22.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -191,7 +193,8 @@ export default {
             "ops_monitoring",
             "strict_cache_policy",
             "deep_compute_quota",
-            "optional_webhook_alerting"
+            "optional_webhook_alerting",
+            "telegram_ops_alerting"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -210,7 +213,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -253,7 +256,7 @@ export default {
           },
           ops_monitoring: {
             scheduled_check: "every_5_minutes",
-            alert_webhook: getOpsAlertWebhook(env) ? "configured" : "absent",
+            alert_channels: getOpsAlertChannels(env),
             cache_policy: cachePolicy(env),
             deep_compute_quota: getDeepRateLimit(env)
           },
@@ -302,6 +305,10 @@ export default {
       if (url.pathname === "/ops/monitor" && request.method === "GET") {
         const status = await runOperationalMonitor(env, true);
         return json(status, status.status === "ok" ? 200 : 503);
+      }
+
+      if (url.pathname === "/ops/test-alert" && request.method === "GET") {
+        return json(await sendOpsTestAlert(env));
       }
 
       if (["/history", "/compare-runs", "/alerts", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/clients/me", "/usage-summary"].includes(url.pathname) && request.method === "GET") {
@@ -1026,7 +1033,7 @@ async function buildOpsStatus(env: Env): Promise<Record<string, unknown>> {
     cache_policy: policy,
     deep_compute_quota: getDeepRateLimit(env),
     alerting: {
-      webhook: getOpsAlertWebhook(env) ? "configured" : "absent",
+      channels: getOpsAlertChannels(env),
       cooldown_seconds: clampInt(parseNumber(env.OPS_MONITOR_ALERT_COOLDOWN_SECONDS, OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60)
     },
     warnings,
@@ -1047,6 +1054,7 @@ async function runOperationalMonitor(env: Env, manual = false): Promise<Record<s
     const blockers = Array.isArray(status.blockers) ? status.blockers.join("; ") : "";
     const message = blockers || warnings || "Quant BTC operational monitor detected a degraded state.";
     const fingerprint = `ops:${status.status}:${message}`;
+    await sendOpsAlertIfNeeded(env, fingerprint, message, status);
     await persistOpsEventToD1(env, {
       kind: manual ? "manual_monitor" : "scheduled_monitor",
       status: String(status.status),
@@ -1055,7 +1063,6 @@ async function runOperationalMonitor(env: Env, manual = false): Promise<Record<s
       fingerprint,
       payload: status
     });
-    await sendOpsAlertIfNeeded(env, fingerprint, message, status);
   }
   return status;
 }
@@ -1205,17 +1212,47 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
-function getOpsAlertWebhook(env: Env): string | null {
+function getOpsAlertChannels(env: Env): Record<string, string> {
+  return {
+    discord_webhook: getDiscordOpsWebhook(env) ? "configured" : "absent",
+    telegram: getTelegramConfig(env) ? "configured" : "absent"
+  };
+}
+
+function getDiscordOpsWebhook(env: Env): string | null {
   return stringOrNull(env.OPS_ALERT_WEBHOOK_URL) || stringOrNull(env.DISCORD_WEBHOOK_URL);
 }
 
+function getTelegramConfig(env: Env): { token: string; chatId: string } | null {
+  const token = stringOrNull(env.TELEGRAM_BOT_TOKEN);
+  const chatId = stringOrNull(env.TELEGRAM_CHAT_ID);
+  if (!token || !chatId) {
+    return null;
+  }
+  return { token, chatId };
+}
+
 async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: string, status: Record<string, unknown>): Promise<void> {
-  const webhook = getOpsAlertWebhook(env);
-  if (!webhook) {
+  const hasDiscord = Boolean(getDiscordOpsWebhook(env));
+  const hasTelegram = Boolean(getTelegramConfig(env));
+  if (!hasDiscord && !hasTelegram) {
     return;
   }
   const cooldown = clampInt(parseNumber(env.OPS_MONITOR_ALERT_COOLDOWN_SECONDS, OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60);
   if (!(await shouldSendOpsAlert(env, fingerprint, cooldown))) {
+    return;
+  }
+  const title = `Quant BTC ops ${String(status.status).toUpperCase()}`;
+  const text = `${title}\n${message}\nUTC: ${new Date().toISOString()}`;
+  await Promise.all([
+    sendDiscordOpsAlert(env, title, message, status),
+    sendTelegramOpsAlert(env, text)
+  ]);
+}
+
+async function sendDiscordOpsAlert(env: Env, title: string, message: string, status: Record<string, unknown>): Promise<void> {
+  const webhook = getDiscordOpsWebhook(env);
+  if (!webhook) {
     return;
   }
   try {
@@ -1223,7 +1260,7 @@ async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: stri
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        content: `Quant BTC ops ${String(status.status).toUpperCase()}: ${message}`,
+        content: `${title}: ${message}`,
         embeds: [
           {
             title: "Quant BTC operational monitor",
@@ -1235,8 +1272,59 @@ async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: stri
       })
     });
   } catch {
-    // Alert delivery is best-effort; /ops/status remains the source of truth.
+    // Discord delivery is best-effort; /ops/status remains the source of truth.
   }
+}
+
+async function sendTelegramOpsAlert(env: Env, text: string): Promise<void> {
+  const config = getTelegramConfig(env);
+  if (!config) {
+    return;
+  }
+  try {
+    await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: config.chatId,
+        text,
+        disable_web_page_preview: true
+      })
+    });
+  } catch {
+    // Telegram delivery is best-effort; /ops/status remains the source of truth.
+  }
+}
+
+async function sendOpsTestAlert(env: Env): Promise<Record<string, unknown>> {
+  const channels = getOpsAlertChannels(env);
+  const hasDiscord = channels.discord_webhook === "configured";
+  const hasTelegram = channels.telegram === "configured";
+  if (!hasDiscord && !hasTelegram) {
+    return {
+      status: "not_configured",
+      channels,
+      message: "No alert channel is configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID, or OPS_ALERT_WEBHOOK_URL/DISCORD_WEBHOOK_URL."
+    };
+  }
+  const now = new Date();
+  const payload = {
+    status: "test",
+    worker_version: WORKER_VERSION,
+    checked_at_utc: now.toISOString(),
+    checked_at_paris: parisIso(now)
+  };
+  await Promise.all([
+    sendDiscordOpsAlert(env, "Quant BTC ops TEST", "Test alert from Quant BTC Worker.", payload),
+    sendTelegramOpsAlert(env, `Quant BTC ops TEST\nWorker: ${WORKER_VERSION}\nUTC: ${now.toISOString()}\nParis: ${parisIso(now)}`)
+  ]);
+  return {
+    status: "sent",
+    channels,
+    message: "Test alert sent to configured channels.",
+    checked_at_utc: now.toISOString(),
+    checked_at_paris: parisIso(now)
+  };
 }
 
 async function shouldSendOpsAlert(env: Env, fingerprint: string, cooldownSeconds: number): Promise<boolean> {
