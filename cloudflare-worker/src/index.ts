@@ -96,8 +96,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.28.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.28.0";
+const WORKER_VERSION = "1.28.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.28.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -285,7 +285,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/strategies/status", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/strategies/status", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -472,6 +472,14 @@ export default {
 
       if (url.pathname === "/strategies/status" && request.method === "GET") {
         return json(await strategyStatus(env));
+      }
+
+      if (url.pathname === "/strategies/deep-signal" && request.method === "GET") {
+        return json(await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: 30 }));
+      }
+
+      if (url.pathname === "/strategies/deep-paper-order" && request.method === "GET") {
+        return json(await createStrategyPaperOrder(env, { asset: "BTC", preset: "deep", horizon: 30 }, "gpt_strategy_action"));
       }
 
       if ((url.pathname === "/strategies/signal" || url.pathname === "/strategies/ensemble") && request.method === "GET") {

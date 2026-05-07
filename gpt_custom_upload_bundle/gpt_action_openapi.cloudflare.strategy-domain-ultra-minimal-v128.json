@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quant BTC Strategy",
-    "version": "1.28.0"
+    "version": "1.28.1"
   },
   "servers": [
     {
@@ -64,41 +64,10 @@
         }
       }
     },
-    "/strategies/signal": {
+    "/strategies/deep-signal": {
       "get": {
-        "operationId": "btcStrategySignal",
-        "summary": "Score quantitatif strategy BTC.",
-        "parameters": [
-          {
-            "name": "preset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "quick",
-                "tactical",
-                "deep"
-              ]
-            }
-          },
-          {
-            "name": "horizon",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "refresh",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
+        "operationId": "btcStrategyDeepSignal",
+        "summary": "Score quantitatif strategy BTC en preset deep, horizon 30j.",
         "responses": {
           "200": {
             "description": "OK",
@@ -128,41 +97,10 @@
         }
       }
     },
-    "/strategies/paper-order": {
+    "/strategies/deep-paper-order": {
       "get": {
-        "operationId": "btcStrategyPaperOrder",
-        "summary": "Creer un ordre paper strategy si les gates passent.",
-        "parameters": [
-          {
-            "name": "preset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "quick",
-                "tactical",
-                "deep"
-              ]
-            }
-          },
-          {
-            "name": "horizon",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "force",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
+        "operationId": "btcStrategyDeepPaperOrder",
+        "summary": "Creer un ordre paper strategy en preset deep 30j si les gates passent.",
         "responses": {
           "200": {
             "description": "OK",
