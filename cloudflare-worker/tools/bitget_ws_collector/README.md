@@ -37,7 +37,7 @@ journalctl -u quant-btc-bitget-collector -f
 ## Alternative Docker
 
 ```powershell
-copy .env.example .env
+copy collector.env.example .env
 # Renseigner REALTIME_INGEST_SECRET
 docker compose up -d --build
 docker logs -f quant-btc-bitget-ws-collector
