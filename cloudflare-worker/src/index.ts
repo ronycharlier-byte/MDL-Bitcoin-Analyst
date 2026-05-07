@@ -79,8 +79,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.25.1";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.25.1";
+const WORKER_VERSION = "1.26.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.26.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -96,6 +96,8 @@ const MODEL_ALERT_BIAS_DELTA_THRESHOLD_DEFAULT = 0.10;
 const MODEL_ALERT_COOLDOWN_SECONDS_DEFAULT = 30 * 60;
 const MODEL_ALERT_QUICK_REFRESH_SECONDS_DEFAULT = 5 * 60;
 const MODEL_ALERT_DEEP_REFRESH_SECONDS_DEFAULT = 30 * 60;
+const LOCK_TTL_SECONDS_DEFAULT = 4 * 60;
+const REALTIME_SNAPSHOT_MAX_SECONDS = 6 * 60;
 const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
   "/run-quick": {
     name: "quick",
@@ -147,8 +149,11 @@ const rateLimitBuckets = new Map<string, number[]>();
 export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(warmRenderBitgetBridge(env));
+    ctx.waitUntil(collectRealtimeMarketSnapshot(env, "scheduled"));
     ctx.waitUntil(runOperationalMonitor(env));
     ctx.waitUntil(runModelAlertMonitor(env, false, true));
+    ctx.waitUntil(processDeepJobQueue(env));
+    ctx.waitUntil(evaluateCustomAlertRules(env));
     ctx.waitUntil(sendDailyOpsSummaryIfDue(env));
   },
 
@@ -216,7 +221,15 @@ export default {
             "telegram_daily_ops_summary",
             "telegram_model_alerts",
             "telegram_model_alert_real_time_refresh",
-            "telegram_french_notifications"
+            "telegram_french_notifications",
+            "d1_refresh_locks",
+            "telegram_interactive_commands",
+            "custom_alert_rules",
+            "deep_job_queue",
+            "realtime_bitget_polling_snapshots",
+            "local_dashboard",
+            "visible_backtest_report",
+            "legal_pages"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -235,7 +248,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -300,7 +313,8 @@ export default {
             "Public endpoint has a best-effort per-IP in-isolate rate limit and simulation caps.",
             "Every precise number must be cited with full model_run_id, report_date UTC, report_date Europe/Paris, reference_spot and data status.",
             "A user-facing answer must not truncate run_id values unless it also provides the full run_id in the provenance section.",
-            "Spot freshness, Monte Carlo error, multi-seed stability, alerts and run comparison diagnostics must be surfaced when present."
+            "Spot freshness, Monte Carlo error, multi-seed stability, alerts and run comparison diagnostics must be surfaced when present.",
+            "Cloudflare Workers free tier cannot keep a permanent Bitget WebSocket collector alive; realtime snapshots are collected by scheduled polling and explicit /realtime/collect calls."
           ],
           timestamp: now.toISOString(),
           timestamp_utc: now.toISOString(),
@@ -339,6 +353,14 @@ export default {
         return json(await sendDailyOpsSummary(env, true));
       }
 
+      if (url.pathname === "/realtime/status" && request.method === "GET") {
+        return json(await realtimeStatus(env));
+      }
+
+      if (url.pathname === "/realtime/collect" && request.method === "GET") {
+        return json(await collectRealtimeMarketSnapshot(env, "manual"));
+      }
+
       if (url.pathname === "/model-alerts/status" && request.method === "GET") {
         const input = await readInput(request, url);
         const refreshStatus = wantsFreshRun(input)
@@ -350,6 +372,50 @@ export default {
       if (url.pathname === "/model-alerts/test" && request.method === "GET") {
         const input = await readInput(request, url);
         return json(await runModelAlertMonitor(env, true, true, wantsFreshRun(input)));
+      }
+
+      if (url.pathname === "/telegram/webhook" && request.method === "POST") {
+        return json(await handleTelegramWebhook(env, await readJson(request)));
+      }
+
+      if (url.pathname === "/telegram/setup-webhook" && request.method === "GET") {
+        return json(await setupTelegramWebhook(env, request));
+      }
+
+      if (url.pathname === "/alert-rules" && request.method === "GET") {
+        return json(await listCustomAlertRules(env, url.searchParams.get("chat_id") || undefined));
+      }
+
+      if (url.pathname === "/alert-rules" && request.method === "POST") {
+        return json(await createCustomAlertRule(env, await readJson(request)));
+      }
+
+      if (url.pathname === "/alert-rules/evaluate" && request.method === "GET") {
+        return json(await evaluateCustomAlertRules(env));
+      }
+
+      if (url.pathname === "/deep-jobs" && request.method === "GET") {
+        return json(await listDeepJobs(env, clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50)));
+      }
+
+      if (url.pathname === "/deep-jobs" && request.method === "POST") {
+        return json(await createDeepJob(env, await readJson(request)));
+      }
+
+      if (url.pathname === "/deep-jobs/process" && request.method === "GET") {
+        return json(await processDeepJobQueue(env));
+      }
+
+      if (url.pathname === "/backtests" && request.method === "GET") {
+        return json(await visibleBacktestReport(env));
+      }
+
+      if (url.pathname === "/legal" && request.method === "GET") {
+        return html(legalIndexHtml());
+      }
+
+      if (url.pathname.startsWith("/legal/") && request.method === "GET") {
+        return html(legalPageHtml(url.pathname));
       }
 
       if (["/history", "/compare-runs", "/alerts", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/clients/me", "/usage-summary"].includes(url.pathname) && request.method === "GET") {
@@ -375,8 +441,18 @@ export default {
         return json(result);
       }
 
+      if (url.pathname === "/dashboard" && request.method === "HEAD") {
+        return new Response(null, {
+          status: 200,
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "access-control-allow-origin": "*"
+          }
+        });
+      }
+
       if (url.pathname === "/dashboard" && request.method === "GET") {
-        return Response.redirect(renderUrl("/dashboard", env), 302);
+        return html(await dashboardHtml(env));
       }
 
       if (url.pathname === "/pdf-report" && request.method === "GET") {
@@ -965,11 +1041,16 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
     return { status: "absent", target: "cloudflare_d1", reason: "DB binding is not configured" };
   }
   try {
-    const [runs, usage, clients, subscriptions] = await env.DB.batch([
+    const [runs, usage, clients, subscriptions, ops, locks, snapshots, jobs, rules] = await env.DB.batch([
       env.DB.prepare("SELECT COUNT(*) AS count FROM quant_runs"),
       env.DB.prepare("SELECT COUNT(*) AS count FROM usage_events"),
       env.DB.prepare("SELECT COUNT(*) AS count FROM api_clients"),
-      env.DB.prepare("SELECT COUNT(*) AS count FROM alert_subscriptions")
+      env.DB.prepare("SELECT COUNT(*) AS count FROM alert_subscriptions"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM ops_events"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM system_locks"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM market_snapshots"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM deep_jobs"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM user_alert_rules")
     ]);
     return {
       status: "ok",
@@ -980,9 +1061,14 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
         runs: countFromD1(runs),
         usage_events: countFromD1(usage),
         clients: countFromD1(clients),
-        alert_subscriptions: countFromD1(subscriptions)
+        alert_subscriptions: countFromD1(subscriptions),
+        ops_events: countFromD1(ops),
+        system_locks: countFromD1(locks),
+        market_snapshots: countFromD1(snapshots),
+        deep_jobs: countFromD1(jobs),
+        user_alert_rules: countFromD1(rules)
       },
-      free_tier_role: "durable metadata storage for run archives, usage logs, clients and alert subscriptions",
+      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules and queued deep jobs",
       checked_at_utc: new Date().toISOString(),
       checked_at_paris: parisIso(new Date())
     };
@@ -1183,6 +1269,770 @@ function collectOpsIssue(check: Record<string, unknown>, label: string, warnings
   } else if (status === "warning") {
     warnings.push(`${label}: ${stringOrNull(check.message) || status}`);
   }
+}
+
+async function acquireD1Lock(
+  env: Env,
+  name: string,
+  ttlSeconds = LOCK_TTL_SECONDS_DEFAULT,
+  metadata: Record<string, unknown> = {}
+): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { acquired: true, status: "no_d1_lock", name, owner: "no-d1" };
+  }
+  const now = new Date();
+  const expires = new Date(now.getTime() + ttlSeconds * 1000);
+  const owner = `${WORKER_VERSION}-${randomRunSuffix()}`;
+  try {
+    await env.DB.prepare("DELETE FROM system_locks WHERE name = ? AND expires_at_utc <= ?").bind(name, now.toISOString()).run();
+    await env.DB.prepare(`
+      INSERT INTO system_locks (name, owner, acquired_at_utc, expires_at_utc, metadata_json)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(name, owner, now.toISOString(), expires.toISOString(), JSON.stringify(metadata)).run();
+    return {
+      acquired: true,
+      status: "locked",
+      name,
+      owner,
+      acquired_at_utc: now.toISOString(),
+      expires_at_utc: expires.toISOString()
+    };
+  } catch {
+    const existing = await env.DB.prepare("SELECT name, owner, acquired_at_utc, expires_at_utc FROM system_locks WHERE name = ?").bind(name).first();
+    return {
+      acquired: false,
+      status: "busy",
+      name,
+      owner: objectValue(existing).owner,
+      acquired_at_utc: objectValue(existing).acquired_at_utc,
+      expires_at_utc: objectValue(existing).expires_at_utc
+    };
+  }
+}
+
+async function releaseD1Lock(env: Env, name: string, owner: string): Promise<void> {
+  if (!env.DB || !name || !owner || owner === "no-d1") {
+    return;
+  }
+  try {
+    await env.DB.prepare("DELETE FROM system_locks WHERE name = ? AND owner = ?").bind(name, owner).run();
+  } catch {
+    // Lock release is best-effort; expired locks are removed by the next acquisition.
+  }
+}
+
+async function collectRealtimeMarketSnapshot(env: Env, trigger: string): Promise<Record<string, unknown>> {
+  const lock = await acquireD1Lock(env, "realtime-market-collector", 90, { trigger, worker_version: WORKER_VERSION });
+  if (!lock.acquired) {
+    return { status: "skipped", reason: "lock_active", lock };
+  }
+  const now = new Date();
+  try {
+    const snapshot = await fetchRealtimeSnapshot(env);
+    const price = numberOrNull(snapshot.price);
+    const bid = numberOrNull(snapshot.bid);
+    const ask = numberOrNull(snapshot.ask);
+    const spreadBps = numberOrNull(snapshot.spread_bps);
+    const observedAt = stringOrNull(snapshot.observed_at_utc) || now.toISOString();
+    const payload = { ...snapshot, trigger };
+    if (env.DB) {
+      await env.DB.prepare(`
+        INSERT INTO market_snapshots (
+          asset, source, kind, price, bid, ask, spread_bps, funding_rate, open_interest,
+          liquidations_status, payload_json, observed_at_utc, created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        "BTC",
+        "bitget_polling_snapshot",
+        "spot_orderbook_derivatives",
+        price,
+        bid,
+        ask,
+        spreadBps,
+        snapshot.funding_rate,
+        snapshot.open_interest,
+        stringOrNull(snapshot.liquidations_status) || "absent",
+        JSON.stringify(payload),
+        observedAt,
+        now.toISOString()
+      ).run();
+    }
+    return {
+      status: "ok",
+      mode: "near_realtime_polling",
+      trigger,
+      asset: "BTC",
+      source: snapshot.source,
+      limitation: "Not a permanent WebSocket stream on the free Worker tier.",
+      price,
+      bid,
+      ask,
+      spread_bps: spreadBps,
+      funding_rate: snapshot.funding_rate,
+      open_interest: snapshot.open_interest,
+      liquidations_status: snapshot.liquidations_status || "absent",
+      observed_at_utc: observedAt,
+      observed_at_paris: parisIso(new Date(observedAt)),
+      created_at_utc: now.toISOString(),
+      created_at_paris: parisIso(now)
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      trigger,
+      message: error instanceof Error ? error.message : String(error),
+      data_status: {
+        bitget_spot: "absent",
+        orderbook: "absent",
+        funding_rate: "absent",
+        open_interest: "absent",
+        liquidations: "absent"
+      },
+      checked_at_utc: now.toISOString(),
+      checked_at_paris: parisIso(now)
+    };
+  } finally {
+    await releaseD1Lock(env, String(lock.name), String(lock.owner));
+  }
+}
+
+async function realtimeStatus(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", reason: "D1 binding is not configured" };
+  }
+  try {
+    const row = await env.DB.prepare(`
+      SELECT asset, source, kind, price, bid, ask, spread_bps, funding_rate, open_interest,
+             liquidations_status, observed_at_utc, created_at_utc, payload_json
+      FROM market_snapshots
+      WHERE asset = ?
+      ORDER BY created_at_utc DESC
+      LIMIT 1
+    `).bind("BTC").first();
+    if (!row) {
+      return {
+        status: "absent",
+        recommendation: "Call /realtime/collect or wait for the next scheduled collection.",
+        checked_at_utc: new Date().toISOString(),
+        checked_at_paris: parisIso(new Date())
+      };
+    }
+    const createdAt = stringOrNull(objectValue(row).created_at_utc);
+    const age = createdAt ? Math.max(0, Math.round((Date.now() - new Date(createdAt).getTime()) / 1000)) : null;
+    return {
+      status: age !== null && age <= REALTIME_SNAPSHOT_MAX_SECONDS ? "ok" : "warning",
+      freshness_label: age !== null && age <= REALTIME_SNAPSHOT_MAX_SECONDS ? "fresh" : "stale",
+      max_age_seconds: REALTIME_SNAPSHOT_MAX_SECONDS,
+      age_seconds: age,
+      asset: row.asset,
+      source: row.source,
+      mode: "near_realtime_polling",
+      limitation: "Free Cloudflare Workers use scheduled polling here, not a permanent WebSocket process.",
+      price: row.price,
+      bid: row.bid,
+      ask: row.ask,
+      spread_bps: row.spread_bps,
+      funding_rate: row.funding_rate,
+      open_interest: row.open_interest,
+      liquidations_status: row.liquidations_status,
+      observed_at_utc: row.observed_at_utc,
+      observed_at_paris: typeof row.observed_at_utc === "string" ? parisIso(new Date(row.observed_at_utc)) : null,
+      created_at_utc: createdAt,
+      created_at_paris: createdAt ? parisIso(new Date(createdAt)) : null
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function fetchRealtimeSnapshot(env: Env): Promise<Record<string, unknown>> {
+  try {
+    const [ticker, orderbook, funding, oi] = await Promise.all([
+      fetchBitgetTickerSnapshot(),
+      fetchBitgetOrderBookSnapshot(),
+      fetchBitgetFundingRate(),
+      fetchBitgetOpenInterest()
+    ]);
+    const bid = numberOrNull(orderbook.bid);
+    const ask = numberOrNull(orderbook.ask);
+    const spreadBps = bid !== null && ask !== null && bid > 0 && ask >= bid
+      ? ((ask - bid) / ((ask + bid) / 2)) * 10000
+      : null;
+    return {
+      status: "ok",
+      source: "bitget_direct_rest_from_cloudflare",
+      route: "direct",
+      price: numberOrNull(ticker.price),
+      bid,
+      ask,
+      spread_bps: spreadBps,
+      funding_rate: funding.value,
+      open_interest: oi.value,
+      liquidations_status: "absent",
+      observed_at_utc: stringOrNull(ticker.timestamp_utc) || new Date().toISOString(),
+      ticker,
+      orderbook,
+      funding,
+      open_interest_snapshot: oi,
+      liquidations: {
+        status: "absent",
+        source: "bitget_liquidations_websocket",
+        note: "Cloudflare Worker free tier cannot keep a permanent public WebSocket collector alive; liquidation capture requires an external long-running collector."
+      }
+    };
+  } catch (error) {
+    return await fetchRenderBitgetRealtimeSnapshot(env, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function fetchRenderBitgetRealtimeSnapshot(env: Env, directError: string): Promise<Record<string, unknown>> {
+  const started = Date.now();
+  const result = await proxyRenderPost("/multi-run", {
+    asset: "BTC",
+    horizons: [1],
+    simulations: 100,
+    model: "ensemble",
+    skip_corpus: true,
+    no_online: false
+  }, env);
+  if (result.error) {
+    throw new Error(`Bitget direct failed (${directError}); Render Bitget bridge failed: ${result.message || result.error}`);
+  }
+  const provenance = objectValue(result.provenance_summary);
+  const sharedSpot = objectValue(provenance.shared_spot_snapshot);
+  const frame = objectValue(Array.isArray(result.frames) ? result.frames[0] : {});
+  const frameProvenance = objectValue(frame.provenance);
+  const liquidity = objectValue(result.liquidity);
+  const bestBid = numberOrNull(liquidity.best_bid);
+  const bestAsk = numberOrNull(liquidity.best_ask);
+  const spotRaw = sharedSpot.price ?? frameProvenance.reference_spot ?? (Array.isArray(provenance.reference_spots) ? provenance.reference_spots[0] : null);
+  const timestampRaw = stringOrNull(sharedSpot.timestamp) || stringOrNull(frameProvenance.reference_spot_timestamp_utc) || stringOrNull(frameProvenance.reference_spot_timestamp);
+  const observedAt = timestampRaw ? new Date(timestampRaw).toISOString() : new Date().toISOString();
+  await persistRunToD1(result, "/realtime/collect-render-bridge", {
+    asset: "BTC",
+    horizons: [1],
+    simulations: 100,
+    model: "ensemble"
+  }, env);
+  await persistUsageToD1(result, "/realtime/collect-render-bridge", {
+    asset: "BTC",
+    horizons: [1],
+    simulations: 100,
+    model: "ensemble"
+  }, env);
+  return {
+    status: "ok",
+    source: "bitget_via_render_bridge_spot_probe",
+    route: "render_bridge",
+    direct_cloudflare_error: directError,
+    latency_ms: Date.now() - started,
+    archive_id: archiveIdFromPayload(result),
+    price: parsePriceValue(spotRaw),
+    bid: bestBid,
+    ask: bestAsk,
+    spread_bps: numberOrNull(liquidity.spread_bps),
+    funding_rate: numberOrNull(objectValue(result.fundamental_inputs).values && objectValue(objectValue(result.fundamental_inputs).values).funding_rate),
+    open_interest: numberOrNull(objectValue(result.fundamental_inputs).values && objectValue(objectValue(result.fundamental_inputs).values).open_interest),
+    liquidations_status: "absent",
+    observed_at_utc: observedAt,
+    observed_at_paris: parisIso(new Date(observedAt)),
+    render_version: result.version,
+    note: "Cloudflare direct Bitget was blocked; Render fetched Bitget and no non-Bitget exchange fallback was used."
+  };
+}
+
+async function fetchBitgetTickerSnapshot(): Promise<Record<string, unknown>> {
+  const response = await fetch("https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT", {
+    headers: { "accept": "application/json", "user-agent": "quant-btc-model-worker-realtime/1.0" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  if (!response.ok) {
+    throw new Error(`Bitget ticker HTTP ${response.status}`);
+  }
+  const payload = objectValue(await response.json());
+  const data = Array.isArray(payload.data) ? objectValue(payload.data[0]) : objectValue(payload.data);
+  const requestTime = numberOrNull(payload.requestTime);
+  const exchangeTime = numberOrNull(data.ts);
+  const timestamp = exchangeTime || requestTime || Date.now();
+  return {
+    status: "real",
+    source: "bitget_btcusdt_spot_ticker_rest",
+    price: parseNullableNumber(data.lastPr ?? data.close ?? data.last),
+    bid: parseNullableNumber(data.bidPr ?? data.bestBid),
+    ask: parseNullableNumber(data.askPr ?? data.bestAsk),
+    high_24h: parseNullableNumber(data.high24h),
+    low_24h: parseNullableNumber(data.low24h),
+    volume_24h: parseNullableNumber(data.baseVolume ?? data.quoteVolume),
+    timestamp_utc: new Date(timestamp).toISOString(),
+    timestamp_paris: parisIso(new Date(timestamp))
+  };
+}
+
+async function fetchBitgetOrderBookSnapshot(): Promise<Record<string, unknown>> {
+  const response = await fetch("https://api.bitget.com/api/v2/spot/market/orderbook?symbol=BTCUSDT&type=step0&limit=50", {
+    headers: { "accept": "application/json", "user-agent": "quant-btc-model-worker-realtime/1.0" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  if (!response.ok) {
+    throw new Error(`Bitget orderbook HTTP ${response.status}`);
+  }
+  const payload = objectValue(await response.json());
+  const data = objectValue(payload.data);
+  const bids = Array.isArray(data.bids) ? data.bids : [];
+  const asks = Array.isArray(data.asks) ? data.asks : [];
+  const bestBid = parseOrderBookLevel(bids[0]);
+  const bestAsk = parseOrderBookLevel(asks[0]);
+  return {
+    status: "real",
+    source: "bitget_btcusdt_spot_orderbook_rest",
+    bid: bestBid.price,
+    ask: bestAsk.price,
+    bid_size: bestBid.size,
+    ask_size: bestAsk.size,
+    levels_bid: bids.length,
+    levels_ask: asks.length,
+    timestamp_utc: new Date(numberOrNull(data.ts) || numberOrNull(payload.requestTime) || Date.now()).toISOString()
+  };
+}
+
+function parseOrderBookLevel(value: unknown): { price: number | null; size: number | null } {
+  if (Array.isArray(value)) {
+    return { price: parseNullableNumber(value[0]), size: parseNullableNumber(value[1]) };
+  }
+  const row = objectValue(value);
+  return {
+    price: parseNullableNumber(row.price ?? row.px),
+    size: parseNullableNumber(row.size ?? row.qty)
+  };
+}
+
+async function createDeepJob(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 binding is required for the deep job queue." };
+  }
+  const now = new Date();
+  const jobId = `deep_${now.toISOString().replace(/[-:.]/g, "").slice(0, 15)}_${randomRunSuffix()}`;
+  const chatId = stringOrNull(input.chat_id) || stringOrNull(input.notify_target) || stringOrNull(env.TELEGRAM_CHAT_ID);
+  const request = {
+    asset: normalizeAsset(input.asset),
+    model: normalizeRenderModel(input.model),
+    preset: "deep",
+    horizons: ANALYSIS_PRESETS["/deep"].horizons,
+    simulations: Math.min(ANALYSIS_PRESETS["/deep"].simulations, getMaxSimulations(env))
+  };
+  await env.DB.prepare(`
+    INSERT INTO deep_jobs (
+      job_id, asset, preset, status, request_json, notify_channel, notify_target,
+      created_at_utc, updated_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    jobId,
+    request.asset,
+    "deep",
+    "queued",
+    JSON.stringify(request),
+    chatId ? "telegram" : "none",
+    chatId,
+    now.toISOString(),
+    now.toISOString()
+  ).run();
+  return {
+    status: "queued",
+    job_id: jobId,
+    request,
+    notify_channel: chatId ? "telegram" : "none",
+    created_at_utc: now.toISOString(),
+    created_at_paris: parisIso(now),
+    note: "Deep run queued; it completes when a fresh deep cache is produced by the scheduled refresh, avoiding long Worker request timeouts."
+  };
+}
+
+async function listDeepJobs(env: Env, limit: number): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", jobs: [] };
+  }
+  const { results } = await env.DB.prepare(`
+    SELECT job_id, asset, preset, status, result_archive_id, error,
+           notify_channel, created_at_utc, updated_at_utc, completed_at_utc
+    FROM deep_jobs
+    ORDER BY created_at_utc DESC
+    LIMIT ?
+  `).bind(limit).all();
+  return {
+    status: "ok",
+    jobs: (results || []).map((item) => {
+      const row = objectValue(item);
+      return {
+        job_id: row.job_id,
+        asset: row.asset,
+        preset: row.preset,
+        status: row.status,
+        result_archive_id: row.result_archive_id,
+        error: row.error,
+        notify_channel: row.notify_channel,
+        created_at_utc: row.created_at_utc,
+        created_at_paris: typeof row.created_at_utc === "string" ? parisIso(new Date(row.created_at_utc)) : null,
+        updated_at_utc: row.updated_at_utc,
+        completed_at_utc: row.completed_at_utc
+      };
+    })
+  };
+}
+
+async function processDeepJobQueue(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", reason: "D1 binding is not configured" };
+  }
+  const lock = await acquireD1Lock(env, "deep-job-processor", 15 * 60, { worker_version: WORKER_VERSION });
+  if (!lock.acquired) {
+    return { status: "skipped", reason: "lock_active", lock };
+  }
+  try {
+    const row = objectValue(await env.DB.prepare(`
+      SELECT job_id, request_json, notify_channel, notify_target, status, created_at_utc, updated_at_utc
+      FROM deep_jobs
+      WHERE status IN ('queued', 'running')
+      ORDER BY created_at_utc ASC
+      LIMIT 1
+    `).first());
+    const jobId = stringOrNull(row.job_id);
+    if (!jobId) {
+      return { status: "idle", message: "No queued deep job." };
+    }
+    const preset = ANALYSIS_PRESETS["/deep"];
+    const input = objectValue(JSON.parse(stringOrNull(row.request_json) || "{}"));
+    const asset = normalizeAsset(input.asset);
+    const latestDeep = await latestD1CacheSummary(env, asset, preset.horizons);
+    const jobCreatedAt = stringOrNull(row.created_at_utc);
+    const cacheCreatedAt = stringOrNull(latestDeep.created_at_utc);
+    const cacheIsNewEnough = Boolean(
+      latestDeep.status === "present" &&
+      cacheCreatedAt &&
+      (!jobCreatedAt || new Date(cacheCreatedAt).getTime() >= new Date(jobCreatedAt).getTime())
+    );
+
+    if (!cacheIsNewEnough) {
+      const jobStatus = stringOrNull(row.status) || "queued";
+      const updatedAt = stringOrNull(row.updated_at_utc);
+      const runningAgeSeconds = updatedAt ? Math.max(0, Math.round((Date.now() - new Date(updatedAt).getTime()) / 1000)) : null;
+      if (jobStatus === "running" && runningAgeSeconds !== null && runningAgeSeconds > 20 * 60) {
+        const now = new Date();
+        await env.DB.prepare(`
+          UPDATE deep_jobs SET status = ?, error = ?, updated_at_utc = ? WHERE job_id = ?
+        `).bind("queued", "running_timeout_requeued_waiting_for_next_deep_cache", now.toISOString(), jobId).run();
+        return {
+          status: "requeued",
+          job_id: jobId,
+          reason: "Previous running state exceeded 20 minutes without a newer deep archive."
+        };
+      }
+      return {
+        status: "waiting_for_deep_cache",
+        job_id: jobId,
+        job_status: jobStatus,
+        latest_deep_cache: latestDeep,
+        note: "The Worker does not hold a long HTTP request for 10k simulations. The job will complete after the next scheduled deep refresh creates a newer deep archive."
+      };
+    }
+
+    const archiveId = stringOrNull(latestDeep.archive_id);
+    const finished = new Date();
+    await env.DB.prepare(`
+      UPDATE deep_jobs SET status = ?, result_archive_id = ?, updated_at_utc = ?, completed_at_utc = ? WHERE job_id = ?
+    `).bind("completed", archiveId, finished.toISOString(), finished.toISOString(), jobId).run();
+    await notifyDeepJob(env, row, [
+      "Quant BTC - Deep job termine",
+      `Job: ${jobId}`,
+      `Archive: ${archiveId || "absente"}`,
+      `UTC: ${finished.toISOString()}`,
+      `Paris: ${parisIso(finished)}`,
+      "Source: cache deep D1 frais",
+      "Sortie: distribution probabiliste, pas prediction certaine."
+    ].join("\n"));
+    return {
+      status: "completed",
+      job_id: jobId,
+      archive_id: archiveId,
+      completed_at_utc: finished.toISOString(),
+      completed_at_paris: parisIso(finished)
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    await releaseD1Lock(env, String(lock.name), String(lock.owner));
+  }
+}
+
+async function notifyDeepJob(env: Env, row: Record<string, unknown>, text: string): Promise<void> {
+  if (stringOrNull(row.notify_channel) !== "telegram") {
+    return;
+  }
+  const chatId = stringOrNull(row.notify_target);
+  if (chatId) {
+    await sendTelegramMessage(env, chatId, text);
+  }
+}
+
+async function createCustomAlertRule(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 binding is required for alert rules." };
+  }
+  const metric = normalizeAlertMetric(input.metric);
+  const operator = normalizeAlertOperator(input.operator);
+  const threshold = numberOrNull(input.threshold);
+  if (!metric || !operator || threshold === null) {
+    return {
+      status: "error",
+      message: "metric, operator and numeric threshold are required.",
+      allowed_metrics: ["btc_price", "var95", "confidence", "transition", "prob_up"],
+      allowed_operators: [">", ">=", "<", "<="]
+    };
+  }
+  const now = new Date();
+  const ruleId = `rule_${now.toISOString().replace(/[-:.]/g, "").slice(0, 15)}_${randomRunSuffix()}`;
+  const chatId = stringOrNull(input.chat_id) || stringOrNull(env.TELEGRAM_CHAT_ID);
+  const horizon = metric === "btc_price" ? null : clampInt(parseNumber(input.horizon, 365), 1, 3650);
+  const cooldown = clampInt(parseNumber(input.cooldown_seconds, 1800), 60, 24 * 60 * 60);
+  await env.DB.prepare(`
+    INSERT INTO user_alert_rules (
+      rule_id, client_id, chat_id, asset, metric, operator, threshold, horizon,
+      status, cooldown_seconds, created_at_utc, updated_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    ruleId,
+    stringOrNull(input.client_id),
+    chatId,
+    normalizeAsset(input.asset),
+    metric,
+    operator,
+    threshold,
+    horizon,
+    "active",
+    cooldown,
+    now.toISOString(),
+    now.toISOString()
+  ).run();
+  return {
+    status: "created",
+    rule_id: ruleId,
+    metric,
+    operator,
+    threshold,
+    horizon,
+    chat_id: chatId,
+    cooldown_seconds: cooldown,
+    created_at_utc: now.toISOString(),
+    created_at_paris: parisIso(now)
+  };
+}
+
+async function listCustomAlertRules(env: Env, chatId?: string): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", rules: [] };
+  }
+  const query = chatId
+    ? env.DB.prepare(`
+        SELECT rule_id, client_id, chat_id, asset, metric, operator, threshold, horizon,
+               status, cooldown_seconds, last_triggered_at_utc, created_at_utc, updated_at_utc
+        FROM user_alert_rules
+        WHERE chat_id = ?
+        ORDER BY created_at_utc DESC
+        LIMIT 50
+      `).bind(chatId)
+    : env.DB.prepare(`
+        SELECT rule_id, client_id, chat_id, asset, metric, operator, threshold, horizon,
+               status, cooldown_seconds, last_triggered_at_utc, created_at_utc, updated_at_utc
+        FROM user_alert_rules
+        ORDER BY created_at_utc DESC
+        LIMIT 50
+      `);
+  const { results } = await query.all();
+  return {
+    status: "ok",
+    rules: (results || []).map((item) => objectValue(item))
+  };
+}
+
+async function evaluateCustomAlertRules(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent" };
+  }
+  const lock = await acquireD1Lock(env, "custom-alert-rules", 120, { worker_version: WORKER_VERSION });
+  if (!lock.acquired) {
+    return { status: "skipped", reason: "lock_active", lock };
+  }
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT rule_id, chat_id, asset, metric, operator, threshold, horizon, cooldown_seconds, last_triggered_at_utc
+      FROM user_alert_rules
+      WHERE status = 'active'
+      ORDER BY created_at_utc ASC
+      LIMIT 100
+    `).all();
+    const realtime = await realtimeStatus(env);
+    const quick = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0);
+    const deep = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 0);
+    const triggered: Record<string, unknown>[] = [];
+    for (const item of results || []) {
+      const rule = objectValue(item);
+      const evaluation = evaluateOneCustomRule(rule, realtime, quick, deep);
+      if (!evaluation.triggered) {
+        continue;
+      }
+      const cooldown = clampInt(parseNumber(rule.cooldown_seconds, 1800), 60, 24 * 60 * 60);
+      const last = stringOrNull(rule.last_triggered_at_utc);
+      if (last && (Date.now() - new Date(last).getTime()) / 1000 < cooldown) {
+        continue;
+      }
+      const now = new Date();
+      await env.DB.prepare("UPDATE user_alert_rules SET last_triggered_at_utc = ?, updated_at_utc = ? WHERE rule_id = ?")
+        .bind(now.toISOString(), now.toISOString(), rule.rule_id).run();
+      const chatId = stringOrNull(rule.chat_id) || stringOrNull(env.TELEGRAM_CHAT_ID);
+      const message = formatCustomRuleAlert(rule, evaluation);
+      if (chatId && !(await isTelegramMuted(env, chatId))) {
+        await sendTelegramMessage(env, chatId, message);
+      }
+      triggered.push({
+        rule_id: rule.rule_id,
+        metric: rule.metric,
+        value: evaluation.value,
+        threshold: rule.threshold,
+        sent_to_telegram: Boolean(chatId)
+      });
+    }
+    return {
+      status: "ok",
+      checked_rules: (results || []).length,
+      triggered_count: triggered.length,
+      triggered
+    };
+  } finally {
+    await releaseD1Lock(env, String(lock.name), String(lock.owner));
+  }
+}
+
+function evaluateOneCustomRule(
+  rule: Record<string, unknown>,
+  realtime: Record<string, unknown>,
+  quick: Record<string, unknown> | null,
+  deep: Record<string, unknown> | null
+): Record<string, unknown> {
+  const metric = stringOrNull(rule.metric);
+  const horizon = numberOrNull(rule.horizon);
+  let value: number | null = null;
+  let source = "absent";
+  if (metric === "btc_price") {
+    value = numberOrNull(realtime.price);
+    source = "realtime_bitget_polling_snapshot";
+  } else {
+    const frame = findFrameForHorizon(deep, horizon) || findFrameForHorizon(quick, horizon);
+    const risk = objectValue(frame?.risk_metrics);
+    const confidence = objectValue(frame?.confidence);
+    const regime = objectValue(frame?.regime_distribution);
+    const distribution = objectValue(frame?.distribution);
+    if (metric === "var95") {
+      value = numberOrNull(risk.var_95);
+    } else if (metric === "confidence") {
+      value = numberOrNull(confidence.score);
+    } else if (metric === "transition") {
+      value = numberOrNull(regime.non_classified_transition);
+    } else if (metric === "prob_up") {
+      value = numberOrNull(distribution.prob_up);
+    }
+    source = stringOrNull(frame?.run_id) || "latest_d1_model_frame";
+  }
+  const threshold = numberOrNull(rule.threshold);
+  const operator = stringOrNull(rule.operator);
+  const triggered = value !== null && threshold !== null && compareNumeric(value, threshold, operator);
+  return { triggered, value, threshold, operator, source };
+}
+
+function findFrameForHorizon(payload: Record<string, unknown> | null, horizon: number | null): Record<string, unknown> | null {
+  if (!payload || horizon === null) {
+    return null;
+  }
+  for (const item of Array.isArray(payload.frames) ? payload.frames : []) {
+    const frame = objectValue(item);
+    if (numberOrNull(frame.horizon) === horizon) {
+      return frame;
+    }
+  }
+  return null;
+}
+
+function compareNumeric(value: number, threshold: number, operator: string | null): boolean {
+  if (operator === ">") return value > threshold;
+  if (operator === ">=") return value >= threshold;
+  if (operator === "<") return value < threshold;
+  if (operator === "<=") return value <= threshold;
+  return false;
+}
+
+function formatCustomRuleAlert(rule: Record<string, unknown>, evaluation: Record<string, unknown>): string {
+  return [
+    "Quant BTC - Alerte personnalisee",
+    `Regle: ${rule.rule_id}`,
+    `Metric: ${rule.metric}${rule.horizon ? ` ${rule.horizon}j` : ""}`,
+    `Condition: ${rule.operator} ${rule.threshold}`,
+    `Valeur: ${formatMetricValue(String(rule.metric), numberOrNull(evaluation.value))}`,
+    `Source: ${evaluation.source || "absente"}`,
+    "Sortie probabiliste, pas conseil financier.",
+    `UTC: ${new Date().toISOString()}`,
+    `Paris: ${parisIso(new Date())}`
+  ].join("\n");
+}
+
+function formatMetricValue(metric: string, value: number | null): string {
+  if (value === null) {
+    return "absente";
+  }
+  if (["var95", "transition", "prob_up"].includes(metric)) {
+    return formatPercent(value);
+  }
+  if (metric === "btc_price") {
+    return `$${value.toFixed(2)}`;
+  }
+  return String(value);
+}
+
+function normalizeAlertMetric(value: unknown): string | null {
+  const metric = String(value || "").trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    price: "btc_price",
+    spot: "btc_price",
+    btc: "btc_price",
+    var: "var95",
+    var_95: "var95",
+    confidence_score: "confidence",
+    conf: "confidence",
+    regime_transition: "transition",
+    p_up: "prob_up",
+    pup: "prob_up"
+  };
+  const normalized = aliases[metric] || metric;
+  return ["btc_price", "var95", "confidence", "transition", "prob_up"].includes(normalized) ? normalized : null;
+}
+
+function normalizeAlertOperator(value: unknown): string | null {
+  const operator = String(value || "").trim();
+  if ([">", ">=", "<", "<="].includes(operator)) {
+    return operator;
+  }
+  const lower = operator.toLowerCase();
+  if (lower === "above" || lower === "gt") return ">";
+  if (lower === "below" || lower === "lt") return "<";
+  if (lower === "gte") return ">=";
+  if (lower === "lte") return "<=";
+  return null;
 }
 
 async function checkRenderHealth(env: Env): Promise<Record<string, unknown>> {
@@ -1416,6 +2266,21 @@ async function refreshPresetForModelAlerts(
 
   const started = Date.now();
   const body = normalizeRenderPresetPayload({ asset: "BTC", model: "ensemble" }, env, preset);
+  const lock = await acquireD1Lock(env, `model-alert-refresh-${preset.name}`, Math.max(90, Math.min(maxAgeSeconds, 15 * 60)), {
+    preset: preset.name,
+    operation_path: operationPath,
+    force
+  });
+  if (!lock.acquired) {
+    return {
+      status: "refresh_skipped_lock_active",
+      preset: preset.name,
+      max_age_seconds: maxAgeSeconds,
+      previous_cache_status: before.status,
+      previous_cache_age_seconds: beforeAge,
+      lock
+    };
+  }
   try {
     const result = await proxyRenderPost("/multi-run", body, env);
     result.analysis_preset = {
@@ -1486,6 +2351,8 @@ async function refreshPresetForModelAlerts(
       latency_ms: Date.now() - started,
       message: error instanceof Error ? error.message : String(error)
     };
+  } finally {
+    await releaseD1Lock(env, String(lock.name), String(lock.owner));
   }
 }
 
@@ -1539,53 +2406,71 @@ async function evaluateLatestModelAlerts(env: Env, refreshStatus?: Record<string
 }
 
 async function runModelAlertMonitor(env: Env, manual = false, refreshBeforeEvaluate = true, forceRefresh = false): Promise<Record<string, unknown>> {
-  const refreshStatus = refreshBeforeEvaluate
-    ? await refreshModelAlertRunsIfNeeded(env, forceRefresh)
-    : { status: "not_requested", reason: "refreshBeforeEvaluate=false" };
-  const evaluation = await evaluateLatestModelAlerts(env, refreshStatus);
-  if (evaluation.status === "ok" && !manual) {
-    return evaluation;
+  const lock = manual
+    ? { acquired: true, owner: "manual", name: "manual-model-alert" }
+    : await acquireD1Lock(env, "model-alert-monitor", LOCK_TTL_SECONDS_DEFAULT, { worker_version: WORKER_VERSION });
+  if (!lock.acquired) {
+    return {
+      status: "skipped",
+      reason: "lock_active",
+      lock,
+      checked_at_utc: new Date().toISOString(),
+      checked_at_paris: parisIso(new Date())
+    };
   }
-  const issues = Array.isArray(evaluation.issues) ? evaluation.issues.map((item) => objectValue(item)) : [];
-  const fingerprint = manual
-    ? `model-alert-test:${new Date().toISOString()}`
-    : modelAlertFingerprint(evaluation);
-  const cooldown = Number(objectValue(evaluation.thresholds).cooldown_seconds || MODEL_ALERT_COOLDOWN_SECONDS_DEFAULT);
-  if (!manual && !(await shouldSendOpsAlert(env, fingerprint, cooldown))) {
+  try {
+    const refreshStatus = refreshBeforeEvaluate
+      ? await refreshModelAlertRunsIfNeeded(env, forceRefresh)
+      : { status: "not_requested", reason: "refreshBeforeEvaluate=false" };
+    const evaluation = await evaluateLatestModelAlerts(env, refreshStatus);
+    if (evaluation.status === "ok" && !manual) {
+      return evaluation;
+    }
+    const issues = Array.isArray(evaluation.issues) ? evaluation.issues.map((item) => objectValue(item)) : [];
+    const fingerprint = manual
+      ? `model-alert-test:${new Date().toISOString()}`
+      : modelAlertFingerprint(evaluation);
+    const cooldown = Number(objectValue(evaluation.thresholds).cooldown_seconds || MODEL_ALERT_COOLDOWN_SECONDS_DEFAULT);
+    if (!manual && !(await shouldSendOpsAlert(env, fingerprint, cooldown))) {
+      return {
+        ...evaluation,
+        alert_delivery: {
+          status: "skipped",
+          reason: "cooldown_active",
+          cooldown_seconds: cooldown
+        }
+      };
+    }
+    const text = formatModelAlertText(evaluation, manual);
+    const [discord, telegram] = await Promise.all([
+      sendDiscordOpsAlert(env, manual ? "Quant BTC model alert TEST" : `Quant BTC model alert ${String(evaluation.status).toUpperCase()}`, text, evaluation),
+      sendTelegramOpsAlert(env, text)
+    ]);
+    const sent = [discord, telegram].some((item) => objectValue(item).status === "sent");
+    await persistOpsEventToD1(env, {
+      kind: manual ? "manual_model_alert" : "model_alert",
+      status: sent ? "sent" : "error",
+      severity: evaluation.status === "critical" ? "critical" : evaluation.status === "warning" ? "warning" : "info",
+      message: issues.length ? issues.slice(0, 5).map((issue) => String(issue.message || issue.type || "model issue")).join("; ") : "No active model alert",
+      fingerprint,
+      payload: {
+        evaluation,
+        delivery: { discord, telegram }
+      }
+    });
     return {
       ...evaluation,
       alert_delivery: {
-        status: "skipped",
-        reason: "cooldown_active",
-        cooldown_seconds: cooldown
+        status: sent ? "sent" : "error",
+        discord,
+        telegram
       }
     };
+  } finally {
+    if (!manual) {
+      await releaseD1Lock(env, String(lock.name), String(lock.owner));
+    }
   }
-  const text = formatModelAlertText(evaluation, manual);
-  const [discord, telegram] = await Promise.all([
-    sendDiscordOpsAlert(env, manual ? "Quant BTC model alert TEST" : `Quant BTC model alert ${String(evaluation.status).toUpperCase()}`, text, evaluation),
-    sendTelegramOpsAlert(env, text)
-  ]);
-  const sent = [discord, telegram].some((item) => objectValue(item).status === "sent");
-  await persistOpsEventToD1(env, {
-    kind: manual ? "manual_model_alert" : "model_alert",
-    status: sent ? "sent" : "error",
-    severity: evaluation.status === "critical" ? "critical" : evaluation.status === "warning" ? "warning" : "info",
-    message: issues.length ? issues.slice(0, 5).map((issue) => String(issue.message || issue.type || "model issue")).join("; ") : "No active model alert",
-    fingerprint,
-    payload: {
-      evaluation,
-      delivery: { discord, telegram }
-    }
-  });
-  return {
-    ...evaluation,
-    alert_delivery: {
-      status: sent ? "sent" : "error",
-      discord,
-      telegram
-    }
-  };
 }
 
 async function latestD1RunPayload(env: Env, asset: string, requestedHorizons: number[], offset: number): Promise<Record<string, unknown> | null> {
@@ -2057,14 +2942,26 @@ async function sendTelegramOpsAlert(env: Env, text: string): Promise<Record<stri
   if (!config) {
     return { status: "absent" };
   }
+  if (await isTelegramMuted(env, config.chatId)) {
+    return { status: "skipped", reason: "telegram_muted" };
+  }
+  return await sendTelegramMessage(env, config.chatId, text);
+}
+
+async function sendTelegramMessage(env: Env, chatId: string, text: string, replyMarkup?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const config = getTelegramConfig(env);
+  if (!config) {
+    return { status: "absent" };
+  }
   try {
     const response = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        chat_id: config.chatId,
+        chat_id: chatId,
         text,
-        disable_web_page_preview: true
+        disable_web_page_preview: true,
+        reply_markup: replyMarkup
       })
     });
     const textBody = await response.text();
@@ -2087,6 +2984,467 @@ async function sendTelegramOpsAlert(env: Env, text: string): Promise<Record<stri
       error: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+async function setupTelegramWebhook(env: Env, request: Request): Promise<Record<string, unknown>> {
+  const config = getTelegramConfig(env);
+  if (!config) {
+    return { status: "absent", message: "Telegram secrets are not configured." };
+  }
+  const url = new URL(request.url);
+  const chatId = url.searchParams.get("chat_id");
+  if (chatId !== config.chatId) {
+    return {
+      status: "forbidden",
+      message: "Pass ?chat_id=<TELEGRAM_CHAT_ID> to confirm webhook setup for the configured owner chat."
+    };
+  }
+  const webhookUrl = `${url.origin}/telegram/webhook`;
+  const response = await fetch(`https://api.telegram.org/bot${config.token}/setWebhook`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      url: webhookUrl,
+      allowed_updates: ["message", "callback_query"]
+    })
+  });
+  const body = objectValue(await response.json().catch(() => ({})));
+  return {
+    status: response.ok && body.ok !== false ? "ok" : "error",
+    webhook_url: webhookUrl,
+    telegram_ok: body.ok,
+    description: body.description,
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
+}
+
+async function handleTelegramWebhook(env: Env, update: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const message = objectValue(update.message || objectValue(update.callback_query).message);
+  const callback = objectValue(update.callback_query);
+  const chat = objectValue(message.chat);
+  const chatId = stringOrNull(chat.id) || (chat.id !== undefined ? String(chat.id) : null);
+  if (!chatId) {
+    return { status: "ignored", reason: "chat_id_absent" };
+  }
+  const config = getTelegramConfig(env);
+  if (config && chatId !== config.chatId) {
+    return { status: "ignored", reason: "unauthorized_chat", chat_id: chatId };
+  }
+  const text = stringOrNull(callback.data) || stringOrNull(message.text) || "/help";
+  await upsertTelegramSession(env, chatId, chat, text);
+  const response = await handleTelegramCommand(env, chatId, text);
+  return { status: "ok", chat_id: chatId, command: text, response };
+}
+
+async function upsertTelegramSession(env: Env, chatId: string, chat: Record<string, unknown>, command: string): Promise<void> {
+  if (!env.DB) {
+    return;
+  }
+  const now = new Date().toISOString();
+  await env.DB.prepare(`
+    INSERT INTO telegram_sessions (chat_id, username, first_name, last_command, created_at_utc, updated_at_utc)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(chat_id) DO UPDATE SET
+      username = excluded.username,
+      first_name = excluded.first_name,
+      last_command = excluded.last_command,
+      updated_at_utc = excluded.updated_at_utc
+  `).bind(
+    chatId,
+    stringOrNull(chat.username),
+    stringOrNull(chat.first_name),
+    command,
+    now,
+    now
+  ).run();
+}
+
+async function handleTelegramCommand(env: Env, chatId: string, raw: string): Promise<Record<string, unknown>> {
+  const [commandRaw, ...args] = raw.trim().split(/\s+/);
+  const command = commandRaw.toLowerCase();
+  if (command === "/start" || command === "/help") {
+    return await sendTelegramMessage(env, chatId, telegramHelpText(), telegramMainKeyboard());
+  }
+  if (command === "/status") {
+    const status = await buildOpsStatus(env);
+    return await sendTelegramMessage(env, chatId, formatOpsStatusForTelegram(status), telegramMainKeyboard());
+  }
+  if (command === "/quick") {
+    const quick = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0);
+    return await sendTelegramMessage(env, chatId, formatRunShortForTelegram("quick", quick), telegramMainKeyboard());
+  }
+  if (command === "/quick_fresh") {
+    const refresh = await refreshPresetForModelAlerts(env, "/quick", "/telegram/quick_fresh", 1, true);
+    const quick = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0);
+    return await sendTelegramMessage(env, chatId, `${refreshSummaryLine("Rafraichissement quick", refresh)}\n\n${formatRunShortForTelegram("quick", quick)}`, telegramMainKeyboard());
+  }
+  if (command === "/deep") {
+    const deep = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 0);
+    return await sendTelegramMessage(env, chatId, formatRunShortForTelegram("deep", deep), telegramMainKeyboard());
+  }
+  if (command === "/deep_run") {
+    const job = await createDeepJob(env, { asset: "BTC", chat_id: chatId });
+    return await sendTelegramMessage(env, chatId, `Deep job cree\nJob: ${job.job_id || "absent"}\nStatut: ${job.status}\nJe t'envoie Telegram quand c'est fini.`, telegramMainKeyboard());
+  }
+  if (command === "/alerts") {
+    const evaluation = await evaluateLatestModelAlerts(env, { status: "not_requested", reason: "telegram_alerts_command" });
+    return await sendTelegramMessage(env, chatId, formatModelAlertText(evaluation, true), telegramMainKeyboard());
+  }
+  if (command === "/last") {
+    const [quick, deep, realtime] = await Promise.all([
+      latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0),
+      latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 0),
+      realtimeStatus(env)
+    ]);
+    return await sendTelegramMessage(env, chatId, [
+      "Quant BTC - Dernier etat",
+      formatRealtimeForTelegram(realtime),
+      "",
+      formatRunShortForTelegram("quick", quick),
+      "",
+      formatRunShortForTelegram("deep", deep)
+    ].join("\n"), telegramMainKeyboard());
+  }
+  if (command === "/mute") {
+    const minutes = clampInt(parseNumber(args[0], 60), 1, 24 * 60);
+    await muteTelegramSession(env, chatId, minutes);
+    return await sendTelegramMessage(env, chatId, `Alertes mutees pendant ${minutes} min.`, telegramMainKeyboard());
+  }
+  if (command === "/rule") {
+    const rule = await createRuleFromTelegram(env, chatId, args);
+    return await sendTelegramMessage(env, chatId, String(rule.message || `Regle: ${rule.status}`), telegramMainKeyboard());
+  }
+  return await sendTelegramMessage(env, chatId, telegramHelpText(), telegramMainKeyboard());
+}
+
+function telegramMainKeyboard(): Record<string, unknown> {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Status", callback_data: "/status" },
+        { text: "Quick", callback_data: "/quick" },
+        { text: "Deep", callback_data: "/deep" }
+      ],
+      [
+        { text: "Alertes", callback_data: "/alerts" },
+        { text: "Dernier", callback_data: "/last" },
+        { text: "Deep run", callback_data: "/deep_run" }
+      ]
+    ]
+  };
+}
+
+function telegramHelpText(): string {
+  return [
+    "Quant BTC - Commandes",
+    "/status : statut ops",
+    "/quick : dernier run quick",
+    "/quick_fresh : force un quick frais",
+    "/deep : dernier run deep",
+    "/deep_run : met un deep en file d'attente",
+    "/alerts : alertes modele",
+    "/last : spot + derniers runs",
+    "/mute 60 : silence 60 minutes",
+    "/rule var95 365 > 0.40 : alerte perso",
+    "",
+    "Toutes les sorties sont probabilistes, jamais des certitudes."
+  ].join("\n");
+}
+
+async function muteTelegramSession(env: Env, chatId: string, minutes: number): Promise<void> {
+  if (!env.DB) {
+    return;
+  }
+  const now = new Date();
+  const mutedUntil = new Date(now.getTime() + minutes * 60 * 1000);
+  await env.DB.prepare(`
+    INSERT INTO telegram_sessions (chat_id, muted_until_utc, created_at_utc, updated_at_utc)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(chat_id) DO UPDATE SET muted_until_utc = excluded.muted_until_utc, updated_at_utc = excluded.updated_at_utc
+  `).bind(chatId, mutedUntil.toISOString(), now.toISOString(), now.toISOString()).run();
+}
+
+async function isTelegramMuted(env: Env, chatId: string): Promise<boolean> {
+  if (!env.DB) {
+    return false;
+  }
+  try {
+    const row = objectValue(await env.DB.prepare("SELECT muted_until_utc FROM telegram_sessions WHERE chat_id = ?").bind(chatId).first());
+    const mutedUntil = stringOrNull(row.muted_until_utc);
+    return Boolean(mutedUntil && new Date(mutedUntil).getTime() > Date.now());
+  } catch {
+    return false;
+  }
+}
+
+async function createRuleFromTelegram(env: Env, chatId: string, args: string[]): Promise<Record<string, unknown>> {
+  if (args.length < 4) {
+    return {
+      status: "error",
+      message: "Format: /rule var95 365 > 0.40 ou /rule btc_price > 85000"
+    };
+  }
+  let metric = args[0];
+  let horizon: number | null = null;
+  let operator = args[1];
+  let thresholdRaw = args[2];
+  if (metric !== "btc_price") {
+    horizon = clampInt(parseNumber(args[1], 365), 1, 3650);
+    operator = args[2];
+    thresholdRaw = args[3];
+  }
+  const rule = await createCustomAlertRule(env, {
+    chat_id: chatId,
+    asset: "BTC",
+    metric,
+    horizon,
+    operator,
+    threshold: Number(thresholdRaw)
+  });
+  return {
+    ...rule,
+    message: rule.status === "created"
+      ? `Regle creee: ${rule.rule_id}\n${metric}${horizon ? ` ${horizon}j` : ""} ${operator} ${thresholdRaw}`
+      : rule.message
+  };
+}
+
+function formatOpsStatusForTelegram(status: Record<string, unknown>): string {
+  const checks = objectValue(status.checks);
+  const quick = objectValue(checks.quick_cache);
+  const deep = objectValue(checks.deep_cache);
+  return [
+    "Quant BTC - Statut",
+    `Niveau: ${formatStatusLabel(status.status)}`,
+    cacheSummaryLine("Cache quick", quick),
+    cacheSummaryLine("Cache deep", deep),
+    `UTC: ${status.checked_at_utc}`,
+    `Paris: ${status.checked_at_paris}`
+  ].join("\n");
+}
+
+function formatRunShortForTelegram(label: string, payload: Record<string, unknown> | null): string {
+  if (!payload) {
+    return `Run ${label}: absent`;
+  }
+  const frames = Array.isArray(payload.frames) ? payload.frames.map((item) => objectValue(item)) : [];
+  const last = frames[frames.length - 1] || {};
+  const distribution = objectValue(last.distribution);
+  const risk = objectValue(last.risk_metrics);
+  const confidence = objectValue(last.confidence);
+  return [
+    `Run ${label}: ${payload.archive_id || "absent"}`,
+    `Spot: ${payload.reference_spot || "absent"} (${payload.reference_spot_timestamp_paris || payload.reference_spot_timestamp_utc || "timestamp absent"})`,
+    `Frames: ${(payload.horizons as unknown[])?.join?.("/") || "absentes"}`,
+    frames.length ? `Derniere frame ${last.horizon}j: P(up) ${formatMetricValue("prob_up", numberOrNull(distribution.prob_up))}, VaR95 ${formatMetricValue("var95", numberOrNull(risk.var_95))}, confiance ${confidence.score || "absente"}/100` : "Frame: absente",
+    `Cache age: ${payload.d1_age_seconds ?? "inconnu"}s`
+  ].join("\n");
+}
+
+function formatRealtimeForTelegram(realtime: Record<string, unknown>): string {
+  return [
+    `Spot temps reel: ${realtime.price ? `$${Number(realtime.price).toFixed(2)}` : "absent"}`,
+    `Statut: ${realtime.status || "absent"} (${realtime.freshness_label || "n/a"})`,
+    `Source: ${realtime.source || "absente"}`
+  ].join("\n");
+}
+
+async function visibleBacktestReport(env: Env): Promise<Record<string, unknown>> {
+  const [deep, quick] = await Promise.all([
+    latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 0),
+    latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0)
+  ]);
+  const source = deep || quick;
+  const backtests = Array.isArray(source?.backtest_diagnostics) ? source.backtest_diagnostics.map((item) => objectValue(item)) : [];
+  const rows = backtests.map((row) => ({
+    horizon_days: row.horizon_days,
+    hit_rate: row.hit_rate,
+    brier_score: row.brier_score,
+    calibration_error: row.calibration_error,
+    interval_coverage: row.interval_coverage,
+    var95_breach_rate: row.var95_breach_rate,
+    expected_var95_breach_rate: row.expected_var95_breach_rate,
+    random_walk_hit_rate: row.random_walk_hit_rate,
+    brier_skill_vs_random_walk: row.brier_skill_vs_random_walk,
+    observations: row.observations,
+    interpretation: interpretBacktestRow(row)
+  }));
+  return {
+    status: source ? "ok" : "absent",
+    source_archive_id: source?.archive_id || null,
+    source_report_date_utc: source?.report_date_utc || null,
+    source_report_date_paris: source?.report_date_paris || null,
+    data_status: source ? "real_backtest_diagnostics_from_archived_run" : "absent",
+    rows,
+    warning: "Backtests are diagnostics, not a guarantee of future calibration. Long-horizon VaR breaches must reduce confidence.",
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
+}
+
+function interpretBacktestRow(row: Record<string, unknown>): string {
+  const breach = numberOrNull(row.var95_breach_rate);
+  const expected = numberOrNull(row.expected_var95_breach_rate) || 0.05;
+  const skill = numberOrNull(row.brier_skill_vs_random_walk);
+  if (breach !== null && breach > expected * 2) {
+    return "Risque probablement sous-calibre historiquement.";
+  }
+  if (skill !== null && skill < 0) {
+    return "Skill inferieur au benchmark random walk sur ce diagnostic.";
+  }
+  return "Diagnostic utilisable avec prudence.";
+}
+
+async function dashboardHtml(env: Env): Promise<string> {
+  const [ops, realtime, alerts, backtests, jobs] = await Promise.all([
+    buildOpsStatus(env),
+    realtimeStatus(env),
+    evaluateLatestModelAlerts(env),
+    visibleBacktestReport(env),
+    listDeepJobs(env, 5)
+  ]);
+  const latestRuns = objectValue(alerts.latest_runs);
+  const quick = objectValue(latestRuns.quick);
+  const deep = objectValue(latestRuns.deep);
+  return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quant BTC Ops</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; }
+    body { margin:0; background:#f6f7f9; color:#111827; }
+    header { background:#0f172a; color:white; padding:24px; }
+    main { max-width:1180px; margin:0 auto; padding:22px; }
+    h1 { margin:0; font-size:28px; }
+    h2 { font-size:18px; margin:0 0 12px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px; }
+    .card { background:white; border:1px solid #e5e7eb; border-radius:8px; padding:16px; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+    .value { font-size:24px; font-weight:700; margin:6px 0; }
+    .muted { color:#667085; font-size:13px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; }
+    th { color:#475467; font-weight:600; }
+    a { color:#155eef; text-decoration:none; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef4ff; color:#1849a9; font-size:12px; }
+    .warn { background:#fff7ed; color:#9a3412; }
+    .crit { background:#fef2f2; color:#991b1b; }
+    .ok { background:#ecfdf3; color:#027a48; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Quant BTC Model - Dashboard operationnel</h1>
+    <div class="muted">UTC ${new Date().toISOString()} / Paris ${parisIso(new Date())}</div>
+  </header>
+  <main>
+    <section class="grid">
+      ${dashboardCard("Ops", formatStatusLabel(ops.status), `Worker ${WORKER_VERSION}`, statusClass(ops.status))}
+      ${dashboardCard("Spot Bitget", realtime.price ? `$${Number(realtime.price).toFixed(2)}` : "Absent", `${realtime.status || "absent"} - age ${realtime.age_seconds ?? "?"}s`, statusClass(realtime.status))}
+      ${dashboardCard("Alertes modele", `${alerts.issue_count || 0}`, `niveau ${formatStatusLabel(alerts.status)}`, statusClass(alerts.status))}
+      ${dashboardCard("Deep jobs", String((objectValue(jobs).jobs as unknown[])?.length || 0), "file locale D1", "pill")}
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Derniers runs</h2>
+      <table><tr><th>Mode</th><th>Archive</th><th>Spot</th><th>Age D1</th><th>Frames</th></tr>
+        ${dashboardRunRow("Quick", quick)}
+        ${dashboardRunRow("Deep", deep)}
+      </table>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Backtests visibles</h2>
+      ${dashboardBacktestTable(objectValue(backtests).rows)}
+    </section>
+    <section class="grid" style="margin-top:14px">
+      <div class="card"><h2>Actions</h2><p><a href="/realtime/collect">Collecter snapshot Bitget</a></p><p><a href="/model-alerts/test">Tester alerte modele Telegram</a></p><p><a href="/deep-jobs/process">Traiter un job deep</a></p></div>
+      <div class="card"><h2>Legal</h2><p><a href="/legal/privacy">Privacy</a></p><p><a href="/legal/terms">Terms</a></p><p><a href="/legal/disclaimer">Disclaimer</a></p><p><a href="/legal/refund">Refund</a></p></div>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function dashboardCard(title: string, value: string, detail: string, cls: string): string {
+  return `<div class="card"><h2>${escapeHtml(title)}</h2><div class="value">${escapeHtml(value)}</div><span class="${cls}">${escapeHtml(detail)}</span></div>`;
+}
+
+function dashboardRunRow(label: string, run: Record<string, unknown>): string {
+  return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(String(run.archive_id || "absente"))}</td><td>${escapeHtml(String(run.reference_spot || "absent"))}</td><td>${escapeHtml(String(run.d1_age_seconds ?? "inconnu"))}s</td><td>${escapeHtml(Array.isArray(run.horizons) ? run.horizons.join("/") : "absentes")}</td></tr>`;
+}
+
+function dashboardBacktestTable(rowsValue: unknown): string {
+  const rows = Array.isArray(rowsValue) ? rowsValue.map((item) => objectValue(item)) : [];
+  if (!rows.length) {
+    return `<p class="muted">Backtests absents du dernier run archive.</p>`;
+  }
+  return `<table><tr><th>Horizon</th><th>Hit rate</th><th>Brier</th><th>VaR breach</th><th>Lecture</th></tr>${rows.map((row) => `<tr><td>${row.horizon_days}j</td><td>${formatMaybePercent(row.hit_rate)}</td><td>${escapeHtml(String(row.brier_score ?? "absent"))}</td><td>${formatMaybePercent(row.var95_breach_rate)}</td><td>${escapeHtml(String(row.interpretation || ""))}</td></tr>`).join("")}</table>`;
+}
+
+function statusClass(value: unknown): string {
+  const status = String(value || "").toLowerCase();
+  if (status === "ok") return "pill ok";
+  if (status === "critical" || status === "degraded" || status === "blocked" || status === "error") return "pill crit";
+  return "pill warn";
+}
+
+function formatMaybePercent(value: unknown): string {
+  const number = numberOrNull(value);
+  return number === null ? "absent" : formatPercent(number);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char] || char));
+}
+
+function legalIndexHtml(): string {
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Quant BTC Legal</title></head><body><h1>Quant BTC - Documents legaux</h1><ul><li><a href="/legal/privacy">Privacy Policy</a></li><li><a href="/legal/terms">Terms</a></li><li><a href="/legal/disclaimer">Disclaimer financier</a></li><li><a href="/legal/refund">Refund Policy</a></li></ul></body></html>`;
+}
+
+function legalPageHtml(path: string): string {
+  const pages: Record<string, { title: string; body: string[] }> = {
+    "/legal/privacy": {
+      title: "Privacy Policy",
+      body: [
+        "Quant BTC Model stocke uniquement les donnees operationnelles necessaires: archives de runs, metadonnees d'usage, preferences d'alertes et identifiants Telegram si fournis.",
+        "Aucune cle secrete utilisateur n'est exposee dans les reponses publiques.",
+        "Les donnees de marche proviennent de sources externes telles que Bitget et peuvent etre indisponibles ou retardees."
+      ]
+    },
+    "/legal/terms": {
+      title: "Terms of Service",
+      body: [
+        "Le service fournit des analyses probabilistes de scenarios BTC.",
+        "L'utilisateur accepte que les sorties puissent etre partielles, inferred, absentes ou basees sur cache recent selon l'etat des sources.",
+        "Le service peut limiter les runs deep et utiliser une file d'attente pour proteger l'infrastructure gratuite."
+      ]
+    },
+    "/legal/disclaimer": {
+      title: "Disclaimer financier",
+      body: [
+        "Quant BTC Model ne fournit aucun conseil financier, fiscal, juridique ou d'investissement.",
+        "Les probabilites, VaR, CVaR, regimes et stress tests sont des sorties de modele, pas des certitudes ni des objectifs garantis.",
+        "Toute decision financiere reste sous la responsabilite de l'utilisateur."
+      ]
+    },
+    "/legal/refund": {
+      title: "Refund Policy",
+      body: [
+        "Si le produit est vendu via une plateforme tierce, la politique de remboursement applicable est celle de cette plateforme sauf mention contraire.",
+        "Un remboursement peut etre refuse si l'utilisateur a consomme des runs, exports ou alertes au-dela d'une periode d'essai indiquee.",
+        "Les interruptions de sources externes ne garantissent pas un remboursement automatique."
+      ]
+    }
+  };
+  const page = pages[path] || pages["/legal/disclaimer"];
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(page.title)}</title><style>body{font-family:system-ui,Segoe UI,sans-serif;max-width:820px;margin:40px auto;padding:0 20px;line-height:1.55;color:#111827}a{color:#155eef}</style></head><body><p><a href="/legal">Legal</a></p><h1>${escapeHtml(page.title)}</h1>${page.body.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}<p><strong>Version:</strong> ${WORKER_VERSION}</p></body></html>`;
 }
 
 async function sendOpsTestAlert(env: Env): Promise<Record<string, unknown>> {
@@ -3329,6 +4687,18 @@ function parseNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parsePriceValue(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const cleaned = value.replace(/[$,\s]/g, "");
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return parseNullableNumber(value);
+}
+
 function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
@@ -3732,5 +5102,15 @@ function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
     headers: JSON_HEADERS
+  });
+}
+
+function html(markup: string, status = 200): Response {
+  return new Response(markup, {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "access-control-allow-origin": "*"
+    }
   });
 }
