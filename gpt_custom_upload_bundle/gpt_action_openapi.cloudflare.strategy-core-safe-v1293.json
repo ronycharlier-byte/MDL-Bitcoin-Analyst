@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quant BTC Strategy Core",
-    "version": "1.29.4"
+    "version": "1.30.0"
   },
   "servers": [
     {

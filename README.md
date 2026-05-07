@@ -118,6 +118,20 @@ The public API includes a short SQLite-backed cache, a SQLite-backed rate limit 
 - `api_version`
 - `model_version`
 - `schema_version`
+
+## Operational layer v1.30.0
+
+The Cloudflare Worker also includes an operational strategy layer:
+
+- `GET /strategies/deep-summary`: compact GPT strategy answer.
+- `GET /strategies/performance`: mark-to-market tracking for stored strategy signals.
+- `GET /trading/paper-report`: consolidated paper trading and virtual portfolio report.
+- `GET /risk/live-readiness`: live-trading readiness gate, blocked by default.
+- `GET /market/realtime-capabilities`: explains polling vs permanent WebSocket limits.
+- `GET /assets/supported`: BTC production status and non-BTC roadmap.
+- `GET /options/summary`: options context from the latest archived run.
+
+See `reports/operational_upgrade_v1_30.md` for the 14-priority operational status.
 - `git_commit`
 - UTC and Europe/Paris timestamp fields for report, audit, archive, cache, and spot provenance
 

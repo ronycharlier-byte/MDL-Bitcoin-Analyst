@@ -46,10 +46,16 @@ Il ne produit jamais une certitude. Il produit :
 - `GET /strategies/signal?preset=deep&horizon=30`
 - `GET /strategies/ensemble?preset=deep&horizon=30`
 - `GET /strategies/signals?limit=10`
+- `GET /strategies/performance`
 - `GET /strategies/paper-order?preset=deep&horizon=30`
 - `GET /strategies/propose-trade?preset=deep&horizon=30&mode=paper`
 - `GET /trading/paper-pnl`
 - `GET /trading/paper-portfolio`
+- `GET /trading/paper-report`
+- `GET /risk/live-readiness`
+- `GET /market/realtime-capabilities`
+- `GET /assets/supported`
+- `GET /options/summary`
 
 ## Telegram
 
@@ -83,3 +89,17 @@ Un signal `sell_or_reduce_candidate` ne prouve pas qu'une position existe.
 Les queues rares Monte Carlo restent approximatives.
 Les backtests long terme doivent peser negativement dans toute conclusion.
 Tout resultat doit citer `archive_id`, `run_id`, date UTC/Paris, spot et statuts de donnees.
+
+## Upgrade operationnel v1.30.0
+
+Ajouts :
+
+- suivi mark-to-market des signaux stockes ;
+- checkpoints strategie 1j/3j/7j/30j dans D1 ;
+- rapport paper trading consolide ;
+- dashboard enrichi avec strategie, paper portfolio et live readiness ;
+- endpoint des capacites temps reel pour distinguer polling et WebSocket permanent ;
+- support multi-assets documente, BTC seul en production ;
+- readiness live qui bloque tant que les secrets Bitget et l'approbation explicite sont absents.
+
+Regle produit : vendre le moteur comme infrastructure probabiliste d'analyse, de risque, de paper trading et d'alerting, pas comme bot de trading autonome.

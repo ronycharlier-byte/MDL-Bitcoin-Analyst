@@ -96,8 +96,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.29.4";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.29.4";
+const WORKER_VERSION = "1.30.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.30.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -285,7 +285,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/trading/paper-pnl", "/trading/paper-portfolio", "/trading/cleanup-paper-tests", "/strategies/status", "/strategies/deep-summary", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/market/capabilities", "/market/realtime-capabilities", "/assets/supported", "/options/summary", "/risk/live-readiness", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/trading/paper-pnl", "/trading/paper-portfolio", "/trading/paper-report", "/trading/cleanup-paper-tests", "/strategies/status", "/strategies/deep-summary", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/performance", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -401,6 +401,22 @@ export default {
         return json(await collectRealtimeMarketSnapshot(env, "manual"));
       }
 
+      if ((url.pathname === "/market/capabilities" || url.pathname === "/market/realtime-capabilities") && request.method === "GET") {
+        return json(await realtimeCapabilities(env));
+      }
+
+      if (url.pathname === "/assets/supported" && request.method === "GET") {
+        return json(supportedAssets());
+      }
+
+      if (url.pathname === "/options/summary" && request.method === "GET") {
+        return json(await optionsSummary(env));
+      }
+
+      if (url.pathname === "/risk/live-readiness" && request.method === "GET") {
+        return json(await liveReadiness(env));
+      }
+
       if (url.pathname === "/model-alerts/status" && request.method === "GET") {
         const input = await readInput(request, url);
         const refreshStatus = wantsFreshRun(input)
@@ -466,6 +482,10 @@ export default {
         return json(await paperPortfolioState(env));
       }
 
+      if (url.pathname === "/trading/paper-report" && request.method === "GET") {
+        return json(await paperTradingReport(env));
+      }
+
       if (url.pathname === "/trading/cleanup-paper-tests" && request.method === "GET") {
         return json(await cleanupPaperTestOrders(env, await readInput(request, url)));
       }
@@ -488,6 +508,10 @@ export default {
 
       if (url.pathname === "/strategies/deep-summary" && request.method === "GET") {
         return json(await buildStrategySummary(env));
+      }
+
+      if (url.pathname === "/strategies/performance" && request.method === "GET") {
+        return json(await strategyPerformanceReport(env));
       }
 
       if (url.pathname === "/strategies/deep-signal" && request.method === "GET") {
@@ -1164,6 +1188,8 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
     ]);
     const strategySignals = await optionalD1Count(env, "strategy_signals");
     const paperPnlSnapshots = await optionalD1Count(env, "paper_pnl_snapshots");
+    const strategyPerformanceSnapshots = await optionalD1Count(env, "strategy_performance_snapshots");
+    const virtualPortfolioLedger = await optionalD1Count(env, "virtual_portfolio_ledger");
     return {
       status: "ok",
       target: "cloudflare_d1",
@@ -1182,9 +1208,11 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
         trade_orders: countFromD1(tradeOrders),
         trade_events: countFromD1(tradeEvents),
         strategy_signals: strategySignals,
-        paper_pnl_snapshots: paperPnlSnapshots
+        paper_pnl_snapshots: paperPnlSnapshots,
+        strategy_performance_snapshots: strategyPerformanceSnapshots,
+        virtual_portfolio_ledger: virtualPortfolioLedger
       },
-      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules, queued deep jobs, strategy signals, paper PnL and trading journals",
+      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules, queued deep jobs, strategy signals, paper PnL, strategy performance checkpoints and trading journals",
       checked_at_utc: new Date().toISOString(),
       checked_at_paris: parisIso(new Date())
     };
@@ -1575,6 +1603,143 @@ async function realtimeStatus(env: Env): Promise<Record<string, unknown>> {
       message: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+async function realtimeCapabilities(env: Env): Promise<Record<string, unknown>> {
+  const realtime = await realtimeStatus(env);
+  return {
+    status: "ok",
+    mode: "near_realtime_polling",
+    worker_version: WORKER_VERSION,
+    schema_version: SCHEMA_VERSION,
+    current_snapshot: realtime,
+    implemented_now: [
+      "Bitget spot ticker polling snapshots",
+      "Bitget top-of-book/orderbook snapshot context",
+      "Bitget funding/open-interest snapshots when reachable",
+      "D1 freshness gates and anti-double-run locks",
+      "Telegram ops/model/custom alert delivery"
+    ],
+    external_collector_needed_for_true_realtime: [
+      "Permanent Bitget WebSocket spot stream",
+      "Permanent Bitget order book depth stream",
+      "Permanent Bitget liquidation stream",
+      "Continuous funding/open-interest archiving"
+    ],
+    why_not_permanent_inside_worker: "Cloudflare Workers free tier is request/schedule driven and is not a reliable always-on WebSocket daemon.",
+    recommended_architecture: {
+      collector: "Run tools/bitget_ws_collector on a free/always-on host or local machine.",
+      storage: "Write compact snapshots into Cloudflare D1/R2 or the Worker ingest endpoint.",
+      gpt_usage: "GPT reads the latest audited snapshot and must label stale/absent fields explicitly."
+    },
+    data_status: {
+      spot_polling: numberOrNull(realtime.price) !== null ? "real" : "absent",
+      permanent_websocket: "absent",
+      liquidations_stream: realtime.liquidations_status || "absent",
+      non_bitget_fallback: "absent"
+    },
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
+}
+
+function supportedAssets(): Record<string, unknown> {
+  return {
+    status: "ok",
+    production_assets: [
+      {
+        asset: "BTC",
+        symbol: "BTCUSDT",
+        exchange_policy: "Bitget-only for spot reference",
+        model_status: "production",
+        gpt_action_status: "enabled"
+      }
+    ],
+    scaffolded_assets: [
+      { asset: "ETH", status: "roadmap", reason: "Needs validated market/fundamental mappings and backtests before GPT exposure." },
+      { asset: "SOL", status: "roadmap", reason: "Needs validated market/fundamental mappings and backtests before GPT exposure." },
+      { asset: "DXY", status: "context_only", reason: "Macro input, not a traded model asset." },
+      { asset: "NASDAQ", status: "context_only", reason: "Macro/risk input, not a traded model asset." },
+      { asset: "GOLD", status: "roadmap", reason: "Requires separate asset model and data governance." }
+    ],
+    rule: "Do not analyze non-BTC assets as if they were production-supported until their data dictionary, backtests and source policy are complete.",
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
+}
+
+async function optionsSummary(env: Env): Promise<Record<string, unknown>> {
+  const payload = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 0)
+    || await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0);
+  const options = objectValue(objectValue(payload?.context).options);
+  const timestampUtc = stringOrNull(options.timestamp_utc) || stringOrNull(options.observed_at_utc);
+  const hasOptions = Object.keys(options).length > 0;
+  return {
+    status: hasOptions ? "ok" : "absent",
+    source_archive_id: payload?.archive_id || null,
+    source_report_date_utc: payload?.report_date_utc || null,
+    source_report_date_paris: payload?.report_date_paris || null,
+    options_source: options.source || "deribit_public_api_context_when_present",
+    implied_volatility_mean: numberOrNull(options.implied_volatility_mean),
+    implied_volatility_median: numberOrNull(options.implied_volatility_median),
+    put_call_volume_ratio: numberOrNull(options.put_call_volume_ratio),
+    put_call_open_interest_ratio: numberOrNull(options.put_call_open_interest_ratio),
+    max_pain: numberOrNull(options.max_pain),
+    timestamp_utc: timestampUtc,
+    timestamp_paris: timestampUtc ? parisIso(new Date(timestampUtc)) : null,
+    data_status: {
+      options_context: hasOptions ? "real" : "absent",
+      max_pain: numberOrNull(options.max_pain) !== null ? "real" : "absent",
+      trading_signal: "not_generated"
+    },
+    limitation: "Options are context features only and must not be presented as a standalone trading signal.",
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
+}
+
+async function liveReadiness(env: Env): Promise<Record<string, unknown>> {
+  const config = getTradingConfig(env);
+  const realtime = await realtimeStatus(env);
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  const mode = String(config.mode);
+  const keysConfigured = config.bitget_trade_secrets === "configured";
+  const spotAge = numberOrNull(realtime.age_seconds);
+  const maxSpotAge = Number(config.max_spot_age_seconds);
+
+  if (mode !== "live") blockers.push("TRADING_MODE is not live.");
+  if (!keysConfigured) blockers.push("Bitget trade API secrets are absent.");
+  if (config.live_confirmation !== "configured" && config.telegram_approval_enabled !== true) {
+    blockers.push("No explicit live confirmation or Telegram owner approval is configured.");
+  }
+  if (realtime.status !== "ok") warnings.push("Realtime Bitget snapshot is absent or stale.");
+  if (spotAge !== null && spotAge > maxSpotAge) warnings.push(`Spot age ${spotAge}s exceeds max ${maxSpotAge}s.`);
+
+  return {
+    status: blockers.length ? "blocked" : warnings.length ? "warning" : "ready",
+    live_trading_ready: blockers.length === 0,
+    mode,
+    blockers,
+    warnings,
+    requirements: {
+      trading_mode_live: mode === "live",
+      bitget_trade_secrets: keysConfigured ? "configured" : "absent",
+      approval_gate: config.live_confirmation === "configured" || config.telegram_approval_enabled === true ? "configured" : "absent",
+      max_notional_usdt: config.max_notional_usdt,
+      max_spot_age_seconds: config.max_spot_age_seconds,
+      withdraw_permission_policy: "must_be_disabled_on_exchange_api_key"
+    },
+    realtime_snapshot: realtime,
+    data_status: {
+      exchange_execution: blockers.length ? "absent" : "guarded_available",
+      price: numberOrNull(realtime.price) !== null ? "real" : "absent",
+      strategy_scores: "inferred"
+    },
+    warning: "Even when ready, GPT must not send live trades autonomously; explicit owner approval is required.",
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
 }
 
 async function fetchRealtimeSnapshot(env: Env): Promise<Record<string, unknown>> {
@@ -2424,6 +2589,203 @@ async function listStrategySignals(env: Env, limit: number): Promise<Record<stri
   }
 }
 
+async function strategyPerformanceReport(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 is required for strategy performance tracking." };
+  }
+  const realtime = await realtimeStatus(env);
+  const markPrice = numberOrNull(realtime.price);
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT signal_id, asset, horizon, ensemble_score, ensemble_action,
+             agreement, confidence, archive_id, run_id, payload_json, created_at_utc
+      FROM strategy_signals
+      ORDER BY created_at_utc DESC
+      LIMIT 200
+    `).all();
+    const signals = (results || []).map((row) => parseStoredStrategySignal(objectValue(row))).filter(Boolean);
+    const evaluated = signals.map((signal) => evaluateStrategySignalPerformance(signal, markPrice));
+    const due = markPrice !== null
+      ? await upsertDueStrategyPerformanceSnapshots(env, signals, markPrice)
+      : { status: "skipped", reason: "mark_price_absent" };
+    const latestSnapshots = await latestStrategyPerformanceSnapshots(env, 50);
+    const candidateRows = evaluated.filter((row) => row.action !== "hold");
+    const returns = evaluated.map((row) => strictNumberOrNull(row.return_pct)).filter((value): value is number => value !== null);
+    const positive = returns.filter((value) => value > 0).length;
+    const avgReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : null;
+    return {
+      status: "ok",
+      mark_price: markPrice,
+      mark_source: realtime.source || "absent",
+      mark_age_seconds: realtime.age_seconds ?? null,
+      signal_count: signals.length,
+      candidate_count: candidateRows.length,
+      hold_count: evaluated.filter((row) => row.action === "hold").length,
+      latest_action: evaluated[0]?.action || "absent",
+      latest_signal_id: evaluated[0]?.signal_id || null,
+      average_mark_to_market_return_pct: avgReturn,
+      positive_rate_on_evaluable_signals: returns.length ? positive / returns.length : null,
+      checkpoints: due,
+      latest_snapshots: latestSnapshots,
+      latest_evaluations: evaluated.slice(0, 20),
+      data_status: {
+        mark_price: markPrice !== null ? "real" : "absent",
+        strategy_scores: "inferred",
+        performance: returns.length ? "inferred_mark_to_market" : "absent"
+      },
+      warning: "Performance is a mark-to-market proxy against stored strategy signals, not audited exchange execution or financial advice.",
+      checked_at_utc: new Date().toISOString(),
+      checked_at_paris: parisIso(new Date())
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+      migration_hint: "Run D1 migration 0007_strategy_performance.sql if the strategy_performance_snapshots table is absent."
+    };
+  }
+}
+
+function parseStoredStrategySignal(row: Record<string, unknown>): Record<string, unknown> {
+  const payloadRaw = stringOrNull(row.payload_json);
+  let payload: Record<string, unknown> = {};
+  if (payloadRaw) {
+    try {
+      payload = objectValue(JSON.parse(payloadRaw));
+    } catch {
+      payload = {};
+    }
+  }
+  return {
+    ...payload,
+    signal_id: stringOrNull(payload.signal_id) || stringOrNull(row.signal_id),
+    asset: stringOrNull(payload.asset) || stringOrNull(row.asset) || "BTC",
+    horizon: numberOrNull(payload.horizon) || numberOrNull(row.horizon),
+    action: stringOrNull(payload.action) || stringOrNull(row.ensemble_action) || "hold",
+    ensemble_score: numberOrNull(payload.ensemble_score) ?? numberOrNull(row.ensemble_score),
+    agreement: numberOrNull(payload.agreement) ?? numberOrNull(row.agreement),
+    confidence: numberOrNull(payload.confidence) ?? numberOrNull(row.confidence),
+    archive_id: stringOrNull(payload.archive_id) || stringOrNull(row.archive_id),
+    run_id: stringOrNull(payload.run_id) || stringOrNull(row.run_id),
+    created_at_utc: stringOrNull(row.created_at_utc)
+  };
+}
+
+function evaluateStrategySignalPerformance(signal: Record<string, unknown>, markPrice: number | null): Record<string, unknown> {
+  const provenance = objectValue(signal.provenance);
+  const action = String(signal.action || "hold");
+  const side = normalizeTradingSide(signal.side);
+  const entryPrice = numberOrNull(provenance.realtime_spot)
+    || parsePriceValue(provenance.reference_spot)
+    || numberOrNull(signal.reference_spot);
+  let returnPct: number | null = null;
+  if (markPrice !== null && entryPrice !== null && entryPrice > 0 && action !== "hold") {
+    returnPct = side === "sell" || action === "sell_or_reduce_candidate"
+      ? (entryPrice / markPrice) - 1
+      : (markPrice / entryPrice) - 1;
+  }
+  return {
+    signal_id: signal.signal_id,
+    asset: signal.asset || "BTC",
+    horizon: signal.horizon,
+    action,
+    side: side || "hold",
+    score: signal.ensemble_score ?? null,
+    agreement: signal.agreement ?? null,
+    confidence: signal.confidence ?? null,
+    entry_price: entryPrice,
+    mark_price: markPrice,
+    return_pct: returnPct,
+    outcome_label: performanceOutcomeLabel(action, returnPct),
+    archive_id: provenance.archive_id || signal.archive_id || null,
+    run_id: provenance.run_id || signal.run_id || null,
+    created_at_utc: signal.created_at_utc || null,
+    age_seconds: signal.created_at_utc ? Math.max(0, Math.round((Date.now() - new Date(String(signal.created_at_utc)).getTime()) / 1000)) : null
+  };
+}
+
+function performanceOutcomeLabel(action: string, returnPct: number | null): string {
+  if (action === "hold") return "not_applicable_hold";
+  if (returnPct === null) return "unknown";
+  if (returnPct > 0.0025) return "positive";
+  if (returnPct < -0.0025) return "negative";
+  return "flat";
+}
+
+async function upsertDueStrategyPerformanceSnapshots(env: Env, signals: Record<string, unknown>[], markPrice: number): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent" };
+  }
+  let inserted = 0;
+  const now = new Date();
+  for (const signal of signals) {
+    const createdAt = stringOrNull(signal.created_at_utc);
+    const signalId = stringOrNull(signal.signal_id);
+    if (!createdAt || !signalId) {
+      continue;
+    }
+    const ageDays = (Date.now() - new Date(createdAt).getTime()) / 86400000;
+    for (const horizon of [1, 3, 7, 30]) {
+      if (ageDays < horizon) {
+        continue;
+      }
+      const performance = evaluateStrategySignalPerformance(signal, markPrice);
+      const result = await env.DB.prepare(`
+        INSERT OR IGNORE INTO strategy_performance_snapshots (
+          signal_id, horizon_days, asset, action, entry_price, mark_price,
+          return_pct, outcome_label, archive_id, run_id, signal_created_at_utc, evaluated_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        signalId,
+        horizon,
+        stringOrNull(signal.asset) || "BTC",
+        stringOrNull(performance.action) || "hold",
+        numberOrNull(performance.entry_price),
+        markPrice,
+        numberOrNull(performance.return_pct),
+        stringOrNull(performance.outcome_label) || "unknown",
+        stringOrNull(performance.archive_id),
+        stringOrNull(performance.run_id),
+        createdAt,
+        now.toISOString()
+      ).run();
+      inserted += Number(objectValue(result.meta).changes || 0);
+    }
+  }
+  return {
+    status: "ok",
+    inserted,
+    horizons_days: [1, 3, 7, 30],
+    evaluated_at_utc: now.toISOString(),
+    evaluated_at_paris: parisIso(now)
+  };
+}
+
+async function latestStrategyPerformanceSnapshots(env: Env, limit: number): Promise<Record<string, unknown>[]> {
+  if (!env.DB) {
+    return [];
+  }
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT signal_id, horizon_days, asset, action, entry_price, mark_price,
+             return_pct, outcome_label, archive_id, run_id, signal_created_at_utc, evaluated_at_utc
+      FROM strategy_performance_snapshots
+      ORDER BY evaluated_at_utc DESC
+      LIMIT ?
+    `).bind(limit).all();
+    return (results || []).map((row) => {
+      const item = objectValue(row);
+      return {
+        ...item,
+        evaluated_at_paris: stringOrNull(item.evaluated_at_utc) ? parisIso(new Date(String(item.evaluated_at_utc))) : null
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 function strategySignalToTradingSignal(strategy: Record<string, unknown>, env: Env): Record<string, unknown> {
   const provenance = objectValue(strategy.provenance);
   const selected = objectValue(strategy.selected_frame);
@@ -3011,6 +3373,50 @@ async function paperPortfolioState(env: Env): Promise<Record<string, unknown>> {
   };
 }
 
+async function paperTradingReport(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 is required for paper trading reports." };
+  }
+  const [pnl, portfolio, orders, snapshots] = await Promise.all([
+    paperTradingPnl(env),
+    paperPortfolioState(env),
+    listTradeOrders(env, 50),
+    latestPaperPnlSnapshots(env, 50)
+  ]);
+  const orderRows = Array.isArray(objectValue(orders).orders) ? (objectValue(orders).orders as unknown[]).map((item) => objectValue(item)) : [];
+  const filled = orderRows.filter((order) => String(order.status || "").includes("filled"));
+  const pnlRows = Array.isArray(objectValue(pnl).orders) ? (objectValue(pnl).orders as unknown[]).map((item) => objectValue(item)) : [];
+  const returns = pnlRows.map((row) => strictNumberOrNull(row.pnl_pct)).filter((value): value is number => value !== null);
+  const positive = returns.filter((value) => value > 0).length;
+  const avgReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : null;
+  return {
+    status: "ok",
+    mode: "paper",
+    open_orders_count: objectValue(portfolio).open_orders_count ?? 0,
+    filled_orders_count: filled.length,
+    net_position_btc: objectValue(portfolio).net_position_btc ?? null,
+    exposure_usdt: objectValue(portfolio).exposure_usdt ?? null,
+    unrealized_pnl_usdt: objectValue(portfolio).unrealized_pnl_usdt ?? null,
+    total_open_pnl_usdt: objectValue(pnl).total_open_pnl_usdt ?? null,
+    mark_price: objectValue(pnl).mark_price ?? objectValue(portfolio).mark_price ?? null,
+    mark_age_seconds: objectValue(pnl).mark_age_seconds ?? null,
+    mark_source: objectValue(pnl).mark_source || "absent",
+    win_rate_open_mark_to_market: returns.length ? positive / returns.length : null,
+    average_return_open_mark_to_market: avgReturn,
+    checkpoint_snapshots: snapshots,
+    latest_orders: orderRows.slice(0, 10),
+    portfolio,
+    data_status: {
+      paper_orders: "mock",
+      mark_price: objectValue(pnl).mark_price !== null && objectValue(pnl).mark_price !== undefined ? "real" : "absent",
+      pnl: returns.length ? "inferred" : "absent"
+    },
+    warning: "Paper trading is hypothetical infrastructure tracking; it is not exchange execution, audited PnL or financial advice.",
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
+}
+
 async function paperPortfolioCompact(env: Env, markPrice: number | null): Promise<Record<string, unknown>> {
   if (!env.DB) {
     return { status: "absent", open_orders_count: 0 };
@@ -3047,6 +3453,30 @@ async function paperPortfolioCompact(env: Env, markPrice: number | null): Promis
       pnl: "inferred"
     }
   };
+}
+
+async function latestPaperPnlSnapshots(env: Env, limit: number): Promise<Record<string, unknown>[]> {
+  if (!env.DB) {
+    return [];
+  }
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT order_id, horizon_days, asset, side, entry_price, mark_price, size_base,
+             size_usdt, pnl_usdt, pnl_pct, created_at_utc
+      FROM paper_pnl_snapshots
+      ORDER BY created_at_utc DESC
+      LIMIT ?
+    `).bind(limit).all();
+    return (results || []).map((row) => {
+      const item = objectValue(row);
+      return {
+        ...item,
+        created_at_paris: stringOrNull(item.created_at_utc) ? parisIso(new Date(String(item.created_at_utc))) : null
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 
 async function cleanupPaperTestOrders(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -3359,14 +3789,14 @@ async function createCustomAlertRule(env: Env, input: Record<string, unknown>): 
     return {
       status: "error",
       message: "metric, operator and numeric threshold are required.",
-      allowed_metrics: ["btc_price", "var95", "confidence", "transition", "prob_up"],
+      allowed_metrics: ["btc_price", "spot_age", "var95", "confidence", "transition", "prob_up"],
       allowed_operators: [">", ">=", "<", "<="]
     };
   }
   const now = new Date();
   const ruleId = `rule_${now.toISOString().replace(/[-:.]/g, "").slice(0, 15)}_${randomRunSuffix()}`;
   const chatId = stringOrNull(input.chat_id) || stringOrNull(env.TELEGRAM_CHAT_ID);
-  const horizon = metric === "btc_price" ? null : clampInt(parseNumber(input.horizon, 365), 1, 3650);
+  const horizon = metric === "btc_price" || metric === "spot_age" ? null : clampInt(parseNumber(input.horizon, 365), 1, 3650);
   const cooldown = clampInt(parseNumber(input.cooldown_seconds, 1800), 60, 24 * 60 * 60);
   await env.DB.prepare(`
     INSERT INTO user_alert_rules (
@@ -3500,6 +3930,9 @@ function evaluateOneCustomRule(
   if (metric === "btc_price") {
     value = numberOrNull(realtime.price);
     source = "realtime_bitget_polling_snapshot";
+  } else if (metric === "spot_age") {
+    value = numberOrNull(realtime.age_seconds);
+    source = "realtime_bitget_polling_snapshot";
   } else {
     const frame = findFrameForHorizon(deep, horizon) || findFrameForHorizon(quick, horizon);
     const risk = objectValue(frame?.risk_metrics);
@@ -3565,6 +3998,9 @@ function formatMetricValue(metric: string, value: number | null): string {
   if (["var95", "transition", "prob_up"].includes(metric)) {
     return formatPercent(value);
   }
+  if (metric === "spot_age") {
+    return `${value.toFixed(0)}s`;
+  }
   if (metric === "btc_price") {
     return `$${value.toFixed(2)}`;
   }
@@ -3577,6 +4013,9 @@ function normalizeAlertMetric(value: unknown): string | null {
     price: "btc_price",
     spot: "btc_price",
     btc: "btc_price",
+    age: "spot_age",
+    stale: "spot_age",
+    freshness: "spot_age",
     var: "var95",
     var_95: "var95",
     confidence_score: "confidence",
@@ -3586,7 +4025,7 @@ function normalizeAlertMetric(value: unknown): string | null {
     pup: "prob_up"
   };
   const normalized = aliases[metric] || metric;
-  return ["btc_price", "var95", "confidence", "transition", "prob_up"].includes(normalized) ? normalized : null;
+  return ["btc_price", "spot_age", "var95", "confidence", "transition", "prob_up"].includes(normalized) ? normalized : null;
 }
 
 function normalizeAlertOperator(value: unknown): string | null {
@@ -4924,13 +5363,16 @@ function interpretBacktestRow(row: Record<string, unknown>): string {
 }
 
 async function dashboardHtml(env: Env): Promise<string> {
-  const [ops, realtime, alerts, backtests, jobs] = await Promise.all([
+  const [ops, realtime, alerts, backtests, jobs, strategyPerformance, liveReady] = await Promise.all([
     buildOpsStatus(env),
     realtimeStatus(env),
     evaluateLatestModelAlerts(env),
     visibleBacktestReport(env),
-    listDeepJobs(env, 5)
+    listDeepJobs(env, 5),
+    strategyPerformanceReport(env),
+    liveReadiness(env)
   ]);
+  const paper = await paperPortfolioCompact(env, numberOrNull(objectValue(realtime).price));
   const latestRuns = objectValue(alerts.latest_runs);
   const quick = objectValue(latestRuns.quick);
   const deep = objectValue(latestRuns.deep);
@@ -4972,6 +5414,9 @@ async function dashboardHtml(env: Env): Promise<string> {
       ${dashboardCard("Spot Bitget", realtime.price ? `$${Number(realtime.price).toFixed(2)}` : "Absent", `${realtime.status || "absent"} - age ${realtime.age_seconds ?? "?"}s`, statusClass(realtime.status))}
       ${dashboardCard("Alertes modele", `${alerts.issue_count || 0}`, `niveau ${formatStatusLabel(alerts.status)}`, statusClass(alerts.status))}
       ${dashboardCard("Deep jobs", String((objectValue(jobs).jobs as unknown[])?.length || 0), "file locale D1", "pill")}
+      ${dashboardCard("Strategie", String(strategyPerformance.latest_action || "absent"), `score suivi: ${strategyPerformance.candidate_count ?? 0} candidats`, statusClass(strategyPerformance.status))}
+      ${dashboardCard("Paper portfolio", `${paper.net_position_btc ?? 0} BTC`, `PnL ${paper.unrealized_pnl_usdt ?? 0} USDT`, statusClass(paper.status))}
+      ${dashboardCard("Live trading", String(liveReady.status || "blocked"), "approval + Bitget gates", statusClass(liveReady.status))}
     </section>
     <section class="card" style="margin-top:14px">
       <h2>Derniers runs</h2>
@@ -4985,7 +5430,12 @@ async function dashboardHtml(env: Env): Promise<string> {
       ${dashboardBacktestTable(objectValue(backtests).rows)}
     </section>
     <section class="grid" style="margin-top:14px">
-      <div class="card"><h2>Actions</h2><p><a href="/realtime/collect">Collecter snapshot Bitget</a></p><p><a href="/model-alerts/test">Tester alerte modele Telegram</a></p><p><a href="/deep-jobs/process">Traiter un job deep</a></p></div>
+      <div class="card"><h2>Performance strategies</h2>${dashboardStrategyPerformance(strategyPerformance)}</div>
+      <div class="card"><h2>Portefeuille virtuel</h2>${dashboardPaperState(paper)}</div>
+      <div class="card"><h2>Live readiness</h2>${dashboardLiveReadiness(liveReady)}</div>
+    </section>
+    <section class="grid" style="margin-top:14px">
+      <div class="card"><h2>Actions</h2><p><a href="/realtime/collect">Collecter snapshot Bitget</a></p><p><a href="/strategies/performance">Verifier performance strategies</a></p><p><a href="/trading/paper-report">Rapport paper trading</a></p><p><a href="/risk/live-readiness">Verifier live readiness</a></p><p><a href="/model-alerts/test">Tester alerte modele Telegram</a></p><p><a href="/deep-jobs/process">Traiter un job deep</a></p></div>
       <div class="card"><h2>Legal</h2><p><a href="/legal/privacy">Privacy</a></p><p><a href="/legal/terms">Terms</a></p><p><a href="/legal/disclaimer">Disclaimer</a></p><p><a href="/legal/refund">Refund</a></p></div>
     </section>
   </main>
@@ -5007,6 +5457,26 @@ function dashboardBacktestTable(rowsValue: unknown): string {
     return `<p class="muted">Backtests absents du dernier run archive.</p>`;
   }
   return `<table><tr><th>Horizon</th><th>Hit rate</th><th>Brier</th><th>VaR breach</th><th>Lecture</th></tr>${rows.map((row) => `<tr><td>${row.horizon_days}j</td><td>${formatMaybePercent(row.hit_rate)}</td><td>${escapeHtml(String(row.brier_score ?? "absent"))}</td><td>${formatMaybePercent(row.var95_breach_rate)}</td><td>${escapeHtml(String(row.interpretation || ""))}</td></tr>`).join("")}</table>`;
+}
+
+function dashboardStrategyPerformance(payload: Record<string, unknown>): string {
+  const rows = Array.isArray(payload.latest_evaluations) ? payload.latest_evaluations.map((item) => objectValue(item)).slice(0, 5) : [];
+  if (!rows.length) {
+    return `<p class="muted">Aucun signal strategie evalue.</p>`;
+  }
+  return `<p class="muted">Candidats: ${escapeHtml(String(payload.candidate_count ?? 0))} - moyenne MTM: ${formatMaybePercent(payload.average_mark_to_market_return_pct)}</p><table><tr><th>Action</th><th>Score</th><th>Return</th></tr>${rows.map((row) => `<tr><td>${escapeHtml(String(row.action || "hold"))}</td><td>${escapeHtml(String(row.score ?? "absent"))}</td><td>${formatMaybePercent(row.return_pct)}</td></tr>`).join("")}</table>`;
+}
+
+function dashboardPaperState(payload: Record<string, unknown>): string {
+  return `<p>Position: <strong>${escapeHtml(String(payload.net_position_btc ?? 0))} BTC</strong></p><p>Exposition: ${escapeHtml(String(payload.exposure_usdt ?? 0))} USDT</p><p>PnL latent: ${escapeHtml(String(payload.unrealized_pnl_usdt ?? 0))} USDT</p><p class="muted">Mode paper uniquement.</p>`;
+}
+
+function dashboardLiveReadiness(payload: Record<string, unknown>): string {
+  const blockers = Array.isArray(payload.blockers) ? payload.blockers.map(String) : [];
+  if (!blockers.length) {
+    return `<p class="pill ok">Ready gated</p><p class="muted">Execution live toujours soumise a approbation explicite.</p>`;
+  }
+  return `<ul>${blockers.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
 function statusClass(value: unknown): string {
@@ -5682,6 +6152,13 @@ function stringOrNull(value: unknown): string | null {
 function numberOrNull(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function strictNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  return numberOrNull(value);
 }
 
 function normalizeRatio(value: unknown): number | null {
