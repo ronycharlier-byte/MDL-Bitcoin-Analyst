@@ -77,8 +77,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.24.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.24.0";
+const WORKER_VERSION = "1.24.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.24.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -1632,8 +1632,7 @@ function formatModelAlertText(evaluation: Record<string, unknown>, manual: boole
     ``,
     `Quick archive: ${quick.archive_id || "absent"}`,
     `Deep archive: ${deep.archive_id || "absent"}`,
-    `Spot quick: ${quick.reference_spot || "absent"}`,
-    `Spot deep: ${deep.reference_spot || "absent"}`,
+    ...spotReferenceLines(quick, deep),
     ``,
     `Rule: probabilistic risk alert, not trading advice.`,
     `UTC: ${evaluation.checked_at_utc || new Date().toISOString()}`,
@@ -1718,8 +1717,7 @@ function formatDailySummaryText(status: Record<string, unknown>, manual: boolean
     ``,
     `Quick archive: ${quick.archive_id || "absent"}`,
     `Deep archive: ${deep.archive_id || "absent"}`,
-    `Spot quick: ${quick.reference_spot || "absent"}`,
-    `Spot deep: ${deep.reference_spot || "absent"}`,
+    ...spotReferenceLines(quick, deep),
     ``,
     `Warnings: ${warnings.length ? warnings.join(" | ") : "none"}`,
     `Blockers: ${blockers.length ? blockers.join(" | ") : "none"}`,
@@ -1736,6 +1734,27 @@ function cacheSummaryLine(label: string, cache: Record<string, unknown>): string
   const ageText = age === null ? "age unknown" : `age ${Math.round(age / 60)} min`;
   const decision = cache.cache_decision || "no decision";
   return `${label}: ${status} (${ageText}, ${decision})`;
+}
+
+function spotReferenceLines(quick: Record<string, unknown>, deep: Record<string, unknown>): string[] {
+  const quickSpot = stringOrNull(quick.reference_spot);
+  const deepSpot = stringOrNull(deep.reference_spot);
+  const quickTs = stringOrNull(quick.reference_spot_timestamp_paris) || stringOrNull(quick.reference_spot_timestamp_utc);
+  const deepTs = stringOrNull(deep.reference_spot_timestamp_paris) || stringOrNull(deep.reference_spot_timestamp_utc);
+  if (quickSpot && deepSpot && quickSpot === deepSpot) {
+    if (quickTs && deepTs && quickTs === deepTs) {
+      return [`Spot reference: ${quickSpot} (same Bitget snapshot for quick/deep, ${quickTs})`];
+    }
+    return [
+      `Spot reference: ${quickSpot} (same price, separate snapshots)`,
+      `Spot timestamp quick: ${quickTs || "absent"}`,
+      `Spot timestamp deep: ${deepTs || "absent"}`
+    ];
+  }
+  return [
+    `Spot quick: ${quickSpot || "absent"} (${quickTs || "timestamp absent"})`,
+    `Spot deep: ${deepSpot || "absent"} (${deepTs || "timestamp absent"})`
+  ];
 }
 
 async function sendDiscordOpsAlert(env: Env, title: string, message: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
