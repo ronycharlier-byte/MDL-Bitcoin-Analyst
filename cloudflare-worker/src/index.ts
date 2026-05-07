@@ -96,8 +96,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.29.3";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.29.3";
+const WORKER_VERSION = "1.29.4";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.29.4";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -2037,6 +2037,9 @@ async function buildStrategySummary(env: Env): Promise<Record<string, unknown>> 
       prob_up: frame.prob_up ?? null,
       var_95: frame.var_95 ?? null,
       cvar_95: frame.cvar_95 ?? null,
+      bull: frame.bull ?? null,
+      bear: frame.bear ?? null,
+      range: frame.range ?? null,
       transition: frame.transition ?? null,
       model_confidence: frame.confidence ?? null
     },
@@ -2197,12 +2200,12 @@ function evaluateStrategyEnsemble(
   );
   const gates = [
     gate("model_payload_present", true, "model output present"),
-    gate("spot_real_and_fresh", Boolean(spot && numberOrNull(realtime.age_seconds) !== null && Number(realtime.age_seconds) <= Number(trading.max_spot_age_seconds)), `spot age ${numberOrNull(realtime.age_seconds) ?? "absent"}s <= ${trading.max_spot_age_seconds}s`),
-    gate("ensemble_score_ok", Math.abs(ensembleScore) >= Number(config.min_ensemble_score), `score ${ensembleScore.toFixed(2)} >= ${config.min_ensemble_score}`),
-    gate("strategy_agreement_ok", agreement >= Number(config.min_agreement), `agreement ${(agreement * 100).toFixed(1)}% >= ${formatPercent(Number(config.min_agreement))}`),
-    gate("confidence_ok", confidenceScore !== null && confidenceScore >= Number(trading.min_confidence), `model confidence ${confidenceScore ?? "absent"} >= ${trading.min_confidence}`),
-    gate("var95_ok", var95 !== null && var95 <= Number(trading.max_var95), `VaR95 ${formatMaybePercent(var95)} <= ${formatPercent(Number(trading.max_var95))}`),
-    gate("transition_ok", transition !== null && transition <= Number(trading.max_transition), `transition ${formatMaybePercent(transition)} <= ${formatPercent(Number(trading.max_transition))}`)
+    strategyGate("spot_real_and_fresh", Boolean(spot && numberOrNull(realtime.age_seconds) !== null && Number(realtime.age_seconds) <= Number(trading.max_spot_age_seconds)), `spot age ${numberOrNull(realtime.age_seconds) ?? "absent"}s`, `max ${trading.max_spot_age_seconds}s`),
+    strategyGate("ensemble_score_ok", Math.abs(ensembleScore) >= Number(config.min_ensemble_score), `score ${ensembleScore.toFixed(2)}`, `min ${config.min_ensemble_score}`),
+    strategyGate("strategy_agreement_ok", agreement >= Number(config.min_agreement), `agreement ${(agreement * 100).toFixed(1)}%`, `min ${formatPercent(Number(config.min_agreement))}`),
+    strategyGate("confidence_ok", confidenceScore !== null && confidenceScore >= Number(trading.min_confidence), `model confidence ${confidenceScore ?? "absent"}`, `min ${trading.min_confidence}`),
+    strategyGate("var95_ok", var95 !== null && var95 <= Number(trading.max_var95), `VaR95 ${formatMaybePercent(var95)}`, `max ${formatPercent(Number(trading.max_var95))}`),
+    strategyGate("transition_ok", transition !== null && transition <= Number(trading.max_transition), `transition ${formatMaybePercent(transition)}`, `max ${formatPercent(Number(trading.max_transition))}`)
   ];
   const gatesPass = gates.every((item) => item.passed);
   const action = !gatesPass
@@ -2540,11 +2543,11 @@ async function buildTradingSignal(env: Env, input: Record<string, unknown>): Pro
   const spotAge = numberOrNull(realtime.age_seconds);
   const gates = [
     gate("model_payload_present", true, "model output present"),
-    gate("spot_real_and_fresh", Boolean(spot && spotAge !== null && spotAge <= Number(config.max_spot_age_seconds)), `spot age ${spotAge ?? "absent"}s <= ${config.max_spot_age_seconds}s`),
-    gate("confidence_ok", confidenceScore !== null && confidenceScore >= Number(config.min_confidence), `confidence ${confidenceScore ?? "absent"} >= ${config.min_confidence}`),
-    gate("var95_ok", var95 !== null && var95 <= Number(config.max_var95), `VaR95 ${formatMaybePercent(var95)} <= ${formatPercent(Number(config.max_var95))}`),
-    gate("transition_ok", transition !== null && transition <= Number(config.max_transition), `transition ${formatMaybePercent(transition)} <= ${formatPercent(Number(config.max_transition))}`),
-    gate("prob_up_buy_ok", probUp !== null && probUp >= Number(config.buy_prob_up), `P(up) ${formatMaybePercent(probUp)} >= ${formatPercent(Number(config.buy_prob_up))}`)
+    strategyGate("spot_real_and_fresh", Boolean(spot && spotAge !== null && spotAge <= Number(config.max_spot_age_seconds)), `spot age ${spotAge ?? "absent"}s`, `max ${config.max_spot_age_seconds}s`),
+    strategyGate("confidence_ok", confidenceScore !== null && confidenceScore >= Number(config.min_confidence), `confidence ${confidenceScore ?? "absent"}`, `min ${config.min_confidence}`),
+    strategyGate("var95_ok", var95 !== null && var95 <= Number(config.max_var95), `VaR95 ${formatMaybePercent(var95)}`, `max ${formatPercent(Number(config.max_var95))}`),
+    strategyGate("transition_ok", transition !== null && transition <= Number(config.max_transition), `transition ${formatMaybePercent(transition)}`, `max ${formatPercent(Number(config.max_transition))}`),
+    strategyGate("prob_up_buy_ok", probUp !== null && probUp >= Number(config.buy_prob_up), `P(up) ${formatMaybePercent(probUp)}`, `min ${formatPercent(Number(config.buy_prob_up))}`)
   ];
   const buyAllowed = gates.every((item) => item.passed);
   const sellCandidate = probUp !== null && probUp <= Number(config.sell_prob_up) && confidenceScore !== null && confidenceScore >= Number(config.min_confidence);
@@ -2598,6 +2601,16 @@ async function buildTradingSignal(env: Env, input: Record<string, unknown>): Pro
 
 function gate(name: string, passed: boolean, detail: string): Record<string, unknown> {
   return { name, passed, detail };
+}
+
+function strategyGate(name: string, passed: boolean, observed: string, threshold: string): Record<string, unknown> {
+  return {
+    name,
+    passed,
+    observed,
+    threshold,
+    detail: passed ? `${observed} OK (${threshold})` : `${observed} fails (${threshold})`
+  };
 }
 
 function tradingPresetPath(input: Record<string, unknown>): string {
