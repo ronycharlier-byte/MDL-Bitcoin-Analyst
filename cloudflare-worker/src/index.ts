@@ -24,6 +24,20 @@
   MODEL_ALERT_COOLDOWN_SECONDS?: string;
   MODEL_ALERT_QUICK_REFRESH_SECONDS?: string;
   MODEL_ALERT_DEEP_REFRESH_SECONDS?: string;
+  TRADING_MODE?: string;
+  TRADING_DEFAULT_NOTIONAL_USDT?: string;
+  TRADING_MAX_NOTIONAL_USDT?: string;
+  TRADING_MIN_CONFIDENCE?: string;
+  TRADING_MAX_VAR95?: string;
+  TRADING_MAX_TRANSITION?: string;
+  TRADING_BUY_PROB_UP?: string;
+  TRADING_SELL_PROB_UP?: string;
+  TRADING_MAX_SPOT_AGE_SECONDS?: string;
+  TRADING_LIVE_CONFIRMATION?: string;
+  TRADING_TELEGRAM_APPROVAL_ENABLED?: string;
+  BITGET_API_KEY?: string;
+  BITGET_API_SECRET?: string;
+  BITGET_API_PASSPHRASE?: string;
 }
 
 interface RunRequest {
@@ -79,8 +93,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.26.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.26.0";
+const WORKER_VERSION = "1.27.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.27.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -98,6 +112,15 @@ const MODEL_ALERT_QUICK_REFRESH_SECONDS_DEFAULT = 5 * 60;
 const MODEL_ALERT_DEEP_REFRESH_SECONDS_DEFAULT = 30 * 60;
 const LOCK_TTL_SECONDS_DEFAULT = 4 * 60;
 const REALTIME_SNAPSHOT_MAX_SECONDS = 6 * 60;
+const TRADING_DEFAULT_NOTIONAL_USDT_DEFAULT = 10;
+const TRADING_MAX_NOTIONAL_USDT_DEFAULT = 25;
+const TRADING_MIN_CONFIDENCE_DEFAULT = 55;
+const TRADING_MAX_VAR95_DEFAULT = 0.25;
+const TRADING_MAX_TRANSITION_DEFAULT = 0.30;
+const TRADING_BUY_PROB_UP_DEFAULT = 0.58;
+const TRADING_SELL_PROB_UP_DEFAULT = 0.42;
+const TRADING_MAX_SPOT_AGE_SECONDS_DEFAULT = 180;
+const BITGET_SPOT_PLACE_ORDER_PATH = "/api/v2/spot/trade/place-order";
 const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
   "/run-quick": {
     name: "quick",
@@ -229,7 +252,11 @@ export default {
             "realtime_bitget_polling_snapshots",
             "local_dashboard",
             "visible_backtest_report",
-            "legal_pages"
+            "legal_pages",
+            "paper_trading_engine",
+            "gpt_trade_proposals",
+            "telegram_trade_approval",
+            "bitget_live_trading_guarded_disabled_by_default"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -248,7 +275,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -297,6 +324,7 @@ export default {
             daily_summary_paris_hour: getDailySummaryParisHour(env),
             model_alerts: getModelAlertConfig(env)
           },
+          trading: tradingPublicStatus(env),
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
             render_full_engine: "Render remains the Bitget-backed Python/numpy engine behind this Worker.",
@@ -314,7 +342,8 @@ export default {
             "Every precise number must be cited with full model_run_id, report_date UTC, report_date Europe/Paris, reference_spot and data status.",
             "A user-facing answer must not truncate run_id values unless it also provides the full run_id in the provenance section.",
             "Spot freshness, Monte Carlo error, multi-seed stability, alerts and run comparison diagnostics must be surfaced when present.",
-            "Cloudflare Workers free tier cannot keep a permanent Bitget WebSocket collector alive; realtime snapshots are collected by scheduled polling and explicit /realtime/collect calls."
+            "Cloudflare Workers free tier cannot keep a permanent Bitget WebSocket collector alive; realtime snapshots are collected by scheduled polling and explicit /realtime/collect calls.",
+            "Trading is paper-only unless TRADING_MODE=live, Bitget trade secrets are configured, and an explicit owner approval/confirmation is supplied."
           ],
           timestamp: now.toISOString(),
           timestamp_utc: now.toISOString(),
@@ -404,6 +433,30 @@ export default {
 
       if (url.pathname === "/deep-jobs/process" && request.method === "GET") {
         return json(await processDeepJobQueue(env));
+      }
+
+      if (url.pathname === "/trading/status" && request.method === "GET") {
+        return json(await tradingStatus(env));
+      }
+
+      if (url.pathname === "/trading/signal" && request.method === "GET") {
+        return json(await buildTradingSignal(env, await readInput(request, url)));
+      }
+
+      if (url.pathname === "/trading/orders" && request.method === "GET") {
+        return json(await listTradeOrders(env, clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50)));
+      }
+
+      if (url.pathname === "/trading/paper-order" && (request.method === "POST" || request.method === "GET")) {
+        return json(await createPaperTradeOrder(env, await readInput(request, url), "gpt_action"));
+      }
+
+      if (url.pathname === "/trading/propose" && (request.method === "POST" || request.method === "GET")) {
+        return json(await proposeTradeOrder(env, await readInput(request, url), "gpt_action"));
+      }
+
+      if (url.pathname === "/trading/approve" && (request.method === "POST" || request.method === "GET")) {
+        return json(await approveTradeOrder(env, await readInput(request, url), "gpt_action"));
       }
 
       if (url.pathname === "/backtests" && request.method === "GET") {
@@ -1041,7 +1094,7 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
     return { status: "absent", target: "cloudflare_d1", reason: "DB binding is not configured" };
   }
   try {
-    const [runs, usage, clients, subscriptions, ops, locks, snapshots, jobs, rules] = await env.DB.batch([
+    const [runs, usage, clients, subscriptions, ops, locks, snapshots, jobs, rules, tradeOrders, tradeEvents] = await env.DB.batch([
       env.DB.prepare("SELECT COUNT(*) AS count FROM quant_runs"),
       env.DB.prepare("SELECT COUNT(*) AS count FROM usage_events"),
       env.DB.prepare("SELECT COUNT(*) AS count FROM api_clients"),
@@ -1050,7 +1103,9 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
       env.DB.prepare("SELECT COUNT(*) AS count FROM system_locks"),
       env.DB.prepare("SELECT COUNT(*) AS count FROM market_snapshots"),
       env.DB.prepare("SELECT COUNT(*) AS count FROM deep_jobs"),
-      env.DB.prepare("SELECT COUNT(*) AS count FROM user_alert_rules")
+      env.DB.prepare("SELECT COUNT(*) AS count FROM user_alert_rules"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM trade_orders"),
+      env.DB.prepare("SELECT COUNT(*) AS count FROM trade_events")
     ]);
     return {
       status: "ok",
@@ -1066,9 +1121,11 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
         system_locks: countFromD1(locks),
         market_snapshots: countFromD1(snapshots),
         deep_jobs: countFromD1(jobs),
-        user_alert_rules: countFromD1(rules)
+        user_alert_rules: countFromD1(rules),
+        trade_orders: countFromD1(tradeOrders),
+        trade_events: countFromD1(tradeEvents)
       },
-      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules and queued deep jobs",
+      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules, queued deep jobs and trading journals",
       checked_at_utc: new Date().toISOString(),
       checked_at_paris: parisIso(new Date())
     };
@@ -1779,6 +1836,603 @@ async function notifyDeepJob(env: Env, row: Record<string, unknown>, text: strin
   if (chatId) {
     await sendTelegramMessage(env, chatId, text);
   }
+}
+
+function getTradingConfig(env: Env): Record<string, unknown> {
+  const mode = String(env.TRADING_MODE || "paper").toLowerCase() === "live" ? "live" : "paper";
+  const keysConfigured = Boolean(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE);
+  return {
+    mode,
+    symbol: "BTCUSDT",
+    default_notional_usdt: clampFloat(parseNumber(env.TRADING_DEFAULT_NOTIONAL_USDT, TRADING_DEFAULT_NOTIONAL_USDT_DEFAULT), 1, 100000),
+    max_notional_usdt: clampFloat(parseNumber(env.TRADING_MAX_NOTIONAL_USDT, TRADING_MAX_NOTIONAL_USDT_DEFAULT), 1, 100000),
+    min_confidence: clampFloat(parseNumber(env.TRADING_MIN_CONFIDENCE, TRADING_MIN_CONFIDENCE_DEFAULT), 1, 100),
+    max_var95: clampFloat(parseNumber(env.TRADING_MAX_VAR95, TRADING_MAX_VAR95_DEFAULT), 0.01, 0.99),
+    max_transition: clampFloat(parseNumber(env.TRADING_MAX_TRANSITION, TRADING_MAX_TRANSITION_DEFAULT), 0.01, 0.99),
+    buy_prob_up: clampFloat(parseNumber(env.TRADING_BUY_PROB_UP, TRADING_BUY_PROB_UP_DEFAULT), 0.01, 0.99),
+    sell_prob_up: clampFloat(parseNumber(env.TRADING_SELL_PROB_UP, TRADING_SELL_PROB_UP_DEFAULT), 0.01, 0.99),
+    max_spot_age_seconds: clampInt(parseNumber(env.TRADING_MAX_SPOT_AGE_SECONDS, TRADING_MAX_SPOT_AGE_SECONDS_DEFAULT), 15, 3600),
+    bitget_trade_secrets: keysConfigured ? "configured" : "absent",
+    live_confirmation: env.TRADING_LIVE_CONFIRMATION ? "configured" : "absent",
+    telegram_approval_enabled: parseBoolean(env.TRADING_TELEGRAM_APPROVAL_ENABLED, false),
+    live_ready: mode === "live" && keysConfigured
+  };
+}
+
+function tradingPublicStatus(env: Env): Record<string, unknown> {
+  const config = getTradingConfig(env);
+  return {
+    mode: config.mode,
+    paper_trading: "enabled",
+    live_trading: config.live_ready ? "guarded_available" : "disabled",
+    exchange: "Bitget spot BTCUSDT",
+    order_policy: [
+      "GPT may request a probabilistic signal, create paper orders and create proposals.",
+      "Live orders are disabled unless TRADING_MODE=live and Bitget trade secrets are configured.",
+      "Live execution also requires explicit owner approval through Telegram or a confirmation code.",
+      "Withdraw/transfer permissions must never be enabled on the Bitget API key."
+    ],
+    risk_gates: {
+      min_confidence: config.min_confidence,
+      max_var95: config.max_var95,
+      max_transition: config.max_transition,
+      buy_prob_up: config.buy_prob_up,
+      max_notional_usdt: config.max_notional_usdt,
+      max_spot_age_seconds: config.max_spot_age_seconds
+    }
+  };
+}
+
+async function tradingStatus(env: Env): Promise<Record<string, unknown>> {
+  return {
+    status: "ok",
+    service: "quant-btc-model-trading",
+    worker_version: WORKER_VERSION,
+    schema_version: SCHEMA_VERSION,
+    ...tradingPublicStatus(env),
+    d1: env.DB ? "configured" : "absent",
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date()),
+    warning: "Trading outputs are infrastructure actions, not financial advice."
+  };
+}
+
+async function buildTradingSignal(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const config = getTradingConfig(env);
+  const asset = normalizeAsset(input.asset);
+  const horizon = clampInt(parseNumber(input.horizon, 30), 1, 3650);
+  const presetPath = tradingPresetPath(input);
+  const preset = ANALYSIS_PRESETS[presetPath];
+  let payload = await latestD1RunPayload(env, asset, preset.horizons, 0);
+  if (!payload && parseBoolean(input.refresh, false)) {
+    await refreshPresetForModelAlerts(env, presetPath, "/trading/signal", 1, true);
+    payload = await latestD1RunPayload(env, asset, preset.horizons, 0);
+  }
+  if (!payload) {
+    return {
+      status: "absent",
+      signal: "no_trade",
+      reason: `No ${preset.name} run available in D1 cache.`,
+      data_status: { model_output: "absent", market_data: "absent" }
+    };
+  }
+
+  let realtime = await realtimeStatus(env);
+  if (realtime.status !== "ok") {
+    await collectRealtimeMarketSnapshot(env, "trading_signal");
+    realtime = await realtimeStatus(env);
+  }
+  const frame = findFrameForHorizon(payload, horizon) || findFrameForHorizon(payload, 30) || objectValue(Array.isArray(payload.frames) ? payload.frames[0] : {});
+  const distribution = objectValue(frame.distribution);
+  const risk = objectValue(frame.risk_metrics);
+  const regime = objectValue(frame.regime_distribution);
+  const confidence = objectValue(frame.confidence);
+  const probUp = numberOrNull(distribution.prob_up);
+  const var95 = numberOrNull(risk.var_95);
+  const transition = numberOrNull(regime.non_classified_transition);
+  const confidenceScore = numberOrNull(confidence.score);
+  const spot = numberOrNull(realtime.price) || parsePriceValue(payload.reference_spot) || parsePriceValue(frame.reference_spot);
+  const spotAge = numberOrNull(realtime.age_seconds);
+  const gates = [
+    gate("model_payload_present", true, "model output present"),
+    gate("spot_real_and_fresh", Boolean(spot && spotAge !== null && spotAge <= Number(config.max_spot_age_seconds)), `spot age ${spotAge ?? "absent"}s <= ${config.max_spot_age_seconds}s`),
+    gate("confidence_ok", confidenceScore !== null && confidenceScore >= Number(config.min_confidence), `confidence ${confidenceScore ?? "absent"} >= ${config.min_confidence}`),
+    gate("var95_ok", var95 !== null && var95 <= Number(config.max_var95), `VaR95 ${formatMaybePercent(var95)} <= ${formatPercent(Number(config.max_var95))}`),
+    gate("transition_ok", transition !== null && transition <= Number(config.max_transition), `transition ${formatMaybePercent(transition)} <= ${formatPercent(Number(config.max_transition))}`),
+    gate("prob_up_buy_ok", probUp !== null && probUp >= Number(config.buy_prob_up), `P(up) ${formatMaybePercent(probUp)} >= ${formatPercent(Number(config.buy_prob_up))}`)
+  ];
+  const buyAllowed = gates.every((item) => item.passed);
+  const sellCandidate = probUp !== null && probUp <= Number(config.sell_prob_up) && confidenceScore !== null && confidenceScore >= Number(config.min_confidence);
+  const side = buyAllowed ? "buy" : sellCandidate ? "sell" : "hold";
+  const signal = buyAllowed ? "paper_buy_candidate" : sellCandidate ? "reduce_candidate_no_position_check" : "no_trade";
+  const sizeUsdt = Math.min(Number(config.default_notional_usdt), Number(config.max_notional_usdt));
+  const sizeBase = side === "buy" && spot ? sizeUsdt / spot : null;
+  const runId = stringOrNull(frame.run_id);
+  return {
+    status: "ok",
+    asset,
+    symbol: config.symbol,
+    signal,
+    side,
+    order_type: "market",
+    suggested_notional_usdt: side === "buy" ? sizeUsdt : null,
+    suggested_size_base: sizeBase,
+    gates,
+    decision_policy: "All buy gates must pass. Otherwise no trade is recommended by the execution engine.",
+    provenance: {
+      archive_id: payload.archive_id,
+      run_id: runId,
+      report_date_utc: payload.report_date_utc,
+      report_date_paris: payload.report_date_paris,
+      reference_spot: payload.reference_spot,
+      realtime_spot: spot,
+      realtime_spot_age_seconds: spotAge,
+      realtime_source: realtime.source,
+      worker_version: WORKER_VERSION,
+      schema_version: SCHEMA_VERSION
+    },
+    model_frame: {
+      horizon: frame.horizon,
+      prob_up: probUp,
+      median_return: distribution.median_return,
+      p10_return: distribution.p10_return,
+      p90_return: distribution.p90_return,
+      var95,
+      cvar95: risk.cvar_95,
+      confidence: confidenceScore,
+      transition
+    },
+    data_status: {
+      price: "real",
+      model_outputs: "inferred",
+      trade_execution: "not_executed"
+    },
+    warning: "Signal probabiliste uniquement; pas une prediction certaine ni un conseil financier."
+  };
+}
+
+function gate(name: string, passed: boolean, detail: string): Record<string, unknown> {
+  return { name, passed, detail };
+}
+
+function tradingPresetPath(input: Record<string, unknown>): string {
+  const preset = String(input.preset || "deep").toLowerCase();
+  if (preset === "quick") return "/quick";
+  if (preset === "tactical") return "/tactical";
+  return "/deep";
+}
+
+async function createPaperTradeOrder(env: Env, input: Record<string, unknown>, createdBy: string): Promise<Record<string, unknown>> {
+  const signal = await buildTradingSignal(env, input);
+  return await createTradeOrder(env, input, signal, "paper", "paper_filled", createdBy);
+}
+
+async function proposeTradeOrder(env: Env, input: Record<string, unknown>, createdBy: string): Promise<Record<string, unknown>> {
+  const requestedMode = String(input.mode || "paper").toLowerCase() === "live" ? "live" : "paper";
+  const signal = await buildTradingSignal(env, input);
+  const status = requestedMode === "live" ? "pending_live_approval" : "pending_paper_approval";
+  const order = await createTradeOrder(env, input, signal, requestedMode, status, createdBy);
+  const chatId = stringOrNull(input.chat_id) || stringOrNull(env.TELEGRAM_CHAT_ID);
+  if (chatId && order.status !== "error") {
+    await sendTelegramMessage(env, chatId, formatTradeProposalForTelegram(order), tradeApprovalKeyboard(String(order.order_id)));
+  }
+  return {
+    ...order,
+    notification: chatId ? "telegram_sent_or_attempted" : "telegram_absent",
+    approval_policy: requestedMode === "live"
+      ? "A live order is not sent until /trading/approve is called with confirmation or Telegram owner approval."
+      : "Paper proposal can be approved without live exchange execution."
+  };
+}
+
+async function createTradeOrder(
+  env: Env,
+  input: Record<string, unknown>,
+  signal: Record<string, unknown>,
+  mode: string,
+  status: string,
+  createdBy: string
+): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "error", message: "D1 is required for the trading journal." };
+  }
+  if (signal.status !== "ok") {
+    return { status: "error", message: "Trading signal is absent; no order created.", signal };
+  }
+  const side = normalizeTradingSide(input.side || signal.side);
+  const force = parseBoolean(input.force, false);
+  if (side === "hold" || (!force && signal.signal === "no_trade")) {
+    return {
+      status: "blocked",
+      message: "No trade created because risk gates did not pass. Use force=true only for paper/manual testing.",
+      signal
+    };
+  }
+  const config = getTradingConfig(env);
+  const now = new Date();
+  const orderId = `trade_${now.toISOString().replace(/[-:.]/g, "").slice(0, 15)}_${randomRunSuffix()}`;
+  const clientOid = `qbtc_${now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomRunSuffix()}`.slice(0, 32);
+  const spot = numberOrNull(objectValue(signal.provenance).realtime_spot);
+  const maxNotional = Number(config.max_notional_usdt);
+  const requestedNotional = numberOrNull(input.size_usdt) || numberOrNull(signal.suggested_notional_usdt) || Number(config.default_notional_usdt);
+  const sizeUsdt = side === "buy" ? Math.min(Math.max(requestedNotional, 1), maxNotional) : null;
+  const requestedBase = numberOrNull(input.size_base) || numberOrNull(signal.suggested_size_base);
+  const sizeBase = side === "sell" ? requestedBase : (side === "buy" && spot && sizeUsdt ? sizeUsdt / spot : requestedBase);
+  const orderType = normalizeOrderType(input.order_type);
+  const limitPrice = orderType === "limit" ? (numberOrNull(input.limit_price) || spot) : null;
+  const filledPrice = status === "paper_filled" ? spot : null;
+  const proposal = {
+    signal,
+    source: "quant_btc_trading_engine",
+    policy: tradingPublicStatus(env),
+    input: safeTradingInput(input)
+  };
+  await env.DB.prepare(`
+    INSERT INTO trade_orders (
+      order_id, asset, symbol, mode, status, side, order_type, size_usdt, size_base,
+      limit_price, filled_price, client_oid, archive_id, run_id, proposal_json,
+      created_by, created_at_utc, updated_at_utc, executed_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    orderId,
+    normalizeAsset(input.asset),
+    String(config.symbol),
+    mode,
+    status,
+    side,
+    orderType,
+    sizeUsdt,
+    sizeBase,
+    limitPrice,
+    filledPrice,
+    clientOid,
+    stringOrNull(objectValue(signal.provenance).archive_id),
+    stringOrNull(objectValue(signal.provenance).run_id),
+    JSON.stringify(proposal),
+    createdBy,
+    now.toISOString(),
+    now.toISOString(),
+    status === "paper_filled" ? now.toISOString() : null
+  ).run();
+  await persistTradeEvent(env, orderId, "order_created", status, `${mode} ${side} ${orderType} order ${status}`, proposal);
+  return {
+    status,
+    order_id: orderId,
+    mode,
+    asset: normalizeAsset(input.asset),
+    symbol: config.symbol,
+    side,
+    order_type: orderType,
+    size_usdt: sizeUsdt,
+    size_base: sizeBase,
+    limit_price: limitPrice,
+    filled_price: filledPrice,
+    client_oid: clientOid,
+    provenance: objectValue(signal.provenance),
+    risk_gates: signal.gates,
+    data_status: {
+      price: "real",
+      model_outputs: "inferred",
+      order: mode === "paper" ? "mock" : "pending"
+    },
+    warning: mode === "paper"
+      ? "Paper order only; no exchange order was sent."
+      : "Live proposal only; no exchange order was sent until explicit approval."
+  };
+}
+
+async function approveTradeOrder(env: Env, input: Record<string, unknown>, source: string): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "error", message: "D1 is required for trading approval." };
+  }
+  const orderId = stringOrNull(input.order_id) || stringOrNull(input.id);
+  if (!orderId) {
+    return { status: "error", message: "order_id is required." };
+  }
+  const row = objectValue(await env.DB.prepare("SELECT * FROM trade_orders WHERE order_id = ?").bind(orderId).first());
+  if (!stringOrNull(row.order_id)) {
+    return { status: "absent", message: "Trade order not found.", order_id: orderId };
+  }
+  const mode = stringOrNull(row.mode) || "paper";
+  const now = new Date();
+  if (mode !== "live") {
+    const realtime = await realtimeStatus(env);
+    const fillPrice = numberOrNull(row.filled_price) || numberOrNull(row.limit_price) || numberOrNull(realtime.price);
+    await env.DB.prepare(`
+      UPDATE trade_orders SET status = ?, filled_price = ?, approved_by = ?, approved_at_utc = ?, executed_at_utc = ?, updated_at_utc = ? WHERE order_id = ?
+    `).bind("paper_approved_filled", fillPrice, source, now.toISOString(), now.toISOString(), now.toISOString(), orderId).run();
+    await persistTradeEvent(env, orderId, "paper_approved", "paper_approved_filled", "Paper order approved and marked filled.", { source });
+    return { status: "paper_approved_filled", order_id: orderId, message: "Paper order approved; no exchange order was sent." };
+  }
+
+  const liveAuth = canApproveLiveTrade(env, input, source);
+  if (!liveAuth.allowed) {
+    return { status: "blocked", order_id: orderId, reason: liveAuth.reason, message: "Live order was not sent." };
+  }
+  const execution = await placeBitgetSpotOrder(env, row);
+  const finalStatus = execution.status === "sent" ? "live_sent" : "live_error";
+  await env.DB.prepare(`
+    UPDATE trade_orders SET status = ?, exchange_order_id = ?, execution_json = ?, error = ?,
+      approved_by = ?, approved_at_utc = ?, executed_at_utc = ?, updated_at_utc = ?
+    WHERE order_id = ?
+  `).bind(
+    finalStatus,
+    stringOrNull(objectValue(execution.exchange_response).orderId) || stringOrNull(objectValue(objectValue(execution.exchange_response).data).orderId),
+    JSON.stringify(execution),
+    finalStatus === "live_error" ? stringOrNull(execution.message) || stringOrNull(execution.error) : null,
+    source,
+    now.toISOString(),
+    now.toISOString(),
+    now.toISOString(),
+    orderId
+  ).run();
+  await persistTradeEvent(env, orderId, "live_execution", finalStatus, finalStatus === "live_sent" ? "Live Bitget order sent." : "Live Bitget order failed.", execution);
+  return {
+    status: finalStatus,
+    order_id: orderId,
+    execution,
+    warning: "Live exchange response returned by Bitget; verify directly in Bitget before relying on position state."
+  };
+}
+
+function canApproveLiveTrade(env: Env, input: Record<string, unknown>, source: string): Record<string, unknown> {
+  const config = getTradingConfig(env);
+  if (config.live_ready !== true) {
+    return { allowed: false, reason: "TRADING_MODE is not live or Bitget trade secrets are absent." };
+  }
+  if (source === "telegram_owner" && config.telegram_approval_enabled === true) {
+    return { allowed: true, reason: "telegram_owner_approval" };
+  }
+  const expected = stringOrNull(env.TRADING_LIVE_CONFIRMATION);
+  const provided = stringOrNull(input.confirmation) || stringOrNull(input.approval_code);
+  if (expected && provided === expected) {
+    return { allowed: true, reason: "confirmation_code_valid" };
+  }
+  return { allowed: false, reason: "Live approval requires Telegram owner approval or TRADING_LIVE_CONFIRMATION." };
+}
+
+async function placeBitgetSpotOrder(env: Env, order: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const apiKey = stringOrNull(env.BITGET_API_KEY);
+  const apiSecret = stringOrNull(env.BITGET_API_SECRET);
+  const passphrase = stringOrNull(env.BITGET_API_PASSPHRASE);
+  if (!apiKey || !apiSecret || !passphrase) {
+    return { status: "error", error: "bitget_trade_secrets_absent" };
+  }
+  const side = normalizeTradingSide(order.side);
+  const orderType = normalizeOrderType(order.order_type);
+  const sizeUsdt = numberOrNull(order.size_usdt);
+  const sizeBase = numberOrNull(order.size_base);
+  if (side === "sell" && !sizeBase) {
+    return { status: "error", error: "sell_size_base_absent", message: "Spot market sell requires base coin size." };
+  }
+  const size = side === "buy" && orderType === "market" ? sizeUsdt : sizeBase;
+  if (!size || size <= 0) {
+    return { status: "error", error: "order_size_absent" };
+  }
+  const body: Record<string, unknown> = {
+    symbol: stringOrNull(order.symbol) || "BTCUSDT",
+    side,
+    orderType,
+    size: formatOrderNumber(size),
+    clientOid: stringOrNull(order.client_oid) || `qbtc_${randomRunSuffix()}`
+  };
+  if (orderType === "limit") {
+    const limitPrice = numberOrNull(order.limit_price);
+    if (!limitPrice) {
+      return { status: "error", error: "limit_price_absent" };
+    }
+    body.force = "gtc";
+    body.price = formatOrderNumber(limitPrice);
+  }
+  const timestamp = String(Date.now());
+  const bodyText = JSON.stringify(body);
+  const signature = await bitgetSign(apiSecret, timestamp, "POST", BITGET_SPOT_PLACE_ORDER_PATH, bodyText);
+  const response = await fetch(`https://api.bitget.com${BITGET_SPOT_PLACE_ORDER_PATH}`, {
+    method: "POST",
+    headers: {
+      "ACCESS-KEY": apiKey,
+      "ACCESS-SIGN": signature,
+      "ACCESS-PASSPHRASE": passphrase,
+      "ACCESS-TIMESTAMP": timestamp,
+      "locale": "en-US",
+      "content-type": "application/json"
+    },
+    body: bodyText,
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const text = await response.text();
+  let parsed: unknown = {};
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { raw_response: text.slice(0, 1000) };
+  }
+  const payload = objectValue(parsed);
+  const ok = response.ok && (payload.code === "00000" || payload.msg === "success");
+  return {
+    status: ok ? "sent" : "error",
+    http_status: response.status,
+    exchange: "bitget",
+    endpoint: BITGET_SPOT_PLACE_ORDER_PATH,
+    request: { ...body, size: body.size },
+    exchange_response: payload,
+    message: ok ? "Bitget spot order accepted." : stringOrNull(payload.msg) || `HTTP ${response.status}`
+  };
+}
+
+async function bitgetSign(secret: string, timestamp: string, method: string, requestPath: string, body: string): Promise<string> {
+  const payload = `${timestamp}${method.toUpperCase()}${requestPath}${body}`;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return arrayBufferToBase64(signature);
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+async function listTradeOrders(env: Env, limit: number): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", orders: [] };
+  }
+  const { results } = await env.DB.prepare(`
+    SELECT order_id, asset, symbol, mode, status, side, order_type, size_usdt, size_base,
+           limit_price, filled_price, exchange_order_id, client_oid, archive_id, run_id,
+           error, created_by, approved_by, created_at_utc, updated_at_utc, approved_at_utc, executed_at_utc
+    FROM trade_orders
+    ORDER BY created_at_utc DESC
+    LIMIT ?
+  `).bind(limit).all();
+  return {
+    status: "ok",
+    orders: (results || []).map((item) => {
+      const row = objectValue(item);
+      return {
+        ...row,
+        created_at_paris: stringOrNull(row.created_at_utc) ? parisIso(new Date(String(row.created_at_utc))) : null,
+        updated_at_paris: stringOrNull(row.updated_at_utc) ? parisIso(new Date(String(row.updated_at_utc))) : null
+      };
+    })
+  };
+}
+
+async function persistTradeEvent(env: Env, orderId: string, kind: string, status: string, message: string, payload: unknown): Promise<void> {
+  if (!env.DB) {
+    return;
+  }
+  await env.DB.prepare(`
+    INSERT INTO trade_events (order_id, kind, status, message, payload_json, created_at_utc)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(orderId, kind, status, message, JSON.stringify(payload), new Date().toISOString()).run();
+}
+
+function formatTradeProposalForTelegram(order: Record<string, unknown>): string {
+  const provenance = objectValue(order.provenance);
+  return [
+    "Quant BTC - Proposition trading",
+    `Ordre: ${order.order_id}`,
+    `Mode: ${order.mode}`,
+    `Side: ${order.side}`,
+    `Notional: ${order.size_usdt ? `${order.size_usdt} USDT` : "absent"}`,
+    `Base: ${order.size_base || "absent"} BTC`,
+    `Archive: ${provenance.archive_id || "absente"}`,
+    `Run: ${provenance.run_id || "absent"}`,
+    "Aucun ordre reel n'est envoye sans approbation.",
+    "Sortie probabiliste, pas conseil financier."
+  ].join("\n");
+}
+
+function tradeApprovalKeyboard(orderId: string): Record<string, unknown> {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Approuver", callback_data: `/trade_approve ${orderId}` },
+        { text: "Refuser", callback_data: `/trade_cancel ${orderId}` }
+      ],
+      [
+        { text: "Signal", callback_data: "/trade_signal" },
+        { text: "Ordres", callback_data: "/trade_orders" }
+      ]
+    ]
+  };
+}
+
+function normalizeTradingSide(value: unknown): string {
+  const side = String(value || "hold").toLowerCase();
+  if (side === "buy" || side === "long") return "buy";
+  if (side === "sell" || side === "reduce") return "sell";
+  return "hold";
+}
+
+function normalizeOrderType(value: unknown): string {
+  return String(value || "market").toLowerCase() === "limit" ? "limit" : "market";
+}
+
+function formatOrderNumber(value: number): string {
+  return value >= 1 ? value.toFixed(2).replace(/\.?0+$/, "") : value.toFixed(8).replace(/\.?0+$/, "");
+}
+
+function safeTradingInput(input: Record<string, unknown>): Record<string, unknown> {
+  return {
+    asset: input.asset,
+    preset: input.preset,
+    horizon: input.horizon,
+    mode: input.mode,
+    side: input.side,
+    order_type: input.order_type,
+    size_usdt: input.size_usdt,
+    size_base: input.size_base,
+    limit_price: input.limit_price,
+    force: input.force
+  };
+}
+
+async function cancelTradeOrder(env: Env, orderIdRaw: unknown, cancelledBy: string): Promise<Record<string, unknown>> {
+  const orderId = stringOrNull(orderIdRaw);
+  if (!env.DB || !orderId) {
+    return { status: "error", message: "order_id is required." };
+  }
+  const row = objectValue(await env.DB.prepare("SELECT status FROM trade_orders WHERE order_id = ?").bind(orderId).first());
+  if (!stringOrNull(row.status)) {
+    return { status: "absent", message: "Trade order not found.", order_id: orderId };
+  }
+  if (String(row.status).includes("sent") || String(row.status).includes("filled")) {
+    return { status: "blocked", message: "Already executed paper/live order cannot be cancelled here.", order_id: orderId };
+  }
+  const now = new Date();
+  await env.DB.prepare("UPDATE trade_orders SET status = ?, approved_by = ?, updated_at_utc = ? WHERE order_id = ?")
+    .bind("cancelled", cancelledBy, now.toISOString(), orderId).run();
+  await persistTradeEvent(env, orderId, "order_cancelled", "cancelled", "Trade proposal cancelled.", { cancelled_by: cancelledBy });
+  return { status: "cancelled", order_id: orderId };
+}
+
+function formatTradingSignalForTelegram(signal: Record<string, unknown>): string {
+  const provenance = objectValue(signal.provenance);
+  const frame = objectValue(signal.model_frame);
+  return [
+    "Quant BTC - Signal trading",
+    `Statut: ${signal.status}`,
+    `Signal: ${signal.signal || "absent"}`,
+    `Side: ${signal.side || "hold"}`,
+    `P(up): ${formatMaybePercent(numberOrNull(frame.prob_up))}`,
+    `VaR95: ${formatMaybePercent(numberOrNull(frame.var95))}`,
+    `Confiance: ${frame.confidence ?? "absente"}/100`,
+    `Transition: ${formatMaybePercent(numberOrNull(frame.transition))}`,
+    `Archive: ${provenance.archive_id || "absente"}`,
+    `Run: ${provenance.run_id || "absent"}`,
+    "Aucun ordre reel n'est envoye par ce signal."
+  ].join("\n");
+}
+
+function formatTradeOrderForTelegram(order: Record<string, unknown>): string {
+  return [
+    "Quant BTC - Ordre",
+    `Statut: ${order.status}`,
+    `Order ID: ${order.order_id || "absent"}`,
+    `Mode: ${order.mode || "absent"}`,
+    `Side: ${order.side || "absent"}`,
+    `Type: ${order.order_type || "absent"}`,
+    `Notional: ${order.size_usdt || "absent"} USDT`,
+    `Base: ${order.size_base || "absent"} BTC`,
+    `Message: ${order.message || order.warning || "absent"}`
+  ].join("\n");
+}
+
+function formatTradeOrdersForTelegram(payload: Record<string, unknown>): string {
+  const orders = Array.isArray(payload.orders) ? payload.orders.map((item) => objectValue(item)).slice(0, 5) : [];
+  if (orders.length === 0) {
+    return "Quant BTC - Ordres\nAucun ordre journalise.";
+  }
+  return [
+    "Quant BTC - Derniers ordres",
+    ...orders.map((order) => `${order.order_id} | ${order.mode} | ${order.status} | ${order.side} | ${order.size_usdt || "?"} USDT`)
+  ].join("\n");
 }
 
 async function createCustomAlertRule(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -3115,6 +3769,32 @@ async function handleTelegramCommand(env: Env, chatId: string, raw: string): Pro
     const rule = await createRuleFromTelegram(env, chatId, args);
     return await sendTelegramMessage(env, chatId, String(rule.message || `Regle: ${rule.status}`), telegramMainKeyboard());
   }
+  if (command === "/trade_signal") {
+    const signal = await buildTradingSignal(env, { asset: "BTC", preset: "deep", horizon: 30 });
+    return await sendTelegramMessage(env, chatId, formatTradingSignalForTelegram(signal), telegramMainKeyboard());
+  }
+  if (command === "/paper_trade") {
+    const order = await createPaperTradeOrder(env, { asset: "BTC", preset: "deep", horizon: 30 }, "telegram_owner");
+    return await sendTelegramMessage(env, chatId, formatTradeOrderForTelegram(order), telegramMainKeyboard());
+  }
+  if (command === "/trade_propose") {
+    const mode = String(args[0] || "paper").toLowerCase() === "live" ? "live" : "paper";
+    const order = await proposeTradeOrder(env, { asset: "BTC", preset: "deep", horizon: 30, mode, chat_id: chatId }, "telegram_owner");
+    return await sendTelegramMessage(env, chatId, formatTradeOrderForTelegram(order), telegramMainKeyboard());
+  }
+  if (command === "/trade_orders") {
+    const orders = await listTradeOrders(env, 5);
+    return await sendTelegramMessage(env, chatId, formatTradeOrdersForTelegram(orders), telegramMainKeyboard());
+  }
+  if (command === "/trade_approve") {
+    const orderId = args[0];
+    const approved = await approveTradeOrder(env, { order_id: orderId }, "telegram_owner");
+    return await sendTelegramMessage(env, chatId, formatTradeOrderForTelegram(approved), telegramMainKeyboard());
+  }
+  if (command === "/trade_cancel") {
+    const cancelled = await cancelTradeOrder(env, args[0], "telegram_owner");
+    return await sendTelegramMessage(env, chatId, formatTradeOrderForTelegram(cancelled), telegramMainKeyboard());
+  }
   return await sendTelegramMessage(env, chatId, telegramHelpText(), telegramMainKeyboard());
 }
 
@@ -3130,6 +3810,11 @@ function telegramMainKeyboard(): Record<string, unknown> {
         { text: "Alertes", callback_data: "/alerts" },
         { text: "Dernier", callback_data: "/last" },
         { text: "Deep run", callback_data: "/deep_run" }
+      ],
+      [
+        { text: "Signal trade", callback_data: "/trade_signal" },
+        { text: "Paper trade", callback_data: "/paper_trade" },
+        { text: "Ordres", callback_data: "/trade_orders" }
       ]
     ]
   };
@@ -3147,6 +3832,10 @@ function telegramHelpText(): string {
     "/last : spot + derniers runs",
     "/mute 60 : silence 60 minutes",
     "/rule var95 365 > 0.40 : alerte perso",
+    "/trade_signal : signal execution prudent",
+    "/paper_trade : cree un ordre paper si les gates passent",
+    "/trade_propose live : propose un ordre live a approuver",
+    "/trade_orders : derniers ordres",
     "",
     "Toutes les sorties sont probabilistes, jamais des certitudes."
   ].join("\n");
@@ -4685,6 +5374,22 @@ function parseNumber(value: unknown, fallback: number): number {
 function parseNullableNumber(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no", "n", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
 }
 
 function parsePriceValue(value: unknown): number | null {

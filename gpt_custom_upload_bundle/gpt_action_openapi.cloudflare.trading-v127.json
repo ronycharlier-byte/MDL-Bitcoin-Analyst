@@ -1,0 +1,273 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model Analyze + Trading",
+    "version": "1.27.0",
+    "description": "GPT Action schema for Quant BTC Model analysis and guarded trading workflows. Trading is paper-only unless the Worker is explicitly configured for live Bitget execution and owner approval is supplied."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "btcAnalyzeHealth",
+        "summary": "Check Quant BTC Worker health.",
+        "responses": {
+          "200": {
+            "description": "Health response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "service": { "type": "string" },
+                    "worker_version": { "type": "string" },
+                    "timestamp_utc": { "type": "string" },
+                    "timestamp_paris": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze": {
+      "get": {
+        "operationId": "btcAnalyze",
+        "summary": "Run or fetch a compact BTC probabilistic analysis.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["quick", "tactical", "deep"] }
+          },
+          {
+            "name": "fresh",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["true", "false"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Probabilistic BTC analysis response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "archive_id": { "type": "string" },
+                    "report_date_utc": { "type": "string" },
+                    "report_date_paris": { "type": "string" },
+                    "reference_spot": {},
+                    "frames": { "type": "array", "items": { "type": "object", "properties": {}, "additionalProperties": true } }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/status": {
+      "get": {
+        "operationId": "btcTradingStatus",
+        "summary": "Return guarded trading engine status.",
+        "responses": {
+          "200": {
+            "description": "Trading engine status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "mode": { "type": "string" },
+                    "paper_trading": { "type": "string" },
+                    "live_trading": { "type": "string" },
+                    "risk_gates": { "type": "object", "properties": {}, "additionalProperties": true }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/signal": {
+      "get": {
+        "operationId": "btcTradingSignal",
+        "summary": "Build a guarded trading signal from the latest Quant BTC run.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["quick", "tactical", "deep"] }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 3650 }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["true", "false"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trading signal response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "signal": { "type": "string" },
+                    "side": { "type": "string" },
+                    "gates": { "type": "array", "items": { "type": "object", "properties": {}, "additionalProperties": true } },
+                    "provenance": { "type": "object", "properties": {}, "additionalProperties": true }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/paper-order": {
+      "get": {
+        "operationId": "btcTradingPaperOrder",
+        "summary": "Create a paper trading order. No exchange order is sent.",
+        "parameters": [
+          { "name": "preset", "in": "query", "required": false, "schema": { "type": "string", "enum": ["quick", "tactical", "deep"] } },
+          { "name": "horizon", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 3650 } },
+          { "name": "side", "in": "query", "required": false, "schema": { "type": "string", "enum": ["buy", "sell"] } },
+          { "name": "size_usdt", "in": "query", "required": false, "schema": { "type": "number", "minimum": 1 } },
+          { "name": "force", "in": "query", "required": false, "schema": { "type": "string", "enum": ["true", "false"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paper order response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "order_id": { "type": "string" },
+                    "mode": { "type": "string" },
+                    "warning": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/propose": {
+      "get": {
+        "operationId": "btcTradingPropose",
+        "summary": "Create a paper or live proposal. Live proposals require later owner approval before exchange execution.",
+        "parameters": [
+          { "name": "mode", "in": "query", "required": false, "schema": { "type": "string", "enum": ["paper", "live"] } },
+          { "name": "preset", "in": "query", "required": false, "schema": { "type": "string", "enum": ["quick", "tactical", "deep"] } },
+          { "name": "horizon", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 3650 } },
+          { "name": "side", "in": "query", "required": false, "schema": { "type": "string", "enum": ["buy", "sell"] } },
+          { "name": "size_usdt", "in": "query", "required": false, "schema": { "type": "number", "minimum": 1 } },
+          { "name": "force", "in": "query", "required": false, "schema": { "type": "string", "enum": ["true", "false"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trade proposal response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "order_id": { "type": "string" },
+                    "mode": { "type": "string" },
+                    "approval_policy": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/approve": {
+      "get": {
+        "operationId": "btcTradingApprove",
+        "summary": "Approve a pending paper order or a live order if server-side live safeguards are configured.",
+        "parameters": [
+          { "name": "order_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "confirmation", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "order_id": { "type": "string" },
+                    "message": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/orders": {
+      "get": {
+        "operationId": "btcTradingOrders",
+        "summary": "List recent trading journal orders.",
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 50 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trading journal orders.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "orders": { "type": "array", "items": { "type": "object", "properties": {}, "additionalProperties": true } }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
