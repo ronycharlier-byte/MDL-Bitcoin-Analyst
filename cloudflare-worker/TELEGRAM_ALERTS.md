@@ -1,6 +1,6 @@
 # Telegram ops alerts
 
-The Worker supports native Telegram alerts for `/ops/monitor`.
+The Worker supports native Telegram alerts, client summaries and interactive commands.
 
 ## Create the Telegram bot
 
@@ -59,6 +59,22 @@ Expected result:
 ## Runtime behavior
 
 - `/ops/status` reports whether Telegram is configured.
-- `/ops/monitor` sends Telegram alerts only when status is not `ok`.
+- `/ops/monitor` sends Telegram direct alerts only for `CRITICAL` by default.
+- `WARNING` events are grouped in an hourly digest and the daily summary.
+- `/alerts` remains the manual command for detailed model warnings.
 - Alert cooldown is controlled by `OPS_MONITOR_ALERT_COOLDOWN_SECONDS`.
+- Direct alert level is controlled by `TELEGRAM_DIRECT_MIN_LEVEL` (`critical` by default).
+- Warning digest cooldown is controlled by `TELEGRAM_WARNING_DIGEST_COOLDOWN_SECONDS`.
 - Alert delivery is best-effort; `/ops/status` remains the source of truth.
+
+## Useful commands
+
+- `/summary`: short client view with bias, risk, strategy, reason and prudent action.
+- `/status`: operational state.
+- `/alerts`: detailed model alerts.
+- `/quick`: latest quick run.
+- `/deep`: latest deep run.
+- `/deep_run`: queue a deep run.
+- `/strategy_deep`: strategy score.
+- `/paper_strategy`: paper trade only if gates pass.
+- `/onboarding`: usage guide.

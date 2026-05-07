@@ -18,6 +18,9 @@
   TELEGRAM_CHAT_ID?: string;
   OPS_MONITOR_ALERT_COOLDOWN_SECONDS?: string;
   OPS_DAILY_SUMMARY_PARIS_HOUR?: string;
+  TELEGRAM_DIRECT_MIN_LEVEL?: string;
+  TELEGRAM_WARNING_DIGEST_COOLDOWN_SECONDS?: string;
+  REALTIME_INGEST_SECRET?: string;
   MODEL_ALERT_VAR95_THRESHOLD?: string;
   MODEL_ALERT_CONFIDENCE_THRESHOLD?: string;
   MODEL_ALERT_TRANSITION_THRESHOLD?: string;
@@ -93,11 +96,11 @@ const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type, x-client-key"
+  "access-control-allow-headers": "content-type, x-client-key, x-ingest-secret"
 };
 
-const WORKER_VERSION = "1.30.1";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.30.1";
+const WORKER_VERSION = "1.31.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.31.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -107,6 +110,8 @@ const QUICK_CACHE_MAX_SECONDS_DEFAULT = 10 * 60;
 const STALE_CACHE_MAX_SECONDS_DEFAULT = 60 * 60;
 const OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT = 15 * 60;
 const OPS_DAILY_SUMMARY_PARIS_HOUR_DEFAULT = 9;
+const TELEGRAM_DIRECT_MIN_LEVEL_DEFAULT = "critical";
+const TELEGRAM_WARNING_DIGEST_COOLDOWN_SECONDS_DEFAULT = 60 * 60;
 const MODEL_ALERT_VAR95_THRESHOLD_DEFAULT = 0.30;
 const MODEL_ALERT_CONFIDENCE_THRESHOLD_DEFAULT = 50;
 const MODEL_ALERT_TRANSITION_THRESHOLD_DEFAULT = 0.25;
@@ -183,6 +188,7 @@ export default {
     ctx.waitUntil(runModelAlertMonitor(env, false, true));
     ctx.waitUntil(processDeepJobQueue(env));
     ctx.waitUntil(evaluateCustomAlertRules(env));
+    ctx.waitUntil(sendHourlyWarningDigestIfDue(env));
     ctx.waitUntil(sendDailyOpsSummaryIfDue(env));
   },
 
@@ -251,11 +257,15 @@ export default {
             "telegram_model_alerts",
             "telegram_model_alert_real_time_refresh",
             "telegram_french_notifications",
+            "telegram_critical_only_direct_policy",
+            "telegram_warning_digest",
             "d1_refresh_locks",
             "telegram_interactive_commands",
             "custom_alert_rules",
             "deep_job_queue",
             "realtime_bitget_polling_snapshots",
+            "websocket_collector_ingest_endpoint",
+            "client_summary",
             "local_dashboard",
             "visible_backtest_report",
             "legal_pages",
@@ -266,7 +276,13 @@ export default {
             "quant_strategy_engine_v1",
             "strategy_ensemble_scoring",
             "strategy_signal_persistence",
-            "strategy_paper_trading"
+            "strategy_paper_trading",
+            "telegram_critical_only_direct_policy",
+            "telegram_warning_digest",
+            "client_summary",
+            "websocket_collector_ingest",
+            "whop_sales_page",
+            "user_onboarding"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -285,7 +301,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/market/capabilities", "/market/realtime-capabilities", "/assets/supported", "/options/summary", "/risk/live-readiness", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/trading/paper-pnl", "/trading/paper-portfolio", "/trading/paper-report", "/trading/cleanup-paper-tests", "/strategies/status", "/strategies/deep-summary", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/performance", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/client-summary", "/realtime/status", "/realtime/collect", "/realtime/ingest", "/market/capabilities", "/market/realtime-capabilities", "/assets/supported", "/options/summary", "/risk/live-readiness", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/trading/paper-pnl", "/trading/paper-portfolio", "/trading/paper-report", "/trading/cleanup-paper-tests", "/strategies/status", "/strategies/deep-summary", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/performance", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/sales", "/onboarding", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -332,6 +348,8 @@ export default {
             cache_policy: cachePolicy(env),
             deep_compute_quota: getDeepRateLimit(env),
             daily_summary_paris_hour: getDailySummaryParisHour(env),
+            telegram_direct_min_level: getTelegramDirectMinLevel(env),
+            telegram_warning_digest_cooldown_seconds: getTelegramWarningDigestCooldownSeconds(env),
             model_alerts: getModelAlertConfig(env)
           },
           trading: tradingPublicStatus(env),
@@ -353,7 +371,7 @@ export default {
             "Every precise number must be cited with full model_run_id, report_date UTC, report_date Europe/Paris, reference_spot and data status.",
             "A user-facing answer must not truncate run_id values unless it also provides the full run_id in the provenance section.",
             "Spot freshness, Monte Carlo error, multi-seed stability, alerts and run comparison diagnostics must be surfaced when present.",
-            "Cloudflare Workers free tier cannot keep a permanent Bitget WebSocket collector alive; realtime snapshots are collected by scheduled polling and explicit /realtime/collect calls.",
+            "Cloudflare Workers free tier cannot keep a permanent Bitget WebSocket collector alive; realtime snapshots are collected by polling and can be enriched through authenticated /realtime/ingest.",
             "Trading is paper-only unless TRADING_MODE=live, Bitget trade secrets are configured, and an explicit owner approval/confirmation is supplied."
           ],
           timestamp: now.toISOString(),
@@ -401,6 +419,10 @@ export default {
         return json(await collectRealtimeMarketSnapshot(env, "manual"));
       }
 
+      if (url.pathname === "/realtime/ingest" && request.method === "POST") {
+        return json(await ingestRealtimeSnapshot(env, request));
+      }
+
       if ((url.pathname === "/market/capabilities" || url.pathname === "/market/realtime-capabilities") && request.method === "GET") {
         return json(await realtimeCapabilities(env));
       }
@@ -428,6 +450,10 @@ export default {
       if (url.pathname === "/model-alerts/test" && request.method === "GET") {
         const input = await readInput(request, url);
         return json(await runModelAlertMonitor(env, true, true, wantsFreshRun(input)));
+      }
+
+      if (url.pathname === "/client-summary" && request.method === "GET") {
+        return json(await buildClientSummary(env));
       }
 
       if (url.pathname === "/telegram/webhook" && request.method === "POST") {
@@ -540,6 +566,14 @@ export default {
 
       if (url.pathname === "/backtests" && request.method === "GET") {
         return json(await visibleBacktestReport(env));
+      }
+
+      if (url.pathname === "/sales" && request.method === "GET") {
+        return html(await salesPageHtml(env));
+      }
+
+      if (url.pathname === "/onboarding" && request.method === "GET") {
+        return html(onboardingHtml());
       }
 
       if (url.pathname === "/legal" && request.method === "GET") {
@@ -1318,7 +1352,9 @@ async function buildOpsStatus(env: Env): Promise<Record<string, unknown>> {
     alerting: {
       channels: getOpsAlertChannels(env),
       cooldown_seconds: clampInt(parseNumber(env.OPS_MONITOR_ALERT_COOLDOWN_SECONDS, OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60),
-      daily_summary_paris_hour: getDailySummaryParisHour(env)
+      daily_summary_paris_hour: getDailySummaryParisHour(env),
+      telegram_direct_min_level: getTelegramDirectMinLevel(env),
+      telegram_warning_digest_cooldown_seconds: getTelegramWarningDigestCooldownSeconds(env)
     },
     warnings,
     blockers,
@@ -1326,7 +1362,8 @@ async function buildOpsStatus(env: Env): Promise<Record<string, unknown>> {
       "Cache age <= fresh_seconds: analysis allowed as recent cache.",
       "Cache age <= warning_seconds after Render failure or quota exhaustion: analysis allowed only with explicit warning-age fallback.",
       "Cache age > warning_seconds: analysis blocked; do not present stale numbers.",
-      "Deep live computation has a separate quota; cache is preferred before compute."
+      "Deep live computation has a separate quota; cache is preferred before compute.",
+      "Telegram sends CRITICAL alerts directly by default; WARNING events are grouped in hourly/daily digests and remain available through /alerts."
     ]
   };
 }
@@ -1367,6 +1404,66 @@ async function sendDailyOpsSummaryIfDue(env: Env): Promise<Record<string, unknow
     };
   }
   return await sendDailyOpsSummary(env, false);
+}
+
+async function sendHourlyWarningDigestIfDue(env: Env): Promise<Record<string, unknown>> {
+  const config = getTelegramConfig(env);
+  if (!config) {
+    return { status: "not_configured", channel: "telegram" };
+  }
+  const now = new Date();
+  const hourKey = parisIso(now).slice(0, 13);
+  const fingerprint = `telegram:warning-digest:${hourKey}`;
+  const cooldown = getTelegramWarningDigestCooldownSeconds(env);
+  if (!(await shouldSendOpsAlert(env, fingerprint, cooldown))) {
+    return { status: "skipped", reason: "warning_digest_cooldown", hour_paris: hourKey };
+  }
+  const [ops, model] = await Promise.all([
+    buildOpsStatus(env),
+    evaluateLatestModelAlerts(env, { status: "not_requested", reason: "hourly_warning_digest_cache_only" })
+  ]);
+  const hasCritical = opsLevel(ops) === "CRITICAL" || String(model.status || "").toLowerCase() === "critical";
+  const hasWarning = opsLevel(ops) === "WARNING" || String(model.status || "").toLowerCase() === "warning";
+  if (!hasWarning || hasCritical) {
+    return {
+      status: "skipped",
+      reason: hasCritical ? "critical_alerts_are_sent_directly" : "no_warning_to_digest",
+      hour_paris: hourKey
+    };
+  }
+  const telegram = await sendTelegramOpsAlert(env, formatWarningDigestText(ops, model));
+  await persistOpsEventToD1(env, {
+    kind: "telegram_warning_digest",
+    status: objectValue(telegram).status === "sent" ? "sent" : "error",
+    severity: "warning",
+    message: "Hourly Telegram warning digest",
+    fingerprint,
+    payload: { ops, model, delivery: { telegram } }
+  });
+  return {
+    status: objectValue(telegram).status === "sent" ? "sent" : "error",
+    delivery: { telegram },
+    hour_paris: hourKey,
+    checked_at_utc: now.toISOString(),
+    checked_at_paris: parisIso(now)
+  };
+}
+
+function formatWarningDigestText(ops: Record<string, unknown>, model: Record<string, unknown>): string {
+  const warnings = Array.isArray(ops.warnings) ? ops.warnings.map(String) : [];
+  const issues = Array.isArray(model.issues) ? model.issues.map((item) => objectValue(item)) : [];
+  const warningIssues = issues.filter((issue) => String(issue.level || "").toUpperCase() === "WARNING");
+  return [
+    telegramHeader("Quant BTC - Digest warnings", "AVERTISSEMENT"),
+    telegramSection("Politique", [
+      "Les warnings sont groupes pour eviter le spam.",
+      "Les alertes CRITIQUES restent envoyees en direct."
+    ]),
+    telegramSection("Ops", warnings.length ? warnings.slice(0, 4) : ["Aucun warning ops actif."]),
+    telegramSection("Modele", warningIssues.length ? warningIssues.slice(0, 5).map(formatTelegramIssue) : ["Aucun warning modele actif."]),
+    telegramSection("A faire", ["Utilise /alerts pour le detail, /status pour l'etat complet."]),
+    telegramFooter(model.checked_at_utc || ops.checked_at_utc, model.checked_at_paris || ops.checked_at_paris)
+  ].join("\n");
 }
 
 async function sendDailyOpsSummary(env: Env, manual: boolean): Promise<Record<string, unknown>> {
@@ -1553,6 +1650,89 @@ async function collectRealtimeMarketSnapshot(env: Env, trigger: string): Promise
   }
 }
 
+async function ingestRealtimeSnapshot(env: Env, request: Request): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 binding is required for realtime ingest." };
+  }
+  const configuredSecret = stringOrNull(env.REALTIME_INGEST_SECRET);
+  if (!configuredSecret) {
+    return {
+      status: "blocked",
+      message: "REALTIME_INGEST_SECRET is not configured. Set it before enabling external WebSocket collector ingestion.",
+      data_status: {
+        websocket_ingest: "absent",
+        stored_snapshot: "absent"
+      }
+    };
+  }
+  const providedSecret = request.headers.get("x-ingest-secret");
+  if (providedSecret !== configuredSecret) {
+    return {
+      status: "forbidden",
+      message: "Invalid realtime ingest secret.",
+      data_status: {
+        websocket_ingest: "absent",
+        stored_snapshot: "absent"
+      }
+    };
+  }
+  const input = await readJson(request);
+  const now = new Date();
+  const asset = normalizeAsset(input.asset);
+  const source = stringOrNull(input.source) || "bitget_ws_collector";
+  const kind = stringOrNull(input.kind) || "websocket_snapshot";
+  const bid = numberOrNull(input.bid ?? input.best_bid);
+  const ask = numberOrNull(input.ask ?? input.best_ask);
+  const price = numberOrNull(input.price ?? input.last_price ?? input.last ?? input.mark_price) ?? (bid !== null && ask !== null ? (bid + ask) / 2 : null);
+  const spreadBps = numberOrNull(input.spread_bps) ?? (bid !== null && ask !== null && price ? ((ask - bid) / price) * 10000 : null);
+  const observedAt = stringOrNull(input.observed_at_utc) || stringOrNull(input.timestamp_utc) || now.toISOString();
+  const storedPayload: Record<string, unknown> = { ...input };
+  delete storedPayload.secret;
+  await env.DB.prepare(`
+    INSERT INTO market_snapshots (
+      asset, source, kind, price, bid, ask, spread_bps, funding_rate, open_interest,
+      liquidations_status, payload_json, observed_at_utc, created_at_utc
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    asset,
+    source,
+    kind,
+    price,
+    bid,
+    ask,
+    spreadBps,
+    numberOrNull(input.funding_rate),
+    numberOrNull(input.open_interest),
+    stringOrNull(input.liquidations_status) || (Number(input.liquidations_count || 0) > 0 ? "real" : "absent"),
+    JSON.stringify({ ...storedPayload, ingest_worker_version: WORKER_VERSION }),
+    observedAt,
+    now.toISOString()
+  ).run();
+  return {
+    status: "stored",
+    asset,
+    source,
+    kind,
+    price,
+    bid,
+    ask,
+    spread_bps: spreadBps,
+    funding_rate: numberOrNull(input.funding_rate),
+    open_interest: numberOrNull(input.open_interest),
+    liquidations_status: stringOrNull(input.liquidations_status) || (Number(input.liquidations_count || 0) > 0 ? "real" : "absent"),
+    observed_at_utc: observedAt,
+    observed_at_paris: parisIso(new Date(observedAt)),
+    created_at_utc: now.toISOString(),
+    created_at_paris: parisIso(now),
+    data_status: {
+      websocket_ingest: "real",
+      stored_snapshot: "real",
+      non_bitget_fallback: "absent"
+    }
+  };
+}
+
 async function realtimeStatus(env: Env): Promise<Record<string, unknown>> {
   if (!env.DB) {
     return { status: "absent", reason: "D1 binding is not configured" };
@@ -1618,7 +1798,8 @@ async function realtimeCapabilities(env: Env): Promise<Record<string, unknown>> 
       "Bitget top-of-book/orderbook snapshot context",
       "Bitget funding/open-interest snapshots when reachable",
       "D1 freshness gates and anti-double-run locks",
-      "Telegram ops/model/custom alert delivery"
+      "Telegram ops/model/custom alert delivery",
+      "Authenticated /realtime/ingest endpoint for an external Bitget WebSocket collector"
     ],
     external_collector_needed_for_true_realtime: [
       "Permanent Bitget WebSocket spot stream",
@@ -1629,7 +1810,7 @@ async function realtimeCapabilities(env: Env): Promise<Record<string, unknown>> 
     why_not_permanent_inside_worker: "Cloudflare Workers free tier is request/schedule driven and is not a reliable always-on WebSocket daemon.",
     recommended_architecture: {
       collector: "Run tools/bitget_ws_collector on a free/always-on host or local machine.",
-      storage: "Write compact snapshots into Cloudflare D1/R2 or the Worker ingest endpoint.",
+      storage: "POST compact snapshots to /realtime/ingest with x-ingest-secret so they land in Cloudflare D1.",
       gpt_usage: "GPT reads the latest audited snapshot and must label stale/absent fields explicitly."
     },
     data_status: {
@@ -2231,6 +2412,128 @@ async function buildStrategySummary(env: Env): Promise<Record<string, unknown>> 
     data_status: signal.data_status,
     warning: "Resume compact pour GPT: probabiliste, pas conseil financier."
   };
+}
+
+async function buildClientSummary(env: Env): Promise<Record<string, unknown>> {
+  const [strategy, ops, realtime, backtests, modelAlerts] = await Promise.all([
+    buildStrategySummary(env),
+    buildOpsStatus(env),
+    realtimeStatus(env),
+    visibleBacktestReport(env),
+    evaluateLatestModelAlerts(env, { status: "not_requested", reason: "client_summary_cache_only" })
+  ]);
+  const frame = objectValue(strategy.key_frame);
+  const risk = clientRiskLabel(frame, modelAlerts);
+  const bias = clientBiasLabel(frame, strategy);
+  const blocking = Array.isArray(strategy.blocking_gates) ? strategy.blocking_gates.map((item) => objectValue(item)) : [];
+  const mainReason = blocking.length
+    ? `${blocking[0].name || "gate"}: ${blocking[0].detail || "bloquant"}`
+    : strategy.conclusion || "Pas de gate bloquante explicite.";
+  const summary = {
+    status: "ok",
+    bias,
+    risk,
+    strategy_action: strategy.action || "hold",
+    strategy_score: strategy.score ?? null,
+    strategy_agreement: strategy.agreement ?? null,
+    reason_main: mainReason,
+    suggested_action: clientSuggestedAction(strategy, risk),
+    spot: {
+      price: realtime.price ?? objectValue(strategy.provenance).realtime_spot ?? null,
+      age_seconds: realtime.age_seconds ?? objectValue(strategy.provenance).realtime_spot_age_seconds ?? null,
+      source: realtime.source || objectValue(strategy.provenance).realtime_source || "absent",
+      status: realtime.status || "absent"
+    },
+    key_metrics: {
+      horizon: frame.horizon || 30,
+      prob_up: frame.prob_up ?? null,
+      var_95: frame.var_95 ?? null,
+      cvar_95: frame.cvar_95 ?? null,
+      bull: frame.bull ?? null,
+      bear: frame.bear ?? null,
+      range: frame.range ?? null,
+      transition: frame.transition ?? null,
+      model_confidence: frame.model_confidence ?? null
+    },
+    ops_status: ops.status,
+    alert_status: modelAlerts.status,
+    backtest_quality: objectValue(backtests.summary),
+    provenance: strategy.provenance,
+    paper_state: strategy.paper_state,
+    data_status: {
+      price: "real",
+      model_outputs: "inferred",
+      strategy_scores: "inferred",
+      paper_portfolio: "mock_paper",
+      non_bitget_fallback: "absent"
+    },
+    client_text: "",
+    warning: "Resume client court; probabiliste uniquement, pas conseil financier.",
+    generated_at_utc: new Date().toISOString(),
+    generated_at_paris: parisIso(new Date())
+  };
+  summary.client_text = formatClientSummaryText(summary);
+  return summary;
+}
+
+function clientBiasLabel(frame: Record<string, unknown>, strategy: Record<string, unknown>): string {
+  const probUp = normalizeRatio(frame.prob_up);
+  const action = String(strategy.action || "hold");
+  if (action === "buy_candidate") return "biais acheteur candidat, sous gates";
+  if (action === "sell_or_reduce_candidate") return "biais reduction/vente candidat, sous gates";
+  if (probUp === null) return "biais absent";
+  if (probUp >= 0.60) return "biais probabiliste haussier modere";
+  if (probUp >= 0.54) return "leger biais probabiliste haussier";
+  if (probUp <= 0.45) return "biais probabiliste baissier";
+  return "neutre / range";
+}
+
+function clientRiskLabel(frame: Record<string, unknown>, modelAlerts: Record<string, unknown>): string {
+  const var95 = normalizeRatio(frame.var_95);
+  const confidence = numberOrNull(frame.model_confidence);
+  const transition = normalizeRatio(frame.transition);
+  if (String(modelAlerts.status || "").toLowerCase() === "critical") return "critique";
+  if ((var95 !== null && var95 >= 0.30) || (confidence !== null && confidence < 50)) return "eleve";
+  if ((transition !== null && transition >= 0.25) || (var95 !== null && var95 >= 0.18)) return "modere a eleve";
+  return "modere";
+}
+
+function clientSuggestedAction(strategy: Record<string, unknown>, risk: string): string {
+  const action = String(strategy.action || "hold");
+  if (risk === "critique") return "attendre; verifier les alertes avant toute lecture directionnelle";
+  if (action === "hold") return "surveiller; pas de trade operationnel valide par les gates";
+  if (action === "buy_candidate" || action === "sell_or_reduce_candidate") return "paper/proposal uniquement, avec validation manuelle";
+  return "surveiller";
+}
+
+function formatClientSummaryText(summary: Record<string, unknown>): string {
+  const spot = objectValue(summary.spot);
+  const metrics = objectValue(summary.key_metrics);
+  const provenance = objectValue(summary.provenance);
+  return [
+    telegramHeader("Quant BTC - Resume client", String(summary.strategy_action || "hold")),
+    telegramSection("Decision", [
+      `Biais: ${summary.bias}`,
+      `Risque: ${summary.risk}`,
+      `Strategie: ${summary.strategy_action}`,
+      `Score: ${summary.strategy_score ?? "absent"} | Accord: ${formatMaybePercent(summary.strategy_agreement)}`,
+      `Action: ${summary.suggested_action}`
+    ]),
+    telegramSection("Pourquoi", [summary.reason_main || "absent"]),
+    telegramSection("Frame cle", [
+      `Horizon: ${metrics.horizon || 30}j`,
+      `P(up): ${formatMaybePercent(metrics.prob_up)}`,
+      `VaR95: ${formatMaybePercent(metrics.var_95)}`,
+      `Transition: ${formatMaybePercent(metrics.transition)}`,
+      `Confiance modele: ${metrics.model_confidence ?? "absente"}/100`
+    ]),
+    telegramSection("Spot / provenance", [
+      `Spot: ${spot.price ? `$${Number(spot.price).toFixed(2)}` : "absent"} (${spot.status || "absent"}, age ${spot.age_seconds ?? "?"}s)`,
+      `Archive: ${provenance.archive_id || "absente"}`,
+      `Run: ${shortId(provenance.run_id)}`
+    ]),
+    telegramSection("Regle", ["Scenario probabiliste uniquement; pas conseil financier."])
+  ].join("\n");
 }
 
 function strategyConclusion(signal: Record<string, unknown>, blockingGates: Record<string, unknown>[]): string {
@@ -4223,6 +4526,34 @@ function getDailySummaryParisHour(env: Env): number {
   return clampInt(parseNumber(env.OPS_DAILY_SUMMARY_PARIS_HOUR, OPS_DAILY_SUMMARY_PARIS_HOUR_DEFAULT), 0, 23);
 }
 
+function getTelegramDirectMinLevel(env: Env): string {
+  const value = String(env.TELEGRAM_DIRECT_MIN_LEVEL || TELEGRAM_DIRECT_MIN_LEVEL_DEFAULT).toLowerCase();
+  return ["off", "critical", "warning", "info"].includes(value) ? value : TELEGRAM_DIRECT_MIN_LEVEL_DEFAULT;
+}
+
+function getTelegramWarningDigestCooldownSeconds(env: Env): number {
+  return clampInt(parseNumber(env.TELEGRAM_WARNING_DIGEST_COOLDOWN_SECONDS, TELEGRAM_WARNING_DIGEST_COOLDOWN_SECONDS_DEFAULT), 15 * 60, 24 * 60 * 60);
+}
+
+function shouldSendTelegramDirect(env: Env, level: unknown, manual = false): boolean {
+  if (manual) {
+    return true;
+  }
+  const minLevel = getTelegramDirectMinLevel(env);
+  if (minLevel === "off") {
+    return false;
+  }
+  return alertLevelRank(level) >= alertLevelRank(minLevel);
+}
+
+function alertLevelRank(value: unknown): number {
+  const level = String(value || "").toLowerCase();
+  if (level === "critical" || level === "degraded" || level === "error") return 3;
+  if (level === "warning") return 2;
+  if (level === "info" || level === "ok" || level === "test") return 1;
+  return 0;
+}
+
 function getModelAlertConfig(env: Env): Record<string, number> {
   return {
     var95_threshold: clampFloat(parseNumber(env.MODEL_ALERT_VAR95_THRESHOLD, MODEL_ALERT_VAR95_THRESHOLD_DEFAULT), 0.01, 0.99),
@@ -4470,14 +4801,18 @@ async function runModelAlertMonitor(env: Env, manual = false, refreshBeforeEvalu
       };
     }
     const text = formatModelAlertText(evaluation, manual);
+    const telegramDirect = shouldSendTelegramDirect(env, evaluation.status, manual);
     const [discord, telegram] = await Promise.all([
       sendDiscordOpsAlert(env, manual ? "Quant BTC model alert TEST" : `Quant BTC model alert ${String(evaluation.status).toUpperCase()}`, text, evaluation),
-      sendTelegramOpsAlert(env, text)
+      telegramDirect
+        ? sendTelegramOpsAlert(env, text)
+        : Promise.resolve({ status: "skipped", reason: "telegram_direct_policy_warning_digest", policy: getTelegramDirectMinLevel(env) })
     ]);
     const sent = [discord, telegram].some((item) => objectValue(item).status === "sent");
+    const deferredToDigest = objectValue(telegram).reason === "telegram_direct_policy_warning_digest";
     await persistOpsEventToD1(env, {
       kind: manual ? "manual_model_alert" : "model_alert",
-      status: sent ? "sent" : "error",
+      status: sent ? "sent" : deferredToDigest ? "deferred_to_digest" : "error",
       severity: evaluation.status === "critical" ? "critical" : evaluation.status === "warning" ? "warning" : "info",
       message: issues.length ? issues.slice(0, 5).map((issue) => String(issue.message || issue.type || "model issue")).join("; ") : "No active model alert",
       fingerprint,
@@ -4489,7 +4824,7 @@ async function runModelAlertMonitor(env: Env, manual = false, refreshBeforeEvalu
     return {
       ...evaluation,
       alert_delivery: {
-        status: sent ? "sent" : "error",
+        status: sent ? "sent" : deferredToDigest ? "deferred_to_digest" : "error",
         discord,
         telegram
       }
@@ -4897,9 +5232,12 @@ async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: stri
   }
   const title = `Quant BTC Ops ${opsLevel(status)}`;
   const text = formatOpsAlertText(status, message);
+  const telegramDirect = shouldSendTelegramDirect(env, opsLevel(status));
   await Promise.all([
     sendDiscordOpsAlert(env, title, message, status),
-    sendTelegramOpsAlert(env, text)
+    telegramDirect
+      ? sendTelegramOpsAlert(env, text)
+      : Promise.resolve({ status: "skipped", reason: "telegram_direct_policy_warning_digest", policy: getTelegramDirectMinLevel(env) })
   ]);
 }
 
@@ -5193,6 +5531,10 @@ async function handleTelegramCommand(env: Env, chatId: string, raw: string): Pro
     const status = await buildOpsStatus(env);
     return await sendTelegramMessage(env, chatId, formatOpsStatusForTelegram(status), telegramMainKeyboard());
   }
+  if (command === "/summary") {
+    const summary = await buildClientSummary(env);
+    return await sendTelegramMessage(env, chatId, String(summary.client_text || "Resume absent."), telegramMainKeyboard());
+  }
   if (command === "/quick") {
     const quick = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0);
     return await sendTelegramMessage(env, chatId, formatRunShortForTelegram("quick", quick), telegramMainKeyboard());
@@ -5289,6 +5631,22 @@ async function handleTelegramCommand(env: Env, chatId: string, raw: string): Pro
     const signals = await listStrategySignals(env, 5);
     return await sendTelegramMessage(env, chatId, formatStrategySignalsForTelegram(signals), telegramMainKeyboard());
   }
+  if (command === "/onboarding") {
+    return await sendTelegramMessage(env, chatId, [
+      telegramHeader("Quant BTC - Onboarding"),
+      telegramSection("Commandes utiles", [
+        "/summary : resume client court",
+        "/alerts : detail des alertes",
+        "/strategy_deep : signal strategie complet",
+        "/paper_strategy : paper trade si gates OK"
+      ]),
+      telegramSection("Lecture", [
+        "VaR/CVaR = pertes simulees, pas pertes maximales garanties.",
+        "Hold = gates non validees, pas signal directionnel.",
+        "Confidence < 50 = conclusion fragile."
+      ])
+    ].join("\n"), telegramMainKeyboard());
+  }
   return await sendTelegramMessage(env, chatId, telegramHelpText(), telegramMainKeyboard());
 }
 
@@ -5296,6 +5654,7 @@ function telegramMainKeyboard(): Record<string, unknown> {
   return {
     inline_keyboard: [
       [
+        { text: "Resume", callback_data: "/summary" },
         { text: "Status", callback_data: "/status" },
         { text: "Quick", callback_data: "/quick" },
         { text: "Deep", callback_data: "/deep" }
@@ -5314,6 +5673,9 @@ function telegramMainKeyboard(): Record<string, unknown> {
         { text: "Strategie", callback_data: "/strategy" },
         { text: "Strategie deep", callback_data: "/strategy_deep" },
         { text: "Paper strat", callback_data: "/paper_strategy" }
+      ],
+      [
+        { text: "Onboarding", callback_data: "/onboarding" }
       ]
     ]
   };
@@ -5323,6 +5685,7 @@ function telegramHelpText(): string {
   return [
     telegramHeader("Quant BTC - Commandes"),
     telegramSection("Analyse", [
+      "/summary : resume client court",
       "/status : statut ops",
       "/quick : dernier run quick",
       "/quick_fresh : force un quick frais",
@@ -5344,6 +5707,7 @@ function telegramHelpText(): string {
       "/paper_strategy : paper strategy"
     ]),
     telegramSection("Regle", [
+      "Telegram direct = CRITIQUE seulement; warnings regroupes en digest.",
       "Probabiliste uniquement.",
       "Jamais une certitude ni un conseil financier."
     ])
@@ -5495,10 +5859,76 @@ async function visibleBacktestReport(env: Env): Promise<Record<string, unknown>>
     source_report_date_utc: source?.report_date_utc || null,
     source_report_date_paris: source?.report_date_paris || null,
     data_status: source ? "real_backtest_diagnostics_from_archived_run" : "absent",
+    summary: backtestQualitySummary(rows),
     rows,
+    period_stability: backtestPeriodStability(rows),
+    benchmark_policy: "Chaque horizon doit etre compare au random walk quand random_walk_hit_rate/brier_skill_vs_random_walk sont disponibles.",
     warning: "Backtests are diagnostics, not a guarantee of future calibration. Long-horizon VaR breaches must reduce confidence.",
     checked_at_utc: new Date().toISOString(),
     checked_at_paris: parisIso(new Date())
+  };
+}
+
+function backtestQualitySummary(rows: Record<string, unknown>[]): Record<string, unknown> {
+  if (!rows.length) {
+    return {
+      quality_label: "absent",
+      score_0_100: null,
+      critical_notes: ["Aucun backtest visible dans le dernier run archive."]
+    };
+  }
+  const criticalNotes: string[] = [];
+  let score = 82;
+  for (const row of rows) {
+    const horizon = row.horizon_days || "?";
+    const breach = numberOrNull(row.var95_breach_rate);
+    const expected = numberOrNull(row.expected_var95_breach_rate) || 0.05;
+    const skill = numberOrNull(row.brier_skill_vs_random_walk);
+    const calibration = numberOrNull(row.calibration_error);
+    const coverage = numberOrNull(row.interval_coverage);
+    if (breach !== null && breach > expected * 2) {
+      score -= 12;
+      criticalNotes.push(`${horizon}j: VaR95 breach ${formatPercent(breach)} vs attendu ${formatPercent(expected)}.`);
+    }
+    if (skill !== null && skill < 0) {
+      score -= 6;
+      criticalNotes.push(`${horizon}j: Brier skill negatif vs random walk.`);
+    }
+    if (calibration !== null && calibration > 0.20) {
+      score -= 5;
+      criticalNotes.push(`${horizon}j: erreur calibration elevee (${calibration.toFixed(3)}).`);
+    }
+    if (coverage !== null && (coverage < 0.70 || coverage > 0.95)) {
+      score -= 4;
+      criticalNotes.push(`${horizon}j: couverture P10/P90 atypique (${formatPercent(coverage)}).`);
+    }
+  }
+  const clipped = clampInt(Math.round(score), 0, 100);
+  return {
+    quality_label: clipped >= 70 ? "correcte_avec_prudence" : clipped >= 50 ? "fragile" : "faible",
+    score_0_100: clipped,
+    long_horizon_warning: rows.some((row) => {
+      const horizon = numberOrNull(row.horizon_days) || 0;
+      const breach = numberOrNull(row.var95_breach_rate);
+      return horizon >= 90 && breach !== null && breach > 0.10;
+    }),
+    critical_notes: criticalNotes.slice(0, 8),
+    conclusion: "Les backtests doivent peser dans la conclusion: si breaches VaR ou skill random walk sont mauvais, les risques long terme sont indicatifs et probablement sous-calibres."
+  };
+}
+
+function backtestPeriodStability(rows: Record<string, unknown>[]): Record<string, unknown> {
+  if (!rows.length) {
+    return { status: "absent", reason: "No visible backtest rows." };
+  }
+  const observations = rows.map((row) => numberOrNull(row.observations)).filter((value): value is number => value !== null);
+  return {
+    status: "partial",
+    available: "aggregate_by_horizon_only",
+    missing: "rolling sub-period stability is not yet exposed by the Render payload",
+    observations_min: observations.length ? Math.min(...observations) : null,
+    observations_max: observations.length ? Math.max(...observations) : null,
+    next_step: "Expose walk-forward sub-period buckets: bull, bear, high-vol, low-vol, pre/post ETF."
   };
 }
 
@@ -5516,19 +5946,22 @@ function interpretBacktestRow(row: Record<string, unknown>): string {
 }
 
 async function dashboardHtml(env: Env): Promise<string> {
-  const [ops, realtime, alerts, backtests, jobs, strategyPerformance, liveReady] = await Promise.all([
+  const [ops, realtime, alerts, backtests, jobs, strategyPerformance, liveReady, clientSummary] = await Promise.all([
     buildOpsStatus(env),
     realtimeStatus(env),
     evaluateLatestModelAlerts(env),
     visibleBacktestReport(env),
     listDeepJobs(env, 5),
     strategyPerformanceReport(env),
-    liveReadiness(env)
+    liveReadiness(env),
+    buildClientSummary(env).catch((error) => ({ status: "error", message: error instanceof Error ? error.message : String(error) }))
   ]);
   const paper = await paperPortfolioCompact(env, numberOrNull(objectValue(realtime).price));
   const latestRuns = objectValue(alerts.latest_runs);
   const quick = objectValue(latestRuns.quick);
   const deep = objectValue(latestRuns.deep);
+  const client = objectValue(clientSummary);
+  const clientMetrics = objectValue(client.key_metrics);
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -5565,11 +5998,17 @@ async function dashboardHtml(env: Env): Promise<string> {
     <section class="grid">
       ${dashboardCard("Ops", formatStatusLabel(ops.status), `Worker ${WORKER_VERSION}`, statusClass(ops.status))}
       ${dashboardCard("Spot Bitget", realtime.price ? `$${Number(realtime.price).toFixed(2)}` : "Absent", `${realtime.status || "absent"} - age ${realtime.age_seconds ?? "?"}s`, statusClass(realtime.status))}
+      ${dashboardCard("Resume client", String(client.strategy_action || "absent"), `${client.bias || "biais absent"} / risque ${client.risk || "absent"}`, statusClass(client.status))}
+      ${dashboardCard("VaR 30j", formatMaybePercent(clientMetrics.var_95), `CVaR ${formatMaybePercent(clientMetrics.cvar_95)} - confidence ${clientMetrics.model_confidence ?? "?"}/100`, statusClass(client.risk === "critique" ? "critical" : client.risk === "eleve" ? "warning" : "ok"))}
       ${dashboardCard("Alertes modele", `${alerts.issue_count || 0}`, `niveau ${formatStatusLabel(alerts.status)}`, statusClass(alerts.status))}
       ${dashboardCard("Deep jobs", String((objectValue(jobs).jobs as unknown[])?.length || 0), "file locale D1", "pill")}
       ${dashboardCard("Strategie", String(strategyPerformance.latest_action || "absent"), `score suivi: ${strategyPerformance.candidate_count ?? 0} candidats`, statusClass(strategyPerformance.status))}
       ${dashboardCard("Paper portfolio", `${paper.net_position_btc ?? 0} BTC`, `PnL ${paper.unrealized_pnl_usdt ?? 0} USDT`, statusClass(paper.status))}
       ${dashboardCard("Live trading", String(liveReady.status || "blocked"), "approval + Bitget gates", statusClass(liveReady.status))}
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Resume client</h2>
+      <p>${escapeHtml(String(client.client_text || "Resume absent.")).replace(/\n/g, "<br>")}</p>
     </section>
     <section class="card" style="margin-top:14px">
       <h2>Derniers runs</h2>
@@ -5588,7 +6027,8 @@ async function dashboardHtml(env: Env): Promise<string> {
       <div class="card"><h2>Live readiness</h2>${dashboardLiveReadiness(liveReady)}</div>
     </section>
     <section class="grid" style="margin-top:14px">
-      <div class="card"><h2>Actions</h2><p><a href="/realtime/collect">Collecter snapshot Bitget</a></p><p><a href="/strategies/performance">Verifier performance strategies</a></p><p><a href="/trading/paper-report">Rapport paper trading</a></p><p><a href="/risk/live-readiness">Verifier live readiness</a></p><p><a href="/model-alerts/test">Tester alerte modele Telegram</a></p><p><a href="/deep-jobs/process">Traiter un job deep</a></p></div>
+      <div class="card"><h2>Actions</h2><p><a href="/client-summary">Resume client JSON</a></p><p><a href="/realtime/collect">Collecter snapshot Bitget</a></p><p><a href="/strategies/performance">Verifier performance strategies</a></p><p><a href="/trading/paper-report">Rapport paper trading</a></p><p><a href="/risk/live-readiness">Verifier live readiness</a></p><p><a href="/model-alerts/test">Tester alerte modele Telegram</a></p><p><a href="/deep-jobs/process">Traiter un job deep</a></p></div>
+      <div class="card"><h2>Produit</h2><p><a href="/sales">Page Whop</a></p><p><a href="/onboarding">Onboarding utilisateur</a></p><p><a href="/market/realtime-capabilities">Capacites realtime</a></p><p><a href="/backtests">Backtests JSON</a></p></div>
       <div class="card"><h2>Legal</h2><p><a href="/legal/privacy">Privacy</a></p><p><a href="/legal/terms">Terms</a></p><p><a href="/legal/disclaimer">Disclaimer</a></p><p><a href="/legal/refund">Refund</a></p></div>
     </section>
   </main>
@@ -5609,7 +6049,7 @@ function dashboardBacktestTable(rowsValue: unknown): string {
   if (!rows.length) {
     return `<p class="muted">Backtests absents du dernier run archive.</p>`;
   }
-  return `<table><tr><th>Horizon</th><th>Hit rate</th><th>Brier</th><th>VaR breach</th><th>Lecture</th></tr>${rows.map((row) => `<tr><td>${row.horizon_days}j</td><td>${formatMaybePercent(row.hit_rate)}</td><td>${escapeHtml(String(row.brier_score ?? "absent"))}</td><td>${formatMaybePercent(row.var95_breach_rate)}</td><td>${escapeHtml(String(row.interpretation || ""))}</td></tr>`).join("")}</table>`;
+  return `<table><tr><th>Horizon</th><th>Hit rate</th><th>Random walk</th><th>Brier skill</th><th>Calibration</th><th>VaR breach</th><th>Lecture</th></tr>${rows.map((row) => `<tr><td>${row.horizon_days}j</td><td>${formatMaybePercent(row.hit_rate)}</td><td>${formatMaybePercent(row.random_walk_hit_rate)}</td><td>${escapeHtml(String(row.brier_skill_vs_random_walk ?? "absent"))}</td><td>${escapeHtml(String(row.calibration_error ?? "absent"))}</td><td>${formatMaybePercent(row.var95_breach_rate)}</td><td>${escapeHtml(String(row.interpretation || ""))}</td></tr>`).join("")}</table>`;
 }
 
 function dashboardStrategyPerformance(payload: Record<string, unknown>): string {
@@ -5630,6 +6070,100 @@ function dashboardLiveReadiness(payload: Record<string, unknown>): string {
     return `<p class="pill ok">Ready gated</p><p class="muted">Execution live toujours soumise a approbation explicite.</p>`;
   }
   return `<ul>${blockers.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+async function salesPageHtml(env: Env): Promise<string> {
+  const summary = objectValue(await buildClientSummary(env).catch(() => ({})));
+  const action = stringOrNull(summary.strategy_action) || "hold";
+  const risk = stringOrNull(summary.risk) || "absent";
+  const score = summary.strategy_score ?? "absent";
+  return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quant BTC Model - Whop</title>
+  <style>
+    body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:#f8fafc;color:#111827}
+    .hero{background:#101828;color:white;padding:48px 22px 42px}
+    .wrap{max-width:1080px;margin:0 auto}
+    h1{font-size:42px;line-height:1.05;margin:0 0 14px;letter-spacing:0}
+    h2{font-size:22px;margin:0 0 12px}
+    p{line-height:1.55}
+    .sub{font-size:18px;color:#d0d5dd;max-width:760px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:18px}
+    .panel{background:white;border:1px solid #e5e7eb;border-radius:8px;padding:18px}
+    .dark{background:#182230;color:white;border-color:#344054}
+    .metric{font-size:26px;font-weight:750;margin:6px 0}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#eef4ff;color:#1849a9;font-size:12px}
+    .price{font-weight:750;font-size:30px}
+    main{max-width:1080px;margin:0 auto;padding:24px 22px 42px}
+    ul{padding-left:18px}
+    li{margin:7px 0}
+    a{color:#155eef;text-decoration:none}
+    .cta{display:inline-block;background:#155eef;color:white;padding:11px 14px;border-radius:8px;font-weight:700;margin-right:8px}
+    .muted{color:#667085;font-size:13px}
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <div class="wrap">
+      <span class="pill">BTC probabiliste - Telegram + GPT + dashboard</span>
+      <h1>Quant BTC Model</h1>
+      <p class="sub">Un systeme d'analyse Bitcoin qui transforme les donnees Bitget, les simulations, les regimes et les risques en decisions probabilistes lisibles. Pas une boule de cristal: une carte de scenarios, de risque et de discipline.</p>
+      <p><a class="cta" href="/dashboard">Voir le dashboard</a><a class="cta" href="/onboarding">Voir l'onboarding</a></p>
+      <div class="grid">
+        <div class="panel dark"><div class="muted">Strategie actuelle</div><div class="metric">${escapeHtml(action)}</div><div>Score ${escapeHtml(String(score))}</div></div>
+        <div class="panel dark"><div class="muted">Risque actuel</div><div class="metric">${escapeHtml(risk)}</div><div>VaR/CVaR + confidence gates</div></div>
+        <div class="panel dark"><div class="muted">Mode trading</div><div class="metric">paper-first</div><div>Live volontairement verrouille</div></div>
+      </div>
+    </div>
+  </section>
+  <main>
+    <section class="grid">
+      <div class="panel"><h2>Ce que le client recoit</h2><ul><li>Analyse BTC multi-frame quick/deep.</li><li>Resume client court: biais, risque, strategie, raison, action.</li><li>Alertes Telegram propres: CRITICAL direct, WARNING en digest.</li><li>Paper trading et suivi PnL hypothetique.</li></ul></div>
+      <div class="panel"><h2>Pricing indicatif Whop</h2><ul><li>Starter: 29-49 EUR/mois, analyses + Telegram.</li><li>Pro: 79-149 EUR/mois, deep, strategies, dashboard, paper.</li><li>Founders: 199 EUR/mois, acces early + feedback direct.</li></ul></div>
+      <div class="panel"><h2>Limites explicites</h2><ul><li>Aucun conseil financier.</li><li>Les outputs sont inferred, pas des certitudes.</li><li>Les backtests peuvent montrer une sous-calibration du risque.</li><li>Le live trading reel reste desactive par defaut.</li></ul></div>
+    </section>
+    <section class="panel" style="margin-top:14px"><h2>Promesse propre</h2><p>Quant BTC Model aide a lire le marche en probabilites: distribution, regimes, VaR/CVaR, confidence, contexte ETF/liquidite/options quand disponible, puis transforme tout cela en un etat operationnel prudent: hold, buy candidate, sell/reduce candidate ou paper only.</p><p class="muted">Version ${WORKER_VERSION}. Page concue pour servir de base Whop; ajouter captures GPT/Telegram dans Whop directement.</p></section>
+  </main>
+</body>
+</html>`;
+}
+
+function onboardingHtml(): string {
+  return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quant BTC - Onboarding</title>
+  <style>
+    body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f7f9;color:#111827}
+    header{background:#0f172a;color:white;padding:30px 22px}
+    main{max-width:980px;margin:0 auto;padding:24px 22px 44px}
+    h1{margin:0;font-size:34px;letter-spacing:0}
+    h2{font-size:20px;margin:0 0 10px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+    .card{background:white;border:1px solid #e5e7eb;border-radius:8px;padding:18px}
+    code{background:#eef2f7;border-radius:5px;padding:2px 5px}
+    li{margin:8px 0;line-height:1.45}
+    a{color:#155eef;text-decoration:none}
+  </style>
+</head>
+<body>
+  <header><main style="padding:0"><h1>Bien demarrer avec Quant BTC</h1><p>Lis les sorties comme des scenarios probabilistes, jamais comme des certitudes.</p></main></header>
+  <main>
+    <section class="grid">
+      <div class="card"><h2>Commandes Telegram</h2><ul><li><code>/summary</code> resume client court.</li><li><code>/alerts</code> alertes modele detaillees.</li><li><code>/status</code> sante ops.</li><li><code>/quick</code> dernier run quick.</li><li><code>/deep_run</code> met un deep en file.</li><li><code>/strategy_deep</code> score strategie.</li><li><code>/paper_strategy</code> paper trade si gates OK.</li><li><code>/mute 60</code> silence 60 minutes.</li></ul></div>
+      <div class="card"><h2>Lire les risques</h2><ul><li>VaR95: seuil des 5% pires scenarios simules.</li><li>CVaR95: perte moyenne dans ces scenarios pires que la VaR.</li><li>Confidence sous 50: conclusion directionnelle fragile.</li><li>Transition elevee: regime mal classe, prudence.</li></ul></div>
+      <div class="card"><h2>Ce que GPT peut faire</h2><ul><li>Analyser BTC live/cache avec provenance.</li><li>Comparer quick/deep et expliquer les gates.</li><li>Proposer des paper trades verrouilles.</li><li>Surveiller alertes et PnL paper.</li></ul></div>
+      <div class="card"><h2>Ce que GPT ne fait pas</h2><ul><li>Ne promet aucun prix futur.</li><li>Ne donne pas de conseil financier.</li><li>Ne trade pas reellement sans activation live + approbation.</li><li>N'invente pas une donnee absente.</li></ul></div>
+    </section>
+    <section class="card" style="margin-top:14px"><h2>Workflow recommande</h2><ol><li>Commence par <code>/summary</code>.</li><li>Si risque ou confidence semble fragile, consulte <code>/alerts</code>.</li><li>Pour une decision operationnelle, utilise <code>/strategy_deep</code>.</li><li>Pour tester sans argent reel, utilise uniquement <code>/paper_strategy</code>.</li></ol><p><a href="/dashboard">Ouvrir le dashboard</a> - <a href="/sales">Voir la page Whop</a></p></section>
+  </main>
+</body>
+</html>`;
 }
 
 function statusClass(value: unknown): string {
