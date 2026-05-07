@@ -1,0 +1,190 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Strategy",
+    "version": "1.28.0"
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-strategy.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "btcStrategyHealth",
+        "summary": "Health check du Worker strategy.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "worker_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/status": {
+      "get": {
+        "operationId": "btcStrategyStatus",
+        "summary": "Statut du moteur de strategies quantitatives.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "worker_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/signal": {
+      "get": {
+        "operationId": "btcStrategySignal",
+        "summary": "Score quantitatif strategy BTC.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "quick",
+                "tactical",
+                "deep"
+              ]
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "type": "string"
+                    },
+                    "side": {
+                      "type": "string"
+                    },
+                    "ensemble_score": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/paper-order": {
+      "get": {
+        "operationId": "btcStrategyPaperOrder",
+        "summary": "Creer un ordre paper strategy si les gates passent.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "quick",
+                "tactical",
+                "deep"
+              ]
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "order_id": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
