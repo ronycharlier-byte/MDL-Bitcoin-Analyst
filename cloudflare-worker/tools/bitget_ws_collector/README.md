@@ -6,10 +6,47 @@ Cloudflare Workers free tier n'est pas un daemon WebSocket permanent. Ce script 
 
 `POST /realtime/ingest`
 
-## Demarrage
+## Option recommandee: VPS gratuit Always Free
+
+Objectif: le collecteur tourne 24/7 et redemarre tout seul.
+
+Plateforme recommandee gratuite: Oracle Cloud Always Free VM.
+
+Principe:
+
+1. Creer une VM Ubuntu Always Free.
+2. Cloner ce repo sur la VM.
+3. Installer le service `systemd`.
+4. Verifier les logs.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git
+git clone https://github.com/ronycharlier-byte/MDL-Bitcoin-Analyst.git
+cd MDL-Bitcoin-Analyst/cloudflare-worker/tools/bitget_ws_collector
+sudo REALTIME_INGEST_SECRET="<SECRET>" bash install_systemd_ubuntu.sh
+```
+
+Verifier:
+
+```bash
+systemctl status quant-btc-bitget-collector
+journalctl -u quant-btc-bitget-collector -f
+```
+
+## Alternative Docker
 
 ```powershell
-pip install websockets
+copy .env.example .env
+# Renseigner REALTIME_INGEST_SECRET
+docker compose up -d --build
+docker logs -f quant-btc-bitget-ws-collector
+```
+
+## Demarrage manuel local
+
+```powershell
+pip install -r requirements.txt
 python collector.py --worker-url https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev --secret "<REALTIME_INGEST_SECRET>"
 ```
 

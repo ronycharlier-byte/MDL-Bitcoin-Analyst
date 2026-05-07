@@ -1,0 +1,21 @@
+[Unit]
+Description=Quant BTC Bitget WebSocket Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quantbtc
+Group=quantbtc
+WorkingDirectory=/opt/quant-btc-bitget-collector
+EnvironmentFile=/etc/quant-btc-bitget-collector.env
+ExecStart=/opt/quant-btc-bitget-collector/.venv/bin/python /opt/quant-btc-bitget-collector/collector.py --worker-url ${WORKER_URL} --secret ${REALTIME_INGEST_SECRET} --min-interval-seconds ${MIN_INTERVAL_SECONDS}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

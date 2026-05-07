@@ -1,0 +1,18 @@
+services:
+  bitget-ws-collector:
+    build: .
+    container_name: quant-btc-bitget-ws-collector
+    restart: unless-stopped
+    environment:
+      WORKER_URL: ${WORKER_URL:-https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev}
+      REALTIME_INGEST_SECRET: ${REALTIME_INGEST_SECRET}
+      MIN_INTERVAL_SECONDS: ${MIN_INTERVAL_SECONDS:-15}
+    command:
+      - python
+      - collector.py
+      - --worker-url
+      - ${WORKER_URL:-https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev}
+      - --secret
+      - ${REALTIME_INGEST_SECRET}
+      - --min-interval-seconds
+      - ${MIN_INTERVAL_SECONDS:-15}
