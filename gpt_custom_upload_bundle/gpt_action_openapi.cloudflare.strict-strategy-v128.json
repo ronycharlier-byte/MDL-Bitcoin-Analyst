@@ -1,0 +1,266 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Model Lite Strict",
+    "version": "1.28.0",
+    "description": "Schema GPT Actions minimal et strict. Remplace l'action existante du meme domaine au lieu d'en creer une deuxieme."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "btcHealth",
+        "summary": "Verifier que le Worker Quant BTC repond.",
+        "responses": {
+          "200": {
+            "description": "Health response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze": {
+      "get": {
+        "operationId": "btcAnalyze",
+        "summary": "Analyse BTC probabiliste avec preset quick, tactical ou deep.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["quick", "tactical", "deep"],
+              "default": "quick"
+            }
+          },
+          {
+            "name": "fresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Analyse response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "archive_id": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze-deep": {
+      "get": {
+        "operationId": "btcAnalyzeDeep",
+        "summary": "Analyse BTC deep dediee avec cache D1 recent si disponible.",
+        "parameters": [
+          {
+            "name": "fresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deep analysis response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "archive_id": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/status": {
+      "get": {
+        "operationId": "btcStrategiesStatus",
+        "summary": "Statut du moteur de strategies quantitatives.",
+        "responses": {
+          "200": {
+            "description": "Strategy status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/signal": {
+      "get": {
+        "operationId": "btcStrategiesSignal",
+        "summary": "Score ensemble de strategies quantitatives BTC.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["quick", "tactical", "deep"],
+              "default": "deep"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Strategy signal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "action": { "type": ["string", "null"] },
+                    "ensemble_score": { "type": ["number", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/paper-order": {
+      "get": {
+        "operationId": "btcStrategyPaperOrder",
+        "summary": "Creer un ordre paper derive du score strategie si les gates passent.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["quick", "tactical", "deep"],
+              "default": "deep"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paper order response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "order_id": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trading/status": {
+      "get": {
+        "operationId": "btcTradingStatus",
+        "summary": "Statut du journal trading paper/proposition.",
+        "responses": {
+          "200": {
+            "description": "Trading status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,11 +1,12 @@
 {
   "name": "quant-btc-model-worker",
-  "version": "1.27.0",
+  "version": "1.28.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:strategy": "wrangler deploy --config wrangler.strategy.toml",
     "deploy:schema": "powershell -ExecutionPolicy Bypass -File ./deploy_and_write_schema.ps1",
     "check": "tsc --noEmit"
   },

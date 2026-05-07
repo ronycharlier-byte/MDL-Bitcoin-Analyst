@@ -1,0 +1,220 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Quant BTC Strategy Action",
+    "version": "1.28.0",
+    "description": "Action GPT dediee aux strategies quantitatives BTC sur un domaine Worker separe."
+  },
+  "servers": [
+    {
+      "url": "https://quant-btc-model-strategy.mdl-bitcoin-analyst.workers.dev"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "btcStrategyHealth",
+        "summary": "Verifier le Worker Strategy.",
+        "responses": {
+          "200": {
+            "description": "Health response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/status": {
+      "get": {
+        "operationId": "btcStrategyStatus",
+        "summary": "Statut du moteur de strategies quantitatives.",
+        "responses": {
+          "200": {
+            "description": "Strategy status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/signal": {
+      "get": {
+        "operationId": "btcStrategySignal",
+        "summary": "Calculer un score ensemble de strategies quantitatives BTC.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["quick", "tactical", "deep"],
+              "default": "deep"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Strategy signal response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "action": { "type": ["string", "null"] },
+                    "ensemble_score": { "type": ["number", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/paper-order": {
+      "get": {
+        "operationId": "btcStrategyPaperOrder",
+        "summary": "Creer un ordre paper a partir du score strategie si les gates passent.",
+        "parameters": [
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["quick", "tactical", "deep"],
+              "default": "deep"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paper order response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "order_id": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/strategies/propose-trade": {
+      "get": {
+        "operationId": "btcStrategyProposeTrade",
+        "summary": "Creer une proposition de trade paper ou live gardee par approbation.",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["paper", "live"],
+              "default": "paper"
+            }
+          },
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["quick", "tactical", "deep"],
+              "default": "deep"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trade proposal response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "order_id": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

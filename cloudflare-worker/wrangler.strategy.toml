@@ -1,4 +1,4 @@
-name = "quant-btc-model-lite"
+name = "quant-btc-model-strategy"
 main = "src/index.ts"
 compatibility_date = "2026-05-04"
 workers_dev = true
@@ -8,6 +8,7 @@ preview_urls = false
 crons = ["*/5 * * * *"]
 
 [vars]
+WORKER_SERVICE_NAME = "quant-btc-model-strategy-worker"
 MAX_SIMULATIONS = "10000"
 DEFAULT_SIMULATIONS = "2000"
 DEFAULT_HORIZON = "365"

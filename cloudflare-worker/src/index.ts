@@ -1,5 +1,6 @@
 ﻿interface Env {
   DB?: D1Database;
+  WORKER_SERVICE_NAME?: string;
   MAX_SIMULATIONS?: string;
   DEFAULT_SIMULATIONS?: string;
   DEFAULT_HORIZON?: string;
@@ -38,6 +39,8 @@
   BITGET_API_KEY?: string;
   BITGET_API_SECRET?: string;
   BITGET_API_PASSPHRASE?: string;
+  STRATEGY_MIN_ENSEMBLE_SCORE?: string;
+  STRATEGY_MIN_AGREEMENT?: string;
 }
 
 interface RunRequest {
@@ -93,9 +96,10 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.27.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.27.0";
+const WORKER_VERSION = "1.28.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.28.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
+const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
 const SIMULATION_HARD_CAP = 10000;
@@ -121,6 +125,8 @@ const TRADING_BUY_PROB_UP_DEFAULT = 0.58;
 const TRADING_SELL_PROB_UP_DEFAULT = 0.42;
 const TRADING_MAX_SPOT_AGE_SECONDS_DEFAULT = 180;
 const BITGET_SPOT_PLACE_ORDER_PATH = "/api/v2/spot/trade/place-order";
+const STRATEGY_MIN_ENSEMBLE_SCORE_DEFAULT = 25;
+const STRATEGY_MIN_AGREEMENT_DEFAULT = 0.55;
 const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
   "/run-quick": {
     name: "quick",
@@ -192,7 +198,7 @@ export default {
         const now = new Date();
         return json({
           status: "ok",
-          service: "quant-btc-model-lite-worker",
+          service: workerServiceName(env),
           worker_version: WORKER_VERSION,
           mode: "render_bitget_bridge_probabilistic",
           timestamp: now.toISOString(),
@@ -207,7 +213,7 @@ export default {
         const now = new Date();
         return json({
           status: "ok",
-          service: "quant-btc-model-lite-worker",
+          service: workerServiceName(env),
           worker_version: WORKER_VERSION,
           schema_version: SCHEMA_VERSION,
           model_version: MODEL_VERSION,
@@ -256,7 +262,11 @@ export default {
             "paper_trading_engine",
             "gpt_trade_proposals",
             "telegram_trade_approval",
-            "bitget_live_trading_guarded_disabled_by_default"
+            "bitget_live_trading_guarded_disabled_by_default",
+            "quant_strategy_engine_v1",
+            "strategy_ensemble_scoring",
+            "strategy_signal_persistence",
+            "strategy_paper_trading"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -271,11 +281,11 @@ export default {
         const now = new Date();
         return json({
           status: "ok",
-          service: "quant-btc-model-lite-worker",
+          service: workerServiceName(env),
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/strategies/status", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -325,6 +335,7 @@ export default {
             model_alerts: getModelAlertConfig(env)
           },
           trading: tradingPublicStatus(env),
+          strategies: strategyPublicStatus(env),
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
             render_full_engine: "Render remains the Bitget-backed Python/numpy engine behind this Worker.",
@@ -457,6 +468,26 @@ export default {
 
       if (url.pathname === "/trading/approve" && (request.method === "POST" || request.method === "GET")) {
         return json(await approveTradeOrder(env, await readInput(request, url), "gpt_action"));
+      }
+
+      if (url.pathname === "/strategies/status" && request.method === "GET") {
+        return json(await strategyStatus(env));
+      }
+
+      if ((url.pathname === "/strategies/signal" || url.pathname === "/strategies/ensemble") && request.method === "GET") {
+        return json(await buildStrategySignal(env, await readInput(request, url)));
+      }
+
+      if (url.pathname === "/strategies/signals" && request.method === "GET") {
+        return json(await listStrategySignals(env, clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50)));
+      }
+
+      if (url.pathname === "/strategies/paper-order" && (request.method === "POST" || request.method === "GET")) {
+        return json(await createStrategyPaperOrder(env, await readInput(request, url), "gpt_strategy_action"));
+      }
+
+      if (url.pathname === "/strategies/propose-trade" && (request.method === "POST" || request.method === "GET")) {
+        return json(await proposeStrategyTradeOrder(env, await readInput(request, url), "gpt_strategy_action"));
       }
 
       if (url.pathname === "/backtests" && request.method === "GET") {
@@ -1107,6 +1138,7 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
       env.DB.prepare("SELECT COUNT(*) AS count FROM trade_orders"),
       env.DB.prepare("SELECT COUNT(*) AS count FROM trade_events")
     ]);
+    const strategySignals = await optionalD1Count(env, "strategy_signals");
     return {
       status: "ok",
       target: "cloudflare_d1",
@@ -1123,9 +1155,10 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
         deep_jobs: countFromD1(jobs),
         user_alert_rules: countFromD1(rules),
         trade_orders: countFromD1(tradeOrders),
-        trade_events: countFromD1(tradeEvents)
+        trade_events: countFromD1(tradeEvents),
+        strategy_signals: strategySignals
       },
-      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules, queued deep jobs and trading journals",
+      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules, queued deep jobs, strategy signals and trading journals",
       checked_at_utc: new Date().toISOString(),
       checked_at_paris: parisIso(new Date())
     };
@@ -1135,6 +1168,18 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
       target: "cloudflare_d1",
       error: error instanceof Error ? error.message : String(error)
     };
+  }
+}
+
+async function optionalD1Count(env: Env, tableName: string): Promise<number | string> {
+  if (!env.DB || !/^[a-z_]+$/i.test(tableName)) {
+    return "absent";
+  }
+  try {
+    const result = await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).first();
+    return numberOrNull(objectValue(result).count) ?? 0;
+  } catch {
+    return "migration_pending";
   }
 }
 
@@ -1198,7 +1243,7 @@ async function buildOpsStatus(env: Env): Promise<Record<string, unknown>> {
   const status = blockers.length > 0 ? "degraded" : warnings.length > 0 ? "warning" : "ok";
   return {
     status,
-    service: "quant-btc-model-lite-worker",
+    service: workerServiceName(env),
     worker_version: WORKER_VERSION,
     schema_version: SCHEMA_VERSION,
     checked_at_utc: now.toISOString(),
@@ -1897,6 +1942,474 @@ async function tradingStatus(env: Env): Promise<Record<string, unknown>> {
   };
 }
 
+function getStrategyConfig(env: Env): Record<string, unknown> {
+  return {
+    min_ensemble_score: clampFloat(parseNumber(env.STRATEGY_MIN_ENSEMBLE_SCORE, STRATEGY_MIN_ENSEMBLE_SCORE_DEFAULT), 1, 100),
+    min_agreement: clampFloat(parseNumber(env.STRATEGY_MIN_AGREEMENT, STRATEGY_MIN_AGREEMENT_DEFAULT), 0.10, 1),
+    default_horizon: 30,
+    supported_methods: [
+      "trend_momentum",
+      "mean_reversion",
+      "volatility_breakout",
+      "regime_filter",
+      "risk_adjusted_quant",
+      "flow_liquidity_context"
+    ],
+    ensemble_policy: "Weighted score in [-100,+100]. Positive means buy bias candidate, negative means sell/reduce candidate, neutral means hold.",
+    execution_policy: "Strategy Engine only creates inferred candidates. Paper/proposal routes must still pass the trading journal and approval rules."
+  };
+}
+
+function strategyPublicStatus(env: Env): Record<string, unknown> {
+  return {
+    status: "enabled",
+    version: "strategy_engine_v1",
+    ...getStrategyConfig(env),
+    data_policy: {
+      market_price: "real Bitget when available",
+      model_outputs: "inferred",
+      strategy_scores: "inferred",
+      non_bitget_spot_fallback: "absent"
+    }
+  };
+}
+
+async function strategyStatus(env: Env): Promise<Record<string, unknown>> {
+  return {
+    status: "ok",
+    service: "quant-btc-model-strategies",
+    worker_version: WORKER_VERSION,
+    schema_version: SCHEMA_VERSION,
+    strategies: strategyPublicStatus(env),
+    d1: env.DB ? "configured" : "absent",
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date()),
+    warning: "Strategy scores are probabilistic infrastructure signals, not financial advice."
+  };
+}
+
+async function buildStrategySignal(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const asset = normalizeAsset(input.asset);
+  const horizon = clampInt(parseNumber(input.horizon, 30), 1, 3650);
+  const presetPath = tradingPresetPath(input);
+  const preset = ANALYSIS_PRESETS[presetPath];
+  let payload = await latestD1RunPayload(env, asset, preset.horizons, 0);
+  if (!payload && parseBoolean(input.refresh, false)) {
+    await refreshPresetForModelAlerts(env, presetPath, "/strategies/signal", 1, true);
+    payload = await latestD1RunPayload(env, asset, preset.horizons, 0);
+  }
+  if (!payload) {
+    return {
+      status: "absent",
+      action: "hold",
+      reason: `No ${preset.name} run available in D1 cache.`,
+      data_status: { model_output: "absent", market_data: "absent", strategy_scores: "absent" }
+    };
+  }
+
+  let realtime = await realtimeStatus(env);
+  if (realtime.status !== "ok") {
+    await collectRealtimeMarketSnapshot(env, "strategy_signal");
+    realtime = await realtimeStatus(env);
+  }
+  const frame = findFrameForHorizon(payload, horizon) || findFrameForHorizon(payload, 30) || objectValue(Array.isArray(payload.frames) ? payload.frames[0] : {});
+  const frames = Array.isArray(payload.frames) ? payload.frames.map((item) => objectValue(item)) : [];
+  const spot = numberOrNull(realtime.price) || parsePriceValue(payload.reference_spot) || parsePriceValue(frame.reference_spot);
+  const spotAge = numberOrNull(realtime.age_seconds);
+  const strategy = evaluateStrategyEnsemble(env, payload, frames, frame, spot, realtime);
+  const signalId = `strategy_${new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15)}_${randomRunSuffix()}`;
+  const result: Record<string, unknown> = {
+    status: "ok",
+    signal_id: signalId,
+    asset,
+    preset: preset.name,
+    horizon: numberOrNull(frame.horizon) || horizon,
+    action: strategy.action,
+    side: strategy.side,
+    ensemble_score: strategy.ensemble_score,
+    agreement: strategy.agreement,
+    confidence: strategy.confidence,
+    suggested_notional_usdt: strategy.side === "buy" ? getTradingConfig(env).default_notional_usdt : null,
+    strategies: strategy.strategies,
+    gates: strategy.gates,
+    provenance: {
+      archive_id: payload.archive_id,
+      run_id: stringOrNull(frame.run_id),
+      report_date_utc: payload.report_date_utc,
+      report_date_paris: payload.report_date_paris,
+      reference_spot: payload.reference_spot,
+      reference_spot_timestamp_utc: payload.reference_spot_timestamp_utc,
+      reference_spot_timestamp_paris: payload.reference_spot_timestamp_paris,
+      realtime_spot: spot,
+      realtime_spot_age_seconds: spotAge,
+      realtime_source: realtime.source,
+      worker_version: WORKER_VERSION,
+      schema_version: SCHEMA_VERSION
+    },
+    selected_frame: summarizeStrategyFrame(frame),
+    context: {
+      realtime,
+      liquidity: objectValue(objectValue(payload.context).liquidity),
+      options: objectValue(objectValue(payload.context).options),
+      etf_flow_trends: objectValue(objectValue(payload.context).etf_flow_trends)
+    },
+    data_status: {
+      price: "real",
+      model_outputs: "inferred",
+      strategy_scores: "inferred",
+      trade_execution: "not_executed"
+    },
+    warning: "Signal de strategie probabiliste uniquement; pas une prediction certaine ni un conseil financier."
+  };
+  result.d1_persist = await persistStrategySignal(env, result);
+  return result;
+}
+
+function evaluateStrategyEnsemble(
+  env: Env,
+  payload: Record<string, unknown>,
+  frames: Record<string, unknown>[],
+  selectedFrame: Record<string, unknown>,
+  spot: number | null,
+  realtime: Record<string, unknown>
+): Record<string, unknown> {
+  const config = getStrategyConfig(env);
+  const trading = getTradingConfig(env);
+  const strategies = [
+    scoreTrendMomentum(frames),
+    scoreMeanReversion(selectedFrame, spot),
+    scoreVolatilityBreakout(selectedFrame, spot),
+    scoreRegimeFilter(selectedFrame),
+    scoreRiskAdjustedQuant(selectedFrame),
+    scoreFlowLiquidityContext(payload, realtime)
+  ];
+  const totalWeight = strategies.reduce((sum, item) => sum + Number(item.weight || 0), 0) || 1;
+  const ensembleScore = clampFloat(
+    strategies.reduce((sum, item) => sum + Number(item.score || 0) * Number(item.weight || 0), 0) / totalWeight,
+    -100,
+    100
+  );
+  const sign = ensembleScore > 0 ? 1 : ensembleScore < 0 ? -1 : 0;
+  const active = strategies.filter((item) => Math.abs(Number(item.score || 0)) >= 8);
+  const agreeing = sign === 0 ? 0 : active.filter((item) => Math.sign(Number(item.score || 0)) === sign).length;
+  const agreement = active.length ? agreeing / active.length : 0;
+  const confidenceScore = numberOrNull(objectValue(selectedFrame.confidence).score);
+  const risk = objectValue(selectedFrame.risk_metrics);
+  const regime = objectValue(selectedFrame.regime_distribution);
+  const var95 = normalizeRatio(risk.var_95);
+  const transition = normalizeRatio(regime.non_classified_transition);
+  const confidence = clampFloat(
+    ((confidenceScore ?? 50) * 0.55) + (Math.abs(ensembleScore) * 0.20) + (agreement * 100 * 0.25),
+    0,
+    100
+  );
+  const gates = [
+    gate("model_payload_present", true, "model output present"),
+    gate("spot_real_and_fresh", Boolean(spot && numberOrNull(realtime.age_seconds) !== null && Number(realtime.age_seconds) <= Number(trading.max_spot_age_seconds)), `spot age ${numberOrNull(realtime.age_seconds) ?? "absent"}s <= ${trading.max_spot_age_seconds}s`),
+    gate("ensemble_score_ok", Math.abs(ensembleScore) >= Number(config.min_ensemble_score), `score ${ensembleScore.toFixed(2)} >= ${config.min_ensemble_score}`),
+    gate("strategy_agreement_ok", agreement >= Number(config.min_agreement), `agreement ${(agreement * 100).toFixed(1)}% >= ${formatPercent(Number(config.min_agreement))}`),
+    gate("confidence_ok", confidenceScore !== null && confidenceScore >= Number(trading.min_confidence), `model confidence ${confidenceScore ?? "absent"} >= ${trading.min_confidence}`),
+    gate("var95_ok", var95 !== null && var95 <= Number(trading.max_var95), `VaR95 ${formatMaybePercent(var95)} <= ${formatPercent(Number(trading.max_var95))}`),
+    gate("transition_ok", transition !== null && transition <= Number(trading.max_transition), `transition ${formatMaybePercent(transition)} <= ${formatPercent(Number(trading.max_transition))}`)
+  ];
+  const gatesPass = gates.every((item) => item.passed);
+  const action = !gatesPass
+    ? "hold"
+    : ensembleScore > 0
+      ? "buy_candidate"
+      : ensembleScore < 0
+        ? "sell_or_reduce_candidate"
+        : "hold";
+  return {
+    action,
+    side: action === "buy_candidate" ? "buy" : action === "sell_or_reduce_candidate" ? "sell" : "hold",
+    ensemble_score: Number(ensembleScore.toFixed(2)),
+    agreement: Number(agreement.toFixed(4)),
+    confidence: Number(confidence.toFixed(2)),
+    strategies,
+    gates
+  };
+}
+
+function scoreTrendMomentum(frames: Record<string, unknown>[]): Record<string, unknown> {
+  const weights: Record<number, number> = { 1: 0.04, 3: 0.05, 7: 0.09, 14: 0.10, 30: 0.18, 90: 0.22, 180: 0.17, 365: 0.15 };
+  let weighted = 0;
+  let total = 0;
+  const inputs: Record<string, unknown>[] = [];
+  for (const frame of frames) {
+    const horizon = numberOrNull(frame.horizon);
+    const distribution = objectValue(frame.distribution);
+    const probUp = normalizeRatio(distribution.prob_up);
+    const medianReturn = normalizeRatio(distribution.median_return);
+    if (!horizon || probUp === null || medianReturn === null) {
+      continue;
+    }
+    const weight = weights[horizon] || 0.05;
+    const score = clampFloat(((probUp - 0.5) * 180) + (medianReturn * 120), -100, 100);
+    weighted += score * weight;
+    total += weight;
+    inputs.push({ horizon, prob_up: probUp, median_return: medianReturn, score: Number(score.toFixed(2)) });
+  }
+  const score = total ? weighted / total : 0;
+  return strategyScore("trend_momentum", score, 0.22, "Momentum multi-horizon base sur P(up) et rendement median.", inputs);
+}
+
+function scoreMeanReversion(frame: Record<string, unknown>, spot: number | null): Record<string, unknown> {
+  const distribution = objectValue(frame.distribution);
+  const p10 = parsePriceValue(distribution.p10_price);
+  const median = parsePriceValue(distribution.median_price);
+  const p90 = parsePriceValue(distribution.p90_price);
+  if (!spot || !p10 || !median || !p90 || p90 <= p10) {
+    return strategyScore("mean_reversion", 0, 0.14, "Prix/percentiles indisponibles.", { spot, p10, median, p90 });
+  }
+  const halfRange = (p90 - p10) / 2;
+  const score = clampFloat(((median - spot) / halfRange) * 45, -100, 100);
+  return strategyScore("mean_reversion", score, 0.14, "Score positif si le spot est sous le centre de distribution, negatif s'il est riche vs distribution.", { spot, p10, median, p90 });
+}
+
+function scoreVolatilityBreakout(frame: Record<string, unknown>, spot: number | null): Record<string, unknown> {
+  const distribution = objectValue(frame.distribution);
+  const risk = objectValue(frame.risk_metrics);
+  const p10 = parsePriceValue(distribution.p10_price);
+  const p90 = parsePriceValue(distribution.p90_price);
+  const probUp = normalizeRatio(distribution.prob_up);
+  const medianReturn = normalizeRatio(distribution.median_return);
+  const var95 = normalizeRatio(risk.var_95);
+  const width = spot && p10 && p90 ? Math.max(0, (p90 - p10) / spot) : null;
+  const score = probUp === null || medianReturn === null
+    ? 0
+    : ((probUp - 0.5) * 150) + (medianReturn * 110) + ((width || 0) * 12) - ((var95 || 0) * 70);
+  return strategyScore("volatility_breakout", score, 0.16, "Cherche une asymetrie positive en penalisation du risque de queue.", { prob_up: probUp, median_return: medianReturn, distribution_width: width, var95 });
+}
+
+function scoreRegimeFilter(frame: Record<string, unknown>): Record<string, unknown> {
+  const regime = objectValue(frame.regime_distribution);
+  const bull = normalizeRatio(regime.bull) || 0;
+  const bear = normalizeRatio(regime.bear) || 0;
+  const range = normalizeRatio(regime.range) || 0;
+  const transition = normalizeRatio(regime.non_classified_transition) || 0;
+  const score = (bull - bear) * 120 - transition * 55 - (range > 0.75 ? 8 : 0);
+  return strategyScore("regime_filter", score, 0.18, "Filtre bull/bear/range avec penalisation de la zone transition.", { bull, bear, range, transition });
+}
+
+function scoreRiskAdjustedQuant(frame: Record<string, unknown>): Record<string, unknown> {
+  const distribution = objectValue(frame.distribution);
+  const risk = objectValue(frame.risk_metrics);
+  const confidence = objectValue(frame.confidence);
+  const regime = objectValue(frame.regime_distribution);
+  const probUp = normalizeRatio(distribution.prob_up);
+  const medianReturn = normalizeRatio(distribution.median_return);
+  const var95 = normalizeRatio(risk.var_95);
+  const cvar95 = normalizeRatio(risk.cvar_95);
+  const confidenceScore = numberOrNull(confidence.score);
+  const transition = normalizeRatio(regime.non_classified_transition);
+  const score = ((probUp ?? 0.5) - 0.5) * 220
+    + ((medianReturn || 0) * 130)
+    + (((confidenceScore ?? 50) - 50) * 0.55)
+    - ((var95 || 0) * 105)
+    - ((cvar95 || 0) * 55)
+    - ((transition || 0) * 45);
+  return strategyScore("risk_adjusted_quant", score, 0.22, "Score quant ajuste du risque: probabilite, mediane, confiance, VaR/CVaR et transition.", { prob_up: probUp, median_return: medianReturn, var95, cvar95, confidence: confidenceScore, transition });
+}
+
+function scoreFlowLiquidityContext(payload: Record<string, unknown>, realtime: Record<string, unknown>): Record<string, unknown> {
+  const context = objectValue(payload.context);
+  const etf = objectValue(context.etf_flow_trends);
+  const liquidity = objectValue(context.liquidity);
+  const options = objectValue(context.options);
+  let score = 0;
+  const latestEtf = numberOrNull(etf.latest_1d_usd_m);
+  const flow7d = numberOrNull(etf.flow_7d_usd_m);
+  const flow30d = numberOrNull(etf.flow_30d_usd_m);
+  const accel7d = numberOrNull(etf.flow_7d_acceleration_usd_m);
+  if (latestEtf !== null) score += latestEtf > 0 ? 7 : -7;
+  if (flow7d !== null) score += flow7d > 0 ? 8 : -8;
+  if (flow30d !== null) score += flow30d > 0 ? 7 : -7;
+  if (accel7d !== null) score += accel7d > 0 ? 4 : -5;
+  const imbalance = numberOrNull(liquidity.order_book_imbalance_1pct) ?? numberOrNull(realtime.order_book_imbalance_1pct);
+  if (imbalance !== null) score += clampFloat(imbalance * 45, -12, 12);
+  const putCallVolume = numberOrNull(options.put_call_volume_ratio);
+  if (putCallVolume !== null) score += putCallVolume < 0.8 ? 5 : putCallVolume > 1.2 ? -7 : 0;
+  const iv = numberOrNull(options.implied_volatility_median);
+  if (iv !== null) score += iv > 70 ? -5 : iv < 35 ? -3 : 0;
+  return strategyScore("flow_liquidity_context", score, 0.08, "Contexte ETF, carnet Bitget et options Deribit; faible poids car plusieurs donnees sont snapshots.", { latest_etf_flow_usd_m: latestEtf, flow_7d_usd_m: flow7d, flow_30d_usd_m: flow30d, flow_7d_acceleration_usd_m: accel7d, order_book_imbalance_1pct: imbalance, put_call_volume_ratio: putCallVolume, iv_median: iv });
+}
+
+function strategyScore(name: string, scoreRaw: number, weight: number, rationale: string, inputs: unknown): Record<string, unknown> {
+  const score = clampFloat(scoreRaw, -100, 100);
+  return {
+    name,
+    score: Number(score.toFixed(2)),
+    weight,
+    direction: score > 8 ? "positive" : score < -8 ? "negative" : "neutral",
+    rationale,
+    inputs
+  };
+}
+
+function summarizeStrategyFrame(frame: Record<string, unknown>): Record<string, unknown> {
+  const distribution = objectValue(frame.distribution);
+  const risk = objectValue(frame.risk_metrics);
+  const regime = objectValue(frame.regime_distribution);
+  const confidence = objectValue(frame.confidence);
+  return {
+    horizon: frame.horizon,
+    run_id: frame.run_id,
+    prob_up: normalizeRatio(distribution.prob_up),
+    median_return: normalizeRatio(distribution.median_return),
+    p10_price: distribution.p10_price,
+    median_price: distribution.median_price,
+    p90_price: distribution.p90_price,
+    var_95: normalizeRatio(risk.var_95),
+    cvar_95: normalizeRatio(risk.cvar_95),
+    bull: normalizeRatio(regime.bull),
+    bear: normalizeRatio(regime.bear),
+    range: normalizeRatio(regime.range),
+    transition: normalizeRatio(regime.non_classified_transition),
+    confidence: confidence.score
+  };
+}
+
+async function persistStrategySignal(env: Env, signal: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", reason: "D1 binding is not configured" };
+  }
+  try {
+    const provenance = objectValue(signal.provenance);
+    await env.DB.prepare(`
+      INSERT INTO strategy_signals (
+        signal_id, asset, preset, horizon, ensemble_score, ensemble_action, agreement,
+        confidence, archive_id, run_id, payload_json, created_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      signal.signal_id,
+      signal.asset,
+      signal.preset,
+      signal.horizon,
+      signal.ensemble_score,
+      signal.action,
+      signal.agreement,
+      signal.confidence,
+      stringOrNull(provenance.archive_id),
+      stringOrNull(provenance.run_id),
+      JSON.stringify(signal),
+      new Date().toISOString()
+    ).run();
+    return { status: "stored", target: "cloudflare_d1" };
+  } catch (error) {
+    return { status: "error", message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function listStrategySignals(env: Env, limit: number): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", signals: [] };
+  }
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT signal_id, asset, preset, horizon, ensemble_score, ensemble_action,
+             agreement, confidence, archive_id, run_id, created_at_utc
+      FROM strategy_signals
+      ORDER BY created_at_utc DESC
+      LIMIT ?
+    `).bind(limit).all();
+    return {
+      status: "ok",
+      signals: (results || []).map((item) => {
+        const row = objectValue(item);
+        return {
+          ...row,
+          created_at_paris: stringOrNull(row.created_at_utc) ? parisIso(new Date(String(row.created_at_utc))) : null
+        };
+      })
+    };
+  } catch (error) {
+    return { status: "error", signals: [], message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function strategySignalToTradingSignal(strategy: Record<string, unknown>, env: Env): Record<string, unknown> {
+  const provenance = objectValue(strategy.provenance);
+  const selected = objectValue(strategy.selected_frame);
+  const side = normalizeTradingSide(strategy.side);
+  const spot = numberOrNull(provenance.realtime_spot) || numberOrNull(provenance.reference_spot);
+  const notional = side === "buy" ? Number(getTradingConfig(env).default_notional_usdt) : null;
+  return {
+    status: strategy.status,
+    asset: strategy.asset,
+    symbol: "BTCUSDT",
+    signal: side === "buy" ? "strategy_buy_candidate" : side === "sell" ? "strategy_sell_or_reduce_candidate" : "no_trade",
+    side,
+    order_type: "market",
+    suggested_notional_usdt: notional,
+    suggested_size_base: side === "buy" && spot && notional ? notional / spot : null,
+    gates: strategy.gates,
+    provenance: {
+      ...provenance,
+      strategy_signal_id: strategy.signal_id,
+      strategy_ensemble_score: strategy.ensemble_score,
+      strategy_agreement: strategy.agreement
+    },
+    model_frame: {
+      horizon: selected.horizon,
+      prob_up: selected.prob_up,
+      median_return: selected.median_return,
+      var95: selected.var_95,
+      cvar95: selected.cvar_95,
+      confidence: selected.confidence,
+      transition: selected.transition
+    },
+    data_status: {
+      price: "real",
+      model_outputs: "inferred",
+      strategy_scores: "inferred",
+      trade_execution: "not_executed"
+    },
+    warning: "Ordre derive d'un score de strategie probabiliste; pas conseil financier."
+  };
+}
+
+async function createStrategyPaperOrder(env: Env, input: Record<string, unknown>, createdBy: string): Promise<Record<string, unknown>> {
+  const strategy = await buildStrategySignal(env, input);
+  const signal = strategySignalToTradingSignal(strategy, env);
+  const order = await createTradeOrder(env, input, signal, "paper", "paper_filled", createdBy);
+  return { ...order, strategy_signal: strategy };
+}
+
+async function proposeStrategyTradeOrder(env: Env, input: Record<string, unknown>, createdBy: string): Promise<Record<string, unknown>> {
+  const requestedMode = String(input.mode || "paper").toLowerCase() === "live" ? "live" : "paper";
+  const strategy = await buildStrategySignal(env, input);
+  const signal = strategySignalToTradingSignal(strategy, env);
+  const status = requestedMode === "live" ? "pending_live_approval" : "pending_paper_approval";
+  const order = await createTradeOrder(env, input, signal, requestedMode, status, createdBy);
+  const chatId = stringOrNull(input.chat_id) || stringOrNull(env.TELEGRAM_CHAT_ID);
+  if (chatId && order.status !== "error") {
+    await sendTelegramMessage(env, chatId, formatStrategyProposalForTelegram(order, strategy), tradeApprovalKeyboard(String(order.order_id)));
+  }
+  return {
+    ...order,
+    strategy_signal: strategy,
+    notification: chatId ? "telegram_sent_or_attempted" : "telegram_absent"
+  };
+}
+
+function formatStrategyProposalForTelegram(order: Record<string, unknown>, strategy: Record<string, unknown>): string {
+  return [
+    "Quant BTC - Proposition strategie",
+    `Ordre: ${order.order_id}`,
+    `Mode: ${order.mode}`,
+    `Side: ${order.side}`,
+    `Score: ${strategy.ensemble_score}`,
+    `Accord: ${formatPercent(numberOrNull(strategy.agreement) || 0)}`,
+    `Action: ${strategy.action}`,
+    `Archive: ${objectValue(strategy.provenance).archive_id || "absente"}`,
+    `Run: ${objectValue(strategy.provenance).run_id || "absent"}`,
+    "Aucun ordre reel n'est envoye sans approbation.",
+    "Sortie probabiliste, pas conseil financier."
+  ].join("\n");
+}
+
 async function buildTradingSignal(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
   const config = getTradingConfig(env);
   const asset = normalizeAsset(input.asset);
@@ -2432,6 +2945,37 @@ function formatTradeOrdersForTelegram(payload: Record<string, unknown>): string 
   return [
     "Quant BTC - Derniers ordres",
     ...orders.map((order) => `${order.order_id} | ${order.mode} | ${order.status} | ${order.side} | ${order.size_usdt || "?"} USDT`)
+  ].join("\n");
+}
+
+function formatStrategySignalForTelegram(signal: Record<string, unknown>): string {
+  const provenance = objectValue(signal.provenance);
+  const frame = objectValue(signal.selected_frame);
+  return [
+    "Quant BTC - Strategie",
+    `Statut: ${signal.status}`,
+    `Action: ${signal.action || "hold"}`,
+    `Side: ${signal.side || "hold"}`,
+    `Score: ${signal.ensemble_score ?? "absent"}`,
+    `Accord: ${formatMaybePercent(signal.agreement)}`,
+    `Confiance strategie: ${signal.confidence ?? "absente"}/100`,
+    `Horizon: ${frame.horizon || signal.horizon || "absent"}j`,
+    `P(up): ${formatMaybePercent(frame.prob_up)}`,
+    `VaR95: ${formatMaybePercent(frame.var_95)}`,
+    `Archive: ${provenance.archive_id || "absente"}`,
+    `Run: ${provenance.run_id || "absent"}`,
+    "Scores inferred; aucun ordre reel n'est envoye par ce signal."
+  ].join("\n");
+}
+
+function formatStrategySignalsForTelegram(payload: Record<string, unknown>): string {
+  const signals = Array.isArray(payload.signals) ? payload.signals.map((item) => objectValue(item)).slice(0, 5) : [];
+  if (signals.length === 0) {
+    return "Quant BTC - Strategies\nAucun score journalise.";
+  }
+  return [
+    "Quant BTC - Derniers scores strategie",
+    ...signals.map((signal) => `${signal.signal_id} | ${signal.preset} ${signal.horizon}j | ${signal.ensemble_action} | score ${signal.ensemble_score}`)
   ].join("\n");
 }
 
@@ -3795,6 +4339,22 @@ async function handleTelegramCommand(env: Env, chatId: string, raw: string): Pro
     const cancelled = await cancelTradeOrder(env, args[0], "telegram_owner");
     return await sendTelegramMessage(env, chatId, formatTradeOrderForTelegram(cancelled), telegramMainKeyboard());
   }
+  if (command === "/strategy") {
+    const signal = await buildStrategySignal(env, { asset: "BTC", preset: "quick", horizon: Number(args[0]) || 30 });
+    return await sendTelegramMessage(env, chatId, formatStrategySignalForTelegram(signal), telegramMainKeyboard());
+  }
+  if (command === "/strategy_deep") {
+    const signal = await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: Number(args[0]) || 30 });
+    return await sendTelegramMessage(env, chatId, formatStrategySignalForTelegram(signal), telegramMainKeyboard());
+  }
+  if (command === "/paper_strategy") {
+    const order = await createStrategyPaperOrder(env, { asset: "BTC", preset: "deep", horizon: Number(args[0]) || 30 }, "telegram_owner");
+    return await sendTelegramMessage(env, chatId, formatTradeOrderForTelegram(order), telegramMainKeyboard());
+  }
+  if (command === "/strategy_orders") {
+    const signals = await listStrategySignals(env, 5);
+    return await sendTelegramMessage(env, chatId, formatStrategySignalsForTelegram(signals), telegramMainKeyboard());
+  }
   return await sendTelegramMessage(env, chatId, telegramHelpText(), telegramMainKeyboard());
 }
 
@@ -3815,6 +4375,11 @@ function telegramMainKeyboard(): Record<string, unknown> {
         { text: "Signal trade", callback_data: "/trade_signal" },
         { text: "Paper trade", callback_data: "/paper_trade" },
         { text: "Ordres", callback_data: "/trade_orders" }
+      ],
+      [
+        { text: "Strategie", callback_data: "/strategy" },
+        { text: "Strategie deep", callback_data: "/strategy_deep" },
+        { text: "Paper strat", callback_data: "/paper_strategy" }
       ]
     ]
   };
@@ -3836,6 +4401,10 @@ function telegramHelpText(): string {
     "/paper_trade : cree un ordre paper si les gates passent",
     "/trade_propose live : propose un ordre live a approuver",
     "/trade_orders : derniers ordres",
+    "/strategy : score strategie quick 30j",
+    "/strategy_deep : score strategie deep 30j",
+    "/paper_strategy : ordre paper derive du score strategie",
+    "/strategy_orders : derniers scores strategie",
     "",
     "Toutes les sorties sont probabilistes, jamais des certitudes."
   ].join("\n");
@@ -4746,6 +5315,14 @@ function numberOrNull(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeRatio(value: unknown): number | null {
+  const parsed = numberOrNull(value);
+  if (parsed === null) {
+    return null;
+  }
+  return Math.abs(parsed) > 1.5 ? parsed / 100 : parsed;
+}
+
 async function warmRenderBitgetBridge(env: Env): Promise<void> {
   try {
     await fetch(renderUrl("/health", env), {
@@ -4945,7 +5522,7 @@ async function runQuantLite(
 
   return {
     status: "ok",
-    service: "quant-btc-model-lite-worker",
+    service: workerServiceName(env),
     asset,
     horizon,
     simulations,
@@ -5072,7 +5649,7 @@ async function runQuantLiteMultiFrame(input: MultiRunRequest, env: Env): Promise
 
   return {
     status: "ok",
-    service: "quant-btc-model-lite-worker",
+    service: workerServiceName(env),
     asset,
     horizons,
     simulations,
@@ -5416,6 +5993,10 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function workerServiceName(env: Env): string {
+  return stringOrNull(env.WORKER_SERVICE_NAME) || DEFAULT_WORKER_SERVICE_NAME;
 }
 
 function numberField(value: unknown, key: string): number | null {
