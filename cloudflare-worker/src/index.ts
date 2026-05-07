@@ -96,8 +96,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.30.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.30.0";
+const WORKER_VERSION = "1.30.1";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.30.1";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -2853,17 +2853,26 @@ async function proposeStrategyTradeOrder(env: Env, input: Record<string, unknown
 
 function formatStrategyProposalForTelegram(order: Record<string, unknown>, strategy: Record<string, unknown>): string {
   return [
-    "Quant BTC - Proposition strategie",
-    `Ordre: ${order.order_id}`,
-    `Mode: ${order.mode}`,
-    `Side: ${order.side}`,
-    `Score: ${strategy.ensemble_score}`,
-    `Accord: ${formatPercent(numberOrNull(strategy.agreement) || 0)}`,
-    `Action: ${strategy.action}`,
-    `Archive: ${objectValue(strategy.provenance).archive_id || "absente"}`,
-    `Run: ${objectValue(strategy.provenance).run_id || "absent"}`,
-    "Aucun ordre reel n'est envoye sans approbation.",
-    "Sortie probabiliste, pas conseil financier."
+    telegramHeader("Quant BTC - Proposition strategie", String(order.status || "pending")),
+    telegramSection("Ordre", [
+      `ID: ${order.order_id}`,
+      `Mode: ${order.mode}`,
+      `Side: ${order.side}`,
+      `Notional: ${order.size_usdt || "absent"} USDT`
+    ]),
+    telegramSection("Score", [
+      `Action: ${strategy.action}`,
+      `Ensemble: ${strategy.ensemble_score}`,
+      `Accord: ${formatMaybePercent(strategy.agreement)}`
+    ]),
+    telegramSection("Provenance", [
+      `Archive: ${objectValue(strategy.provenance).archive_id || "absente"}`,
+      `Run: ${shortId(objectValue(strategy.provenance).run_id)}`
+    ]),
+    telegramSection("Regle", [
+      "Aucun ordre reel sans approbation.",
+      "Probabiliste, pas conseil financier."
+    ])
   ].join("\n");
 }
 
@@ -3627,16 +3636,22 @@ async function persistTradeEvent(env: Env, orderId: string, kind: string, status
 function formatTradeProposalForTelegram(order: Record<string, unknown>): string {
   const provenance = objectValue(order.provenance);
   return [
-    "Quant BTC - Proposition trading",
-    `Ordre: ${order.order_id}`,
-    `Mode: ${order.mode}`,
-    `Side: ${order.side}`,
-    `Notional: ${order.size_usdt ? `${order.size_usdt} USDT` : "absent"}`,
-    `Base: ${order.size_base || "absent"} BTC`,
-    `Archive: ${provenance.archive_id || "absente"}`,
-    `Run: ${provenance.run_id || "absent"}`,
-    "Aucun ordre reel n'est envoye sans approbation.",
-    "Sortie probabiliste, pas conseil financier."
+    telegramHeader("Quant BTC - Proposition trading", String(order.status || "pending")),
+    telegramSection("Ordre", [
+      `ID: ${order.order_id}`,
+      `Mode: ${order.mode}`,
+      `Side: ${order.side}`,
+      `Notional: ${order.size_usdt ? `${order.size_usdt} USDT` : "absent"}`,
+      `Base: ${order.size_base || "absent"} BTC`
+    ]),
+    telegramSection("Provenance", [
+      `Archive: ${provenance.archive_id || "absente"}`,
+      `Run: ${shortId(provenance.run_id)}`
+    ]),
+    telegramSection("Regle", [
+      "Aucun ordre reel sans approbation.",
+      "Probabiliste, pas conseil financier."
+    ])
   ].join("\n");
 }
 
@@ -3708,42 +3723,45 @@ function formatTradingSignalForTelegram(signal: Record<string, unknown>): string
   const provenance = objectValue(signal.provenance);
   const frame = objectValue(signal.model_frame);
   return [
-    "Quant BTC - Signal trading",
-    `Statut: ${signal.status}`,
-    `Signal: ${signal.signal || "absent"}`,
-    `Side: ${signal.side || "hold"}`,
-    `P(up): ${formatMaybePercent(numberOrNull(frame.prob_up))}`,
-    `VaR95: ${formatMaybePercent(numberOrNull(frame.var95))}`,
-    `Confiance: ${frame.confidence ?? "absente"}/100`,
-    `Transition: ${formatMaybePercent(numberOrNull(frame.transition))}`,
-    `Archive: ${provenance.archive_id || "absente"}`,
-    `Run: ${provenance.run_id || "absent"}`,
-    "Aucun ordre reel n'est envoye par ce signal."
+    telegramHeader("Quant BTC - Signal trading", String(signal.signal || "no_trade")),
+    telegramSection("Decision", [
+      `Side: ${signal.side || "hold"}`,
+      `P(up): ${formatMaybePercent(numberOrNull(frame.prob_up))}`,
+      `VaR95: ${formatMaybePercent(numberOrNull(frame.var95))}`,
+      `Confiance: ${frame.confidence ?? "absente"}/100`,
+      `Transition: ${formatMaybePercent(numberOrNull(frame.transition))}`
+    ]),
+    telegramSection("Provenance", [
+      `Archive: ${provenance.archive_id || "absente"}`,
+      `Run: ${shortId(provenance.run_id)}`
+    ]),
+    telegramSection("Regle", ["Aucun ordre reel n'est envoye par ce signal."])
   ].join("\n");
 }
 
 function formatTradeOrderForTelegram(order: Record<string, unknown>): string {
   return [
-    "Quant BTC - Ordre",
-    `Statut: ${order.status}`,
-    `Order ID: ${order.order_id || "absent"}`,
-    `Mode: ${order.mode || "absent"}`,
-    `Side: ${order.side || "absent"}`,
-    `Type: ${order.order_type || "absent"}`,
-    `Notional: ${order.size_usdt || "absent"} USDT`,
-    `Base: ${order.size_base || "absent"} BTC`,
-    `Message: ${order.message || order.warning || "absent"}`
+    telegramHeader("Quant BTC - Ordre", String(order.status || "absent")),
+    telegramSection("Details", [
+      `ID: ${order.order_id || "absent"}`,
+      `Mode: ${order.mode || "absent"}`,
+      `Side: ${order.side || "absent"}`,
+      `Type: ${order.order_type || "absent"}`,
+      `Notional: ${order.size_usdt || "absent"} USDT`,
+      `Base: ${order.size_base || "absent"} BTC`
+    ]),
+    telegramSection("Message", [order.message || order.warning || "absent"])
   ].join("\n");
 }
 
 function formatTradeOrdersForTelegram(payload: Record<string, unknown>): string {
   const orders = Array.isArray(payload.orders) ? payload.orders.map((item) => objectValue(item)).slice(0, 5) : [];
   if (orders.length === 0) {
-    return "Quant BTC - Ordres\nAucun ordre journalise.";
+    return [telegramHeader("Quant BTC - Ordres"), telegramSection("Etat", ["Aucun ordre journalise."])].join("\n");
   }
   return [
-    "Quant BTC - Derniers ordres",
-    ...orders.map((order) => `${order.order_id} | ${order.mode} | ${order.status} | ${order.side} | ${order.size_usdt || "?"} USDT`)
+    telegramHeader("Quant BTC - Derniers ordres"),
+    telegramSection("Ordres", orders.map((order) => `${shortId(order.order_id)} | ${order.mode} | ${order.status} | ${order.side} | ${order.size_usdt || "?"} USDT`))
   ].join("\n");
 }
 
@@ -3751,30 +3769,34 @@ function formatStrategySignalForTelegram(signal: Record<string, unknown>): strin
   const provenance = objectValue(signal.provenance);
   const frame = objectValue(signal.selected_frame);
   return [
-    "Quant BTC - Strategie",
-    `Statut: ${signal.status}`,
-    `Action: ${signal.action || "hold"}`,
-    `Side: ${signal.side || "hold"}`,
-    `Score: ${signal.ensemble_score ?? "absent"}`,
-    `Accord: ${formatMaybePercent(signal.agreement)}`,
-    `Confiance strategie: ${signal.confidence ?? "absente"}/100`,
-    `Horizon: ${frame.horizon || signal.horizon || "absent"}j`,
-    `P(up): ${formatMaybePercent(frame.prob_up)}`,
-    `VaR95: ${formatMaybePercent(frame.var_95)}`,
-    `Archive: ${provenance.archive_id || "absente"}`,
-    `Run: ${provenance.run_id || "absent"}`,
-    "Scores inferred; aucun ordre reel n'est envoye par ce signal."
+    telegramHeader("Quant BTC - Strategie", String(signal.action || "hold")),
+    telegramSection("Score", [
+      `Side: ${signal.side || "hold"}`,
+      `Score: ${signal.ensemble_score ?? "absent"}`,
+      `Accord: ${formatMaybePercent(signal.agreement)}`,
+      `Confiance strategie: ${signal.confidence ?? "absente"}/100`
+    ]),
+    telegramSection("Frame", [
+      `Horizon: ${frame.horizon || signal.horizon || "absent"}j`,
+      `P(up): ${formatMaybePercent(frame.prob_up)}`,
+      `VaR95: ${formatMaybePercent(frame.var_95)}`
+    ]),
+    telegramSection("Provenance", [
+      `Archive: ${provenance.archive_id || "absente"}`,
+      `Run: ${shortId(provenance.run_id)}`
+    ]),
+    telegramSection("Regle", ["Scores inferred; aucun ordre reel n'est envoye par ce signal."])
   ].join("\n");
 }
 
 function formatStrategySignalsForTelegram(payload: Record<string, unknown>): string {
   const signals = Array.isArray(payload.signals) ? payload.signals.map((item) => objectValue(item)).slice(0, 5) : [];
   if (signals.length === 0) {
-    return "Quant BTC - Strategies\nAucun score journalise.";
+    return [telegramHeader("Quant BTC - Strategies"), telegramSection("Etat", ["Aucun score journalise."])].join("\n");
   }
   return [
-    "Quant BTC - Derniers scores strategie",
-    ...signals.map((signal) => `${signal.signal_id} | ${signal.preset} ${signal.horizon}j | ${signal.ensemble_action} | score ${signal.ensemble_score}`)
+    telegramHeader("Quant BTC - Derniers scores strategie"),
+    telegramSection("Scores", signals.map((signal) => `${shortId(signal.signal_id)} | ${signal.preset} ${signal.horizon}j | ${signal.ensemble_action} | score ${signal.ensemble_score}`))
   ].join("\n");
 }
 
@@ -4666,28 +4688,87 @@ function formatModelAlertText(evaluation: Record<string, unknown>, manual: boole
   const deep = objectValue(latestRuns.deep);
   const refresh = objectValue(evaluation.refresh_status);
   const issues = Array.isArray(evaluation.issues) ? evaluation.issues.map((item) => objectValue(item)) : [];
-  const topIssues = issues.length
-    ? issues.slice(0, 10).map((issue) => `- ${formatIssueLevel(issue.level)}: ${issue.message}`).join("\n")
-    : "- Aucune alerte modele active aux seuils actuels.";
   const header = manual ? "Quant BTC - Alerte modele TEST" : "Quant BTC - Alerte modele";
   return [
-    header,
-    `Niveau: ${formatStatusLabel(evaluation.status)}`,
-    `Alertes: ${issues.length}`,
-    ``,
-    topIssues,
-    ``,
-    refreshSummaryLine("Rafraichissement quick", objectValue(refresh.quick)),
-    refreshSummaryLine("Rafraichissement deep", objectValue(refresh.deep)),
-    ``,
-    `Archive quick: ${quick.archive_id || "absente"}`,
-    `Archive deep: ${deep.archive_id || "absente"}`,
-    ...spotReferenceLines(quick, deep),
-    ``,
-    `Regle: alerte de risque probabiliste, pas un conseil financier.`,
-    `UTC: ${evaluation.checked_at_utc || new Date().toISOString()}`,
-    `Paris: ${evaluation.checked_at_paris || parisIso(new Date())}`
+    telegramHeader(header, formatStatusLabel(evaluation.status)),
+    telegramSection("Resume", [
+      `Alertes actives: ${issues.length}`,
+      `Critiques: ${evaluation.critical_count ?? 0}`,
+      `Warnings: ${evaluation.warning_count ?? 0}`
+    ]),
+    telegramSection("Alertes principales", issues.length
+      ? issues.slice(0, 6).map(formatTelegramIssue)
+      : ["Aucune alerte modele active aux seuils actuels."]),
+    telegramSection("Recalcul/cache", [
+      refreshSummaryLine("Quick", objectValue(refresh.quick)),
+      refreshSummaryLine("Deep", objectValue(refresh.deep))
+    ]),
+    telegramSection("Provenance", [
+      `Quick: ${quick.archive_id || "absente"}`,
+      `Deep: ${deep.archive_id || "absente"}`,
+      ...spotReferenceLines(quick, deep)
+    ]),
+    telegramSection("A faire", [
+      modelAlertActionLine(issues),
+      "Ne pas lire cette alerte comme un conseil financier."
+    ]),
+    telegramFooter(evaluation.checked_at_utc, evaluation.checked_at_paris)
   ].join("\n");
+}
+
+function formatTelegramIssue(issue: Record<string, unknown>): string {
+  const type = String(issue.type || "issue");
+  const horizon = issue.horizon ? `${issue.horizon}j` : "horizon n/a";
+  const mode = issue.mode ? `${issue.mode} ` : "";
+  const value = numberOrNull(issue.value);
+  const threshold = numberOrNull(issue.threshold);
+  const valueText = type === "confidence_low"
+    ? `${value ?? "?"}/100`
+    : type === "bias_shift"
+      ? `${value !== null ? formatPercent(value) : "?"}`
+      : value !== null ? formatPercent(value) : "?";
+  const thresholdText = type === "confidence_low"
+    ? `${threshold ?? "?"}/100`
+    : threshold !== null ? formatPercent(threshold) : "?";
+  return [
+    `${formatIssueLevel(issue.level)} | ${mode}${horizon}`,
+    `Cause: ${issueReadableType(type)}`,
+    `Valeur: ${valueText} | Seuil: ${thresholdText}`,
+    `Impact: ${issueImpact(type)}`,
+    `Run: ${shortId(issue.run_id)}`
+  ].join("\n");
+}
+
+function issueReadableType(type: string): string {
+  const labels: Record<string, string> = {
+    var95_high: "VaR95 trop elevee",
+    confidence_low: "confiance trop faible",
+    transition_high: "regime trop transitionnel",
+    bias_shift: "changement rapide de biais",
+    run_absent: "run absent"
+  };
+  return labels[type] || type;
+}
+
+function issueImpact(type: string): string {
+  const labels: Record<string, string> = {
+    var95_high: "risque de queue eleve; reduire la force des conclusions",
+    confidence_low: "signal fragile; ne pas conclure fortement",
+    transition_high: "marche mal classe; regime peu lisible",
+    bias_shift: "le modele change vite; verifier la provenance",
+    run_absent: "pas de chiffre exploitable pour ce mode"
+  };
+  return labels[type] || "verification requise";
+}
+
+function modelAlertActionLine(issues: Record<string, unknown>[]): string {
+  if (!issues.length) {
+    return "Rien a faire: surveillance OK.";
+  }
+  if (issues.some((issue) => issue.level === "CRITICAL")) {
+    return "Verifier /alerts et eviter toute conclusion directionnelle forte.";
+  }
+  return "Lire comme warning de prudence, pas comme signal de trading.";
 }
 
 function refreshSummaryLine(label: string, refresh: Record<string, unknown>): string {
@@ -4753,6 +4834,40 @@ function formatStatusLabel(value: unknown): string {
   return status.toUpperCase();
 }
 
+function telegramHeader(title: string, status?: string): string {
+  return [
+    "==============================",
+    title,
+    status ? `Statut: ${status}` : "",
+    "=============================="
+  ].filter(Boolean).join("\n");
+}
+
+function telegramSection(title: string, lines: unknown[]): string {
+  const body = lines
+    .flat()
+    .filter((line) => line !== null && line !== undefined && String(line).trim() !== "")
+    .map((line) => `- ${String(line)}`)
+    .join("\n");
+  return body ? `\n${title}\n${body}` : "";
+}
+
+function telegramFooter(utc: unknown, paris: unknown): string {
+  return telegramSection("Horodatage", [
+    `UTC: ${utc || new Date().toISOString()}`,
+    `Paris: ${paris || parisIso(new Date())}`,
+    `Worker: ${WORKER_VERSION}`
+  ]);
+}
+
+function shortId(value: unknown): string {
+  const text = stringOrNull(value);
+  if (!text) {
+    return "absent";
+  }
+  return text.length > 26 ? `${text.slice(0, 18)}...${text.slice(-6)}` : text;
+}
+
 function formatRefreshStatus(value: unknown): string {
   const status = String(value || "unknown");
   const labels: Record<string, string> = {
@@ -4809,18 +4924,20 @@ function formatOpsAlertText(status: Record<string, unknown>, message: string): s
   const quick = objectValue(checks.quick_cache);
   const deep = objectValue(checks.deep_cache);
   return [
-    `Quant BTC - Alerte operationnelle`,
-    `Niveau: ${opsLevel(status)}`,
-    `Cause: ${message}`,
-    ``,
-    `Render: ${render.status || "unknown"}`,
-    `D1: ${d1.status || "unknown"}`,
-    cacheSummaryLine("Cache quick", quick),
-    cacheSummaryLine("Cache deep", deep),
-    ``,
-    `Worker: ${WORKER_VERSION}`,
-    `UTC: ${status.checked_at_utc || new Date().toISOString()}`,
-    `Paris: ${status.checked_at_paris || parisIso(new Date())}`
+    telegramHeader("Quant BTC - Alerte operationnelle", opsLevel(status)),
+    telegramSection("Cause", [message]),
+    telegramSection("Etat systeme", [
+      `Render: ${render.status || "unknown"}`,
+      `D1: ${d1.status || "unknown"}`,
+      cacheSummaryLine("Cache quick", quick),
+      cacheSummaryLine("Cache deep", deep)
+    ]),
+    telegramSection("A faire", [
+      status.status === "degraded"
+        ? "Verifier Render/D1 avant de lancer une analyse live."
+        : "Surveiller; l'analyse peut utiliser un cache avec avertissement."
+    ]),
+    telegramFooter(status.checked_at_utc, status.checked_at_paris)
   ].join("\n");
 }
 
@@ -4834,23 +4951,23 @@ function formatDailySummaryText(status: Record<string, unknown>, manual: boolean
   const blockers = Array.isArray(status.blockers) ? status.blockers : [];
   const header = manual ? "Quant BTC - Resume quotidien TEST" : "Quant BTC - Resume quotidien";
   return [
-    header,
-    `Statut: ${opsLevel(status)}`,
-    `Render: ${render.status || "unknown"}`,
-    `D1: ${d1.status || "unknown"}`,
-    cacheSummaryLine("Cache quick", quick),
-    cacheSummaryLine("Cache deep", deep),
-    ``,
-    `Archive quick: ${quick.archive_id || "absente"}`,
-    `Archive deep: ${deep.archive_id || "absente"}`,
-    ...spotReferenceLines(quick, deep),
-    ``,
-    `Avertissements: ${warnings.length ? warnings.join(" | ") : "aucun"}`,
-    `Blocages: ${blockers.length ? blockers.join(" | ") : "aucun"}`,
-    ``,
-    `Worker: ${WORKER_VERSION}`,
-    `UTC: ${status.checked_at_utc || new Date().toISOString()}`,
-    `Paris: ${status.checked_at_paris || parisIso(new Date())}`
+    telegramHeader(header, opsLevel(status)),
+    telegramSection("Etat", [
+      `Render: ${render.status || "unknown"}`,
+      `D1: ${d1.status || "unknown"}`,
+      cacheSummaryLine("Cache quick", quick),
+      cacheSummaryLine("Cache deep", deep)
+    ]),
+    telegramSection("Archives", [
+      `Quick: ${quick.archive_id || "absente"}`,
+      `Deep: ${deep.archive_id || "absente"}`,
+      ...spotReferenceLines(quick, deep)
+    ]),
+    telegramSection("Points a surveiller", [
+      `Warnings: ${warnings.length ? warnings.slice(0, 3).join(" | ") : "aucun"}`,
+      `Blocages: ${blockers.length ? blockers.slice(0, 3).join(" | ") : "aucun"}`
+    ]),
+    telegramFooter(status.checked_at_utc, status.checked_at_paris)
   ].join("\n");
 }
 
@@ -5091,7 +5208,13 @@ async function handleTelegramCommand(env: Env, chatId: string, raw: string): Pro
   }
   if (command === "/deep_run") {
     const job = await createDeepJob(env, { asset: "BTC", chat_id: chatId });
-    return await sendTelegramMessage(env, chatId, `Deep job cree\nJob: ${job.job_id || "absent"}\nStatut: ${job.status}\nJe t'envoie Telegram quand c'est fini.`, telegramMainKeyboard());
+    return await sendTelegramMessage(env, chatId, [
+      telegramHeader("Quant BTC - Deep job", String(job.status || "cree")),
+      telegramSection("Job", [
+        `ID: ${job.job_id || "absent"}`,
+        "Je t'envoie un message quand le calcul est fini."
+      ])
+    ].join("\n"), telegramMainKeyboard());
   }
   if (command === "/alerts") {
     const evaluation = await evaluateLatestModelAlerts(env, { status: "not_requested", reason: "telegram_alerts_command" });
@@ -5115,7 +5238,10 @@ async function handleTelegramCommand(env: Env, chatId: string, raw: string): Pro
   if (command === "/mute") {
     const minutes = clampInt(parseNumber(args[0], 60), 1, 24 * 60);
     await muteTelegramSession(env, chatId, minutes);
-    return await sendTelegramMessage(env, chatId, `Alertes mutees pendant ${minutes} min.`, telegramMainKeyboard());
+    return await sendTelegramMessage(env, chatId, [
+      telegramHeader("Quant BTC - Alertes mutees", "OK"),
+      telegramSection("Silence", [`Duree: ${minutes} min`])
+    ].join("\n"), telegramMainKeyboard());
   }
   if (command === "/rule") {
     const rule = await createRuleFromTelegram(env, chatId, args);
@@ -5195,26 +5321,32 @@ function telegramMainKeyboard(): Record<string, unknown> {
 
 function telegramHelpText(): string {
   return [
-    "Quant BTC - Commandes",
-    "/status : statut ops",
-    "/quick : dernier run quick",
-    "/quick_fresh : force un quick frais",
-    "/deep : dernier run deep",
-    "/deep_run : met un deep en file d'attente",
-    "/alerts : alertes modele",
-    "/last : spot + derniers runs",
-    "/mute 60 : silence 60 minutes",
-    "/rule var95 365 > 0.40 : alerte perso",
-    "/trade_signal : signal execution prudent",
-    "/paper_trade : cree un ordre paper si les gates passent",
-    "/trade_propose live : propose un ordre live a approuver",
-    "/trade_orders : derniers ordres",
-    "/strategy : score strategie quick 30j",
-    "/strategy_deep : score strategie deep 30j",
-    "/paper_strategy : ordre paper derive du score strategie",
-    "/strategy_orders : derniers scores strategie",
-    "",
-    "Toutes les sorties sont probabilistes, jamais des certitudes."
+    telegramHeader("Quant BTC - Commandes"),
+    telegramSection("Analyse", [
+      "/status : statut ops",
+      "/quick : dernier run quick",
+      "/quick_fresh : force un quick frais",
+      "/deep : dernier run deep",
+      "/deep_run : met un deep en file"
+    ]),
+    telegramSection("Alertes", [
+      "/alerts : alertes modele",
+      "/last : spot + derniers runs",
+      "/mute 60 : silence 60 minutes",
+      "/rule var95 365 > 0.40 : alerte perso"
+    ]),
+    telegramSection("Trading / strategie", [
+      "/trade_signal : signal prudent",
+      "/paper_trade : ordre paper si gates OK",
+      "/trade_orders : derniers ordres",
+      "/strategy : score strategie quick",
+      "/strategy_deep : score strategie deep",
+      "/paper_strategy : paper strategy"
+    ]),
+    telegramSection("Regle", [
+      "Probabiliste uniquement.",
+      "Jamais une certitude ni un conseil financier."
+    ])
   ].join("\n");
 }
 
@@ -5271,7 +5403,13 @@ async function createRuleFromTelegram(env: Env, chatId: string, args: string[]):
   return {
     ...rule,
     message: rule.status === "created"
-      ? `Regle creee: ${rule.rule_id}\n${metric}${horizon ? ` ${horizon}j` : ""} ${operator} ${thresholdRaw}`
+      ? [
+          telegramHeader("Quant BTC - Regle creee", "OK"),
+          telegramSection("Condition", [
+            `ID: ${rule.rule_id}`,
+            `${metric}${horizon ? ` ${horizon}j` : ""} ${operator} ${thresholdRaw}`
+          ])
+        ].join("\n")
       : rule.message
   };
 }
@@ -5281,18 +5419,21 @@ function formatOpsStatusForTelegram(status: Record<string, unknown>): string {
   const quick = objectValue(checks.quick_cache);
   const deep = objectValue(checks.deep_cache);
   return [
-    "Quant BTC - Statut",
-    `Niveau: ${formatStatusLabel(status.status)}`,
-    cacheSummaryLine("Cache quick", quick),
-    cacheSummaryLine("Cache deep", deep),
-    `UTC: ${status.checked_at_utc}`,
-    `Paris: ${status.checked_at_paris}`
+    telegramHeader("Quant BTC - Statut", formatStatusLabel(status.status)),
+    telegramSection("Caches", [
+      cacheSummaryLine("Quick", quick),
+      cacheSummaryLine("Deep", deep)
+    ]),
+    telegramFooter(status.checked_at_utc, status.checked_at_paris)
   ].join("\n");
 }
 
 function formatRunShortForTelegram(label: string, payload: Record<string, unknown> | null): string {
   if (!payload) {
-    return `Run ${label}: absent`;
+    return [
+      telegramHeader(`Quant BTC - Run ${label}`, "ABSENT"),
+      telegramSection("A faire", ["Lancer un nouveau run ou attendre le prochain refresh."])
+    ].join("\n");
   }
   const frames = Array.isArray(payload.frames) ? payload.frames.map((item) => objectValue(item)) : [];
   const last = frames[frames.length - 1] || {};
@@ -5300,20 +5441,32 @@ function formatRunShortForTelegram(label: string, payload: Record<string, unknow
   const risk = objectValue(last.risk_metrics);
   const confidence = objectValue(last.confidence);
   return [
-    `Run ${label}: ${payload.archive_id || "absent"}`,
-    `Spot: ${payload.reference_spot || "absent"} (${payload.reference_spot_timestamp_paris || payload.reference_spot_timestamp_utc || "timestamp absent"})`,
-    `Frames: ${(payload.horizons as unknown[])?.join?.("/") || "absentes"}`,
-    frames.length ? `Derniere frame ${last.horizon}j: P(up) ${formatMetricValue("prob_up", numberOrNull(distribution.prob_up))}, VaR95 ${formatMetricValue("var95", numberOrNull(risk.var_95))}, confiance ${confidence.score || "absente"}/100` : "Frame: absente",
-    `Cache age: ${payload.d1_age_seconds ?? "inconnu"}s`
+    telegramHeader(`Quant BTC - Run ${label}`, "CACHE"),
+    telegramSection("Provenance", [
+      `Archive: ${payload.archive_id || "absent"}`,
+      `Spot: ${payload.reference_spot || "absent"}`,
+      `Timestamp: ${payload.reference_spot_timestamp_paris || payload.reference_spot_timestamp_utc || "absent"}`,
+      `Cache age: ${payload.d1_age_seconds ?? "inconnu"}s`
+    ]),
+    telegramSection("Frames", [
+      `${(payload.horizons as unknown[])?.join?.("/") || "absentes"}`
+    ]),
+    telegramSection("Derniere frame", [
+      frames.length ? `Horizon: ${last.horizon}j` : "Frame absente",
+      frames.length ? `P(up): ${formatMetricValue("prob_up", numberOrNull(distribution.prob_up))}` : "",
+      frames.length ? `VaR95: ${formatMetricValue("var95", numberOrNull(risk.var_95))}` : "",
+      frames.length ? `Confiance: ${confidence.score || "absente"}/100` : ""
+    ])
   ].join("\n");
 }
 
 function formatRealtimeForTelegram(realtime: Record<string, unknown>): string {
-  return [
-    `Spot temps reel: ${realtime.price ? `$${Number(realtime.price).toFixed(2)}` : "absent"}`,
+  return telegramSection("Spot temps reel", [
+    `Prix: ${realtime.price ? `$${Number(realtime.price).toFixed(2)}` : "absent"}`,
     `Statut: ${realtime.status || "absent"} (${realtime.freshness_label || "n/a"})`,
-    `Source: ${realtime.source || "absente"}`
-  ].join("\n");
+    `Source: ${realtime.source || "absente"}`,
+    `Age: ${realtime.age_seconds ?? "?"}s`
+  ]);
 }
 
 async function visibleBacktestReport(env: Env): Promise<Record<string, unknown>> {
@@ -5564,7 +5717,11 @@ async function sendOpsTestAlert(env: Env): Promise<Record<string, unknown>> {
   };
   const [discord, telegram] = await Promise.all([
     sendDiscordOpsAlert(env, "Quant BTC ops TEST", "Test alert from Quant BTC Worker.", payload),
-    sendTelegramOpsAlert(env, `Quant BTC - Test alerte ops\nWorker: ${WORKER_VERSION}\nUTC: ${now.toISOString()}\nParis: ${parisIso(now)}`)
+    sendTelegramOpsAlert(env, [
+      telegramHeader("Quant BTC - Test alerte ops", "OK"),
+      telegramSection("Systeme", [`Worker: ${WORKER_VERSION}`]),
+      telegramFooter(now.toISOString(), parisIso(now))
+    ].join("\n"))
   ]);
   const sent = [discord, telegram].some((item) => objectValue(item).status === "sent");
   return {
