@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Quant BTC Strategy",
-    "version": "1.29.0"
+    "version": "1.29.3"
   },
   "servers": [
     {
@@ -150,63 +150,6 @@
                     },
                     "order_id": {
                       "type": "string"
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/trading/paper-pnl": {
-      "get": {
-        "operationId": "btcPaperPnl",
-        "summary": "PnL paper BTC et checkpoints 1j 3j 7j.",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    },
-                    "total_open_pnl_usdt": {
-                      "type": "number"
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/trading/paper-portfolio": {
-      "get": {
-        "operationId": "btcPaperPortfolio",
-        "summary": "Etat du portfolio paper BTC.",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    },
-                    "net_position_btc": {
-                      "type": "number"
-                    },
-                    "exposure_usdt": {
-                      "type": "number"
                     }
                   },
                   "additionalProperties": true

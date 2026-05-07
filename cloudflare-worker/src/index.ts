@@ -96,8 +96,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.29.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.29.0";
+const WORKER_VERSION = "1.29.3";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.29.3";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -491,11 +491,11 @@ export default {
       }
 
       if (url.pathname === "/strategies/deep-signal" && request.method === "GET") {
-        return json(await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: 30 }));
+        return json(await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: 30, no_realtime_refresh: true }));
       }
 
       if (url.pathname === "/strategies/deep-paper-order" && request.method === "GET") {
-        return json(await createStrategyPaperOrder(env, { asset: "BTC", preset: "deep", horizon: 30 }, "gpt_strategy_action"));
+        return json(await createStrategyPaperOrder(env, { asset: "BTC", preset: "deep", horizon: 30, no_realtime_refresh: true }, "gpt_strategy_action"));
       }
 
       if ((url.pathname === "/strategies/signal" || url.pathname === "/strategies/ensemble") && request.method === "GET") {
@@ -2016,6 +2016,7 @@ async function strategyStatus(env: Env): Promise<Record<string, unknown>> {
 
 async function buildStrategySummary(env: Env): Promise<Record<string, unknown>> {
   const signal = await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: 30 });
+  const portfolio = await paperPortfolioCompact(env, numberOrNull(objectValue(signal.provenance).realtime_spot));
   const gates = Array.isArray(signal.gates) ? signal.gates.map((item) => objectValue(item)) : [];
   const blockingGates = gates.filter((gateItem) => gateItem.passed !== true).map((gateItem) => ({
     name: gateItem.name,
@@ -2049,6 +2050,14 @@ async function buildStrategySummary(env: Env): Promise<Record<string, unknown>> 
       realtime_source: provenance.realtime_source || null,
       worker_version: WORKER_VERSION,
       schema_version: SCHEMA_VERSION
+    },
+    paper_state: {
+      open_orders_count: objectValue(portfolio).open_orders_count ?? null,
+      net_position_btc: objectValue(portfolio).net_position_btc ?? null,
+      exposure_usdt: objectValue(portfolio).exposure_usdt ?? null,
+      mark_price: objectValue(portfolio).mark_price ?? null,
+      unrealized_pnl_usdt: objectValue(portfolio).unrealized_pnl_usdt ?? null,
+      portfolio_status: objectValue(portfolio).status || "absent"
     },
     conclusion: strategyConclusion(signal, blockingGates),
     data_status: signal.data_status,
@@ -2091,7 +2100,7 @@ async function buildStrategySignal(env: Env, input: Record<string, unknown>): Pr
   }
 
   let realtime = await realtimeStatus(env);
-  if (realtime.status !== "ok") {
+  if (realtime.status !== "ok" && !parseBoolean(input.no_realtime_refresh, false)) {
     await collectRealtimeMarketSnapshot(env, "strategy_signal");
     realtime = await realtimeStatus(env);
   }
@@ -2986,6 +2995,44 @@ async function paperPortfolioState(env: Env): Promise<Record<string, unknown>> {
     },
     checked_at_utc: new Date().toISOString(),
     checked_at_paris: parisIso(new Date())
+  };
+}
+
+async function paperPortfolioCompact(env: Env, markPrice: number | null): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", open_orders_count: 0 };
+  }
+  const orders = await paperFilledOrders(env, 500);
+  let buyBase = 0;
+  let buyCost = 0;
+  let sellBase = 0;
+  for (const order of orders) {
+    const side = normalizeTradingSide(order.side);
+    const base = numberOrNull(order.size_base) || 0;
+    const fill = numberOrNull(order.filled_price) || 0;
+    if (side === "buy") {
+      buyBase += base;
+      buyCost += base * fill;
+    } else if (side === "sell") {
+      sellBase += base;
+    }
+  }
+  const netBase = buyBase - sellBase;
+  const avgEntry = buyBase > 0 ? buyCost / buyBase : null;
+  const exposure = markPrice !== null ? netBase * markPrice : null;
+  const unrealized = markPrice !== null && avgEntry !== null ? netBase * (markPrice - avgEntry) : null;
+  return {
+    status: "ok",
+    open_orders_count: orders.length,
+    net_position_btc: Number(netBase.toFixed(10)),
+    average_entry_price: avgEntry,
+    mark_price: markPrice,
+    exposure_usdt: exposure !== null ? Number(exposure.toFixed(4)) : null,
+    unrealized_pnl_usdt: unrealized !== null ? Number(unrealized.toFixed(4)) : null,
+    data_status: {
+      portfolio: "mock_paper",
+      pnl: "inferred"
+    }
   };
 }
 
