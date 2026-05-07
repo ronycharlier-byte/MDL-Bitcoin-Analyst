@@ -96,8 +96,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.28.1";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.28.1";
+const WORKER_VERSION = "1.29.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.29.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -285,7 +285,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/strategies/status", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/realtime/status", "/realtime/collect", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/trading/paper-pnl", "/trading/paper-portfolio", "/trading/cleanup-paper-tests", "/strategies/status", "/strategies/deep-summary", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -458,6 +458,18 @@ export default {
         return json(await listTradeOrders(env, clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50)));
       }
 
+      if (url.pathname === "/trading/paper-pnl" && request.method === "GET") {
+        return json(await paperTradingPnl(env));
+      }
+
+      if (url.pathname === "/trading/paper-portfolio" && request.method === "GET") {
+        return json(await paperPortfolioState(env));
+      }
+
+      if (url.pathname === "/trading/cleanup-paper-tests" && request.method === "GET") {
+        return json(await cleanupPaperTestOrders(env, await readInput(request, url)));
+      }
+
       if (url.pathname === "/trading/paper-order" && (request.method === "POST" || request.method === "GET")) {
         return json(await createPaperTradeOrder(env, await readInput(request, url), "gpt_action"));
       }
@@ -472,6 +484,10 @@ export default {
 
       if (url.pathname === "/strategies/status" && request.method === "GET") {
         return json(await strategyStatus(env));
+      }
+
+      if (url.pathname === "/strategies/deep-summary" && request.method === "GET") {
+        return json(await buildStrategySummary(env));
       }
 
       if (url.pathname === "/strategies/deep-signal" && request.method === "GET") {
@@ -1147,6 +1163,7 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
       env.DB.prepare("SELECT COUNT(*) AS count FROM trade_events")
     ]);
     const strategySignals = await optionalD1Count(env, "strategy_signals");
+    const paperPnlSnapshots = await optionalD1Count(env, "paper_pnl_snapshots");
     return {
       status: "ok",
       target: "cloudflare_d1",
@@ -1164,9 +1181,10 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
         user_alert_rules: countFromD1(rules),
         trade_orders: countFromD1(tradeOrders),
         trade_events: countFromD1(tradeEvents),
-        strategy_signals: strategySignals
+        strategy_signals: strategySignals,
+        paper_pnl_snapshots: paperPnlSnapshots
       },
-      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules, queued deep jobs, strategy signals and trading journals",
+      free_tier_role: "durable metadata storage for run archives, usage logs, clients, locks, realtime snapshots, alert rules, queued deep jobs, strategy signals, paper PnL and trading journals",
       checked_at_utc: new Date().toISOString(),
       checked_at_paris: parisIso(new Date())
     };
@@ -1996,6 +2014,63 @@ async function strategyStatus(env: Env): Promise<Record<string, unknown>> {
   };
 }
 
+async function buildStrategySummary(env: Env): Promise<Record<string, unknown>> {
+  const signal = await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: 30 });
+  const gates = Array.isArray(signal.gates) ? signal.gates.map((item) => objectValue(item)) : [];
+  const blockingGates = gates.filter((gateItem) => gateItem.passed !== true).map((gateItem) => ({
+    name: gateItem.name,
+    detail: gateItem.detail
+  }));
+  const provenance = objectValue(signal.provenance);
+  const frame = objectValue(signal.selected_frame);
+  return {
+    status: signal.status,
+    action: signal.action || "hold",
+    side: signal.side || "hold",
+    score: signal.ensemble_score ?? null,
+    agreement: signal.agreement ?? null,
+    confidence: signal.confidence ?? null,
+    blocking_gates: blockingGates,
+    key_frame: {
+      horizon: frame.horizon || 30,
+      prob_up: frame.prob_up ?? null,
+      var_95: frame.var_95 ?? null,
+      cvar_95: frame.cvar_95 ?? null,
+      transition: frame.transition ?? null,
+      model_confidence: frame.confidence ?? null
+    },
+    provenance: {
+      archive_id: provenance.archive_id || null,
+      run_id: provenance.run_id || null,
+      report_date_utc: provenance.report_date_utc || null,
+      report_date_paris: provenance.report_date_paris || null,
+      realtime_spot: provenance.realtime_spot ?? null,
+      realtime_spot_age_seconds: provenance.realtime_spot_age_seconds ?? null,
+      realtime_source: provenance.realtime_source || null,
+      worker_version: WORKER_VERSION,
+      schema_version: SCHEMA_VERSION
+    },
+    conclusion: strategyConclusion(signal, blockingGates),
+    data_status: signal.data_status,
+    warning: "Resume compact pour GPT: probabiliste, pas conseil financier."
+  };
+}
+
+function strategyConclusion(signal: Record<string, unknown>, blockingGates: Record<string, unknown>[]): string {
+  const action = String(signal.action || "hold");
+  if (signal.status !== "ok") {
+    return "Sortie strategie absente ou non exploitable; ne pas fournir de signal.";
+  }
+  if (action === "hold") {
+    return blockingGates.length
+      ? "Hold/no-trade: le score ou les gates de risque ne valident pas un biais operationnel robuste."
+      : "Hold/no-trade: le moteur ne detecte pas de consensus directionnel suffisant.";
+  }
+  return action === "buy_candidate"
+    ? "Candidat achat probabiliste, a traiter uniquement en paper/proposal et avec gates de risque."
+    : "Candidat reduction/vente probabiliste, a traiter uniquement en paper/proposal et avec verification de position.";
+}
+
 async function buildStrategySignal(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
   const asset = normalizeAsset(input.asset);
   const horizon = clampInt(parseNumber(input.horizon, 30), 1, 3650);
@@ -2820,6 +2895,232 @@ async function listTradeOrders(env: Env, limit: number): Promise<Record<string, 
         updated_at_paris: stringOrNull(row.updated_at_utc) ? parisIso(new Date(String(row.updated_at_utc))) : null
       };
     })
+  };
+}
+
+async function paperTradingPnl(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 is required for paper PnL." };
+  }
+  const realtime = await freshRealtimeForPaper(env);
+  const markPrice = numberOrNull(realtime.price);
+  const orders = await paperFilledOrders(env, 100);
+  const rows = orders.map((order) => paperPnlForOrder(order, markPrice));
+  const snapshots = markPrice ? await upsertDuePaperPnlSnapshots(env, orders, markPrice) : { status: "skipped", reason: "mark_price_absent" };
+  const total = rows.reduce((sum, row) => sum + (numberOrNull(row.pnl_usdt) || 0), 0);
+  return {
+    status: "ok",
+    mark_price: markPrice,
+    mark_source: realtime.source || "absent",
+    mark_age_seconds: realtime.age_seconds ?? null,
+    mark_timestamp_utc: realtime.observed_at_utc || null,
+    mark_timestamp_paris: realtime.observed_at_paris || null,
+    total_open_pnl_usdt: Number(total.toFixed(4)),
+    orders: rows,
+    checkpoints: snapshots,
+    data_status: {
+      mark_price: markPrice ? "real" : "absent",
+      paper_orders: "mock",
+      pnl: "inferred"
+    },
+    warning: "Paper PnL is hypothetical and not an exchange/account statement."
+  };
+}
+
+async function paperPortfolioState(env: Env): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 is required for paper portfolio state." };
+  }
+  const realtime = await freshRealtimeForPaper(env);
+  const markPrice = numberOrNull(realtime.price);
+  const orders = await paperFilledOrders(env, 500);
+  let buyBase = 0;
+  let buyCost = 0;
+  let sellBase = 0;
+  let sellProceeds = 0;
+  for (const order of orders) {
+    const side = normalizeTradingSide(order.side);
+    const base = numberOrNull(order.size_base) || 0;
+    const fill = numberOrNull(order.filled_price) || 0;
+    if (side === "buy") {
+      buyBase += base;
+      buyCost += base * fill;
+    } else if (side === "sell") {
+      sellBase += base;
+      sellProceeds += base * fill;
+    }
+  }
+  const netBase = buyBase - sellBase;
+  const avgEntry = buyBase > 0 ? buyCost / buyBase : null;
+  const exposure = markPrice !== null ? netBase * markPrice : null;
+  const unrealized = markPrice !== null && avgEntry !== null ? netBase * (markPrice - avgEntry) : null;
+  const latestDeep = await latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 0);
+  const frame30 = findFrameForHorizon(latestDeep, 30);
+  const distribution = objectValue(frame30?.distribution);
+  const riskStop = avgEntry !== null ? avgEntry * (1 - Number(getTradingConfig(env).max_var95)) : null;
+  const p10 = parsePriceValue(distribution.p10_price);
+  return {
+    status: "ok",
+    asset: "BTC",
+    mode: "paper",
+    net_position_btc: Number(netBase.toFixed(10)),
+    average_entry_price: avgEntry,
+    mark_price: markPrice,
+    exposure_usdt: exposure !== null ? Number(exposure.toFixed(4)) : null,
+    unrealized_pnl_usdt: unrealized !== null ? Number(unrealized.toFixed(4)) : null,
+    unrealized_pnl_pct_on_buy_cost: buyCost > 0 && unrealized !== null ? unrealized / buyCost : null,
+    buy_cost_usdt: Number(buyCost.toFixed(4)),
+    sell_proceeds_usdt: Number(sellProceeds.toFixed(4)),
+    open_orders_count: orders.length,
+    invalidation_proxy: {
+      method: "lower_of_risk_stop_proxy_and_30d_p10_when_available",
+      risk_stop_proxy: riskStop,
+      p10_30d_price: p10,
+      level: riskStop !== null && p10 !== null ? Math.min(riskStop, p10) : riskStop ?? p10,
+      warning: "Proxy analytique seulement; pas un stop order ni conseil financier."
+    },
+    data_status: {
+      mark_price: markPrice ? "real" : "absent",
+      portfolio: "mock_paper",
+      pnl: "inferred"
+    },
+    checked_at_utc: new Date().toISOString(),
+    checked_at_paris: parisIso(new Date())
+  };
+}
+
+async function cleanupPaperTestOrders(env: Env, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent", message: "D1 is required for cleanup." };
+  }
+  if (stringOrNull(input.confirm) !== "cleanup_paper_tests") {
+    return {
+      status: "blocked",
+      message: "Cleanup requires confirm=cleanup_paper_tests. This endpoint is not exposed in GPT Actions."
+    };
+  }
+  const testOrderIds = [
+    "trade_20260507T003800_f621df45",
+    "trade_20260507T003800_1ffddf74"
+  ];
+  const placeholders = testOrderIds.map(() => "?").join(",");
+  const events = await env.DB.prepare(`DELETE FROM trade_events WHERE order_id IN (${placeholders})`).bind(...testOrderIds).run();
+  const orders = await env.DB.prepare(`DELETE FROM trade_orders WHERE mode = 'paper' AND order_id IN (${placeholders})`).bind(...testOrderIds).run();
+  return {
+    status: "cleaned",
+    deleted_order_ids: testOrderIds,
+    trade_events_deleted: objectValue(events.meta).changes ?? null,
+    trade_orders_deleted: objectValue(orders.meta).changes ?? null,
+    cleaned_at_utc: new Date().toISOString(),
+    cleaned_at_paris: parisIso(new Date())
+  };
+}
+
+async function freshRealtimeForPaper(env: Env): Promise<Record<string, unknown>> {
+  let realtime = await realtimeStatus(env);
+  const age = numberOrNull(realtime.age_seconds);
+  if (realtime.status !== "ok" || age === null || age > Number(getTradingConfig(env).max_spot_age_seconds)) {
+    await collectRealtimeMarketSnapshot(env, "paper_pnl");
+    realtime = await realtimeStatus(env);
+  }
+  return realtime;
+}
+
+async function paperFilledOrders(env: Env, limit: number): Promise<Record<string, unknown>[]> {
+  if (!env.DB) {
+    return [];
+  }
+  const { results } = await env.DB.prepare(`
+    SELECT order_id, asset, symbol, status, side, order_type, size_usdt, size_base,
+           limit_price, filled_price, archive_id, run_id, created_by, created_at_utc, executed_at_utc
+    FROM trade_orders
+    WHERE mode = 'paper' AND status LIKE '%filled%'
+    ORDER BY created_at_utc DESC
+    LIMIT ?
+  `).bind(limit).all();
+  return (results || []).map((item) => objectValue(item));
+}
+
+function paperPnlForOrder(order: Record<string, unknown>, markPrice: number | null): Record<string, unknown> {
+  const side = normalizeTradingSide(order.side);
+  const entry = numberOrNull(order.filled_price) || numberOrNull(order.limit_price);
+  const base = numberOrNull(order.size_base);
+  const notional = numberOrNull(order.size_usdt);
+  const direction = side === "sell" ? -1 : 1;
+  const pnl = markPrice !== null && entry !== null && base !== null ? (markPrice - entry) * base * direction : null;
+  const pnlPct = markPrice !== null && entry !== null && entry > 0 ? ((markPrice / entry) - 1) * direction : null;
+  const executedAt = stringOrNull(order.executed_at_utc) || stringOrNull(order.created_at_utc);
+  const ageSeconds = executedAt ? Math.max(0, Math.round((Date.now() - new Date(executedAt).getTime()) / 1000)) : null;
+  return {
+    order_id: order.order_id,
+    side,
+    status: order.status,
+    entry_price: entry,
+    mark_price: markPrice,
+    size_base: base,
+    size_usdt: notional,
+    pnl_usdt: pnl !== null ? Number(pnl.toFixed(4)) : null,
+    pnl_pct: pnlPct,
+    age_seconds: ageSeconds,
+    checkpoints: [1, 3, 7].map((days) => ({
+      horizon_days: days,
+      due: ageSeconds !== null && ageSeconds >= days * 86400
+    })),
+    created_at_utc: order.created_at_utc,
+    executed_at_utc: order.executed_at_utc
+  };
+}
+
+async function upsertDuePaperPnlSnapshots(env: Env, orders: Record<string, unknown>[], markPrice: number): Promise<Record<string, unknown>> {
+  if (!env.DB) {
+    return { status: "absent" };
+  }
+  let inserted = 0;
+  for (const order of orders) {
+    const executedAt = stringOrNull(order.executed_at_utc) || stringOrNull(order.created_at_utc);
+    if (!executedAt) {
+      continue;
+    }
+    const ageDays = (Date.now() - new Date(executedAt).getTime()) / 86400000;
+    for (const horizon of [1, 3, 7]) {
+      if (ageDays < horizon) {
+        continue;
+      }
+      const pnl = paperPnlForOrder(order, markPrice);
+      const result = await env.DB.prepare(`
+        INSERT OR IGNORE INTO paper_pnl_snapshots (
+          order_id, horizon_days, asset, side, entry_price, mark_price, size_base,
+          size_usdt, pnl_usdt, pnl_pct, created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        order.order_id,
+        horizon,
+        order.asset || "BTC",
+        pnl.side,
+        pnl.entry_price,
+        markPrice,
+        pnl.size_base,
+        pnl.size_usdt,
+        pnl.pnl_usdt,
+        pnl.pnl_pct,
+        new Date().toISOString()
+      ).run();
+      inserted += Number(objectValue(result.meta).changes || 0);
+    }
+  }
+  const { results } = await env.DB.prepare(`
+    SELECT order_id, horizon_days, asset, side, entry_price, mark_price, size_base,
+           size_usdt, pnl_usdt, pnl_pct, created_at_utc
+    FROM paper_pnl_snapshots
+    ORDER BY created_at_utc DESC
+    LIMIT 50
+  `).all();
+  return {
+    status: "ok",
+    inserted,
+    horizons_days: [1, 3, 7],
+    snapshots: (results || []).map((item) => objectValue(item))
   };
 }
 

@@ -42,11 +42,14 @@ Il ne produit jamais une certitude. Il produit :
 ## Endpoints
 
 - `GET /strategies/status`
+- `GET /strategies/deep-summary`
 - `GET /strategies/signal?preset=deep&horizon=30`
 - `GET /strategies/ensemble?preset=deep&horizon=30`
 - `GET /strategies/signals?limit=10`
 - `GET /strategies/paper-order?preset=deep&horizon=30`
 - `GET /strategies/propose-trade?preset=deep&horizon=30&mode=paper`
+- `GET /trading/paper-pnl`
+- `GET /trading/paper-portfolio`
 
 ## Telegram
 
