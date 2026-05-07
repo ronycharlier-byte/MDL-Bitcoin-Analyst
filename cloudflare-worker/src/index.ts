@@ -17,6 +17,11 @@
   TELEGRAM_CHAT_ID?: string;
   OPS_MONITOR_ALERT_COOLDOWN_SECONDS?: string;
   OPS_DAILY_SUMMARY_PARIS_HOUR?: string;
+  MODEL_ALERT_VAR95_THRESHOLD?: string;
+  MODEL_ALERT_CONFIDENCE_THRESHOLD?: string;
+  MODEL_ALERT_TRANSITION_THRESHOLD?: string;
+  MODEL_ALERT_BIAS_DELTA_THRESHOLD?: string;
+  MODEL_ALERT_COOLDOWN_SECONDS?: string;
 }
 
 interface RunRequest {
@@ -72,8 +77,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, x-client-key"
 };
 
-const WORKER_VERSION = "1.23.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.23.0";
+const WORKER_VERSION = "1.24.0";
+const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.24.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
 const DEFAULT_MULTI_HORIZONS = [7, 30, 90, 180, 365];
@@ -82,6 +87,11 @@ const QUICK_CACHE_MAX_SECONDS_DEFAULT = 10 * 60;
 const STALE_CACHE_MAX_SECONDS_DEFAULT = 60 * 60;
 const OPS_MONITOR_ALERT_COOLDOWN_SECONDS_DEFAULT = 15 * 60;
 const OPS_DAILY_SUMMARY_PARIS_HOUR_DEFAULT = 9;
+const MODEL_ALERT_VAR95_THRESHOLD_DEFAULT = 0.30;
+const MODEL_ALERT_CONFIDENCE_THRESHOLD_DEFAULT = 50;
+const MODEL_ALERT_TRANSITION_THRESHOLD_DEFAULT = 0.25;
+const MODEL_ALERT_BIAS_DELTA_THRESHOLD_DEFAULT = 0.10;
+const MODEL_ALERT_COOLDOWN_SECONDS_DEFAULT = 30 * 60;
 const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
   "/run-quick": {
     name: "quick",
@@ -134,6 +144,7 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(warmRenderBitgetBridge(env));
     ctx.waitUntil(runOperationalMonitor(env));
+    ctx.waitUntil(runModelAlertMonitor(env));
     ctx.waitUntil(sendDailyOpsSummaryIfDue(env));
   },
 
@@ -198,7 +209,8 @@ export default {
             "deep_compute_quota",
             "optional_webhook_alerting",
             "telegram_ops_alerting",
-            "telegram_daily_ops_summary"
+            "telegram_daily_ops_summary",
+            "telegram_model_alerts"
           ],
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -217,7 +229,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -263,7 +275,8 @@ export default {
             alert_channels: getOpsAlertChannels(env),
             cache_policy: cachePolicy(env),
             deep_compute_quota: getDeepRateLimit(env),
-            daily_summary_paris_hour: getDailySummaryParisHour(env)
+            daily_summary_paris_hour: getDailySummaryParisHour(env),
+            model_alerts: getModelAlertConfig(env)
           },
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
@@ -318,6 +331,14 @@ export default {
 
       if (url.pathname === "/ops/test-summary" && request.method === "GET") {
         return json(await sendDailyOpsSummary(env, true));
+      }
+
+      if (url.pathname === "/model-alerts/status" && request.method === "GET") {
+        return json(await evaluateLatestModelAlerts(env));
+      }
+
+      if (url.pathname === "/model-alerts/test" && request.method === "GET") {
+        return json(await runModelAlertMonitor(env, true));
       }
 
       if (["/history", "/compare-runs", "/alerts", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/clients/me", "/usage-summary"].includes(url.pathname) && request.method === "GET") {
@@ -1311,6 +1332,317 @@ function getTelegramConfig(env: Env): { token: string; chatId: string } | null {
 
 function getDailySummaryParisHour(env: Env): number {
   return clampInt(parseNumber(env.OPS_DAILY_SUMMARY_PARIS_HOUR, OPS_DAILY_SUMMARY_PARIS_HOUR_DEFAULT), 0, 23);
+}
+
+function getModelAlertConfig(env: Env): Record<string, number> {
+  return {
+    var95_threshold: clampFloat(parseNumber(env.MODEL_ALERT_VAR95_THRESHOLD, MODEL_ALERT_VAR95_THRESHOLD_DEFAULT), 0.01, 0.99),
+    confidence_threshold: clampFloat(parseNumber(env.MODEL_ALERT_CONFIDENCE_THRESHOLD, MODEL_ALERT_CONFIDENCE_THRESHOLD_DEFAULT), 1, 100),
+    transition_threshold: clampFloat(parseNumber(env.MODEL_ALERT_TRANSITION_THRESHOLD, MODEL_ALERT_TRANSITION_THRESHOLD_DEFAULT), 0.01, 0.99),
+    bias_delta_threshold: clampFloat(parseNumber(env.MODEL_ALERT_BIAS_DELTA_THRESHOLD, MODEL_ALERT_BIAS_DELTA_THRESHOLD_DEFAULT), 0.01, 0.99),
+    cooldown_seconds: clampInt(parseNumber(env.MODEL_ALERT_COOLDOWN_SECONDS, MODEL_ALERT_COOLDOWN_SECONDS_DEFAULT), 60, 24 * 60 * 60)
+  };
+}
+
+async function evaluateLatestModelAlerts(env: Env): Promise<Record<string, unknown>> {
+  const now = new Date();
+  const config = getModelAlertConfig(env);
+  const [quickCurrent, quickPrevious, deepCurrent, deepPrevious] = await Promise.all([
+    latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 0),
+    latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/quick"].horizons, 1),
+    latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 0),
+    latestD1RunPayload(env, "BTC", ANALYSIS_PRESETS["/deep"].horizons, 1)
+  ]);
+  const issues = [
+    ...evaluateRunModelIssues("quick", quickCurrent, config),
+    ...evaluateRunModelIssues("deep", deepCurrent, config),
+    ...compareRunBias("quick", quickCurrent, quickPrevious, config),
+    ...compareRunBias("deep", deepCurrent, deepPrevious, config)
+  ];
+  const criticalCount = issues.filter((issue) => issue.level === "CRITICAL").length;
+  const warningCount = issues.filter((issue) => issue.level === "WARNING").length;
+  const status = criticalCount > 0 ? "critical" : warningCount > 0 ? "warning" : "ok";
+  return {
+    status,
+    worker_version: WORKER_VERSION,
+    schema_version: SCHEMA_VERSION,
+    checked_at_utc: now.toISOString(),
+    checked_at_paris: parisIso(now),
+    thresholds: config,
+    latest_runs: {
+      quick: compactRunReference(quickCurrent),
+      deep: compactRunReference(deepCurrent),
+      quick_previous: compactRunReference(quickPrevious),
+      deep_previous: compactRunReference(deepPrevious)
+    },
+    issue_count: issues.length,
+    critical_count: criticalCount,
+    warning_count: warningCount,
+    issues,
+    channels: getOpsAlertChannels(env),
+    policy: [
+      "VaR95 above threshold triggers a model risk alert.",
+      "Confidence below threshold triggers a fragility alert.",
+      "Transition/non-classified regime above threshold triggers a regime uncertainty alert.",
+      "P(up) change above threshold versus the previous matching run triggers a bias shift alert."
+    ]
+  };
+}
+
+async function runModelAlertMonitor(env: Env, manual = false): Promise<Record<string, unknown>> {
+  const evaluation = await evaluateLatestModelAlerts(env);
+  if (evaluation.status === "ok" && !manual) {
+    return evaluation;
+  }
+  const issues = Array.isArray(evaluation.issues) ? evaluation.issues.map((item) => objectValue(item)) : [];
+  const fingerprint = manual
+    ? `model-alert-test:${new Date().toISOString()}`
+    : modelAlertFingerprint(evaluation);
+  const cooldown = Number(objectValue(evaluation.thresholds).cooldown_seconds || MODEL_ALERT_COOLDOWN_SECONDS_DEFAULT);
+  if (!manual && !(await shouldSendOpsAlert(env, fingerprint, cooldown))) {
+    return {
+      ...evaluation,
+      alert_delivery: {
+        status: "skipped",
+        reason: "cooldown_active",
+        cooldown_seconds: cooldown
+      }
+    };
+  }
+  const text = formatModelAlertText(evaluation, manual);
+  const [discord, telegram] = await Promise.all([
+    sendDiscordOpsAlert(env, manual ? "Quant BTC model alert TEST" : `Quant BTC model alert ${String(evaluation.status).toUpperCase()}`, text, evaluation),
+    sendTelegramOpsAlert(env, text)
+  ]);
+  const sent = [discord, telegram].some((item) => objectValue(item).status === "sent");
+  await persistOpsEventToD1(env, {
+    kind: manual ? "manual_model_alert" : "model_alert",
+    status: sent ? "sent" : "error",
+    severity: evaluation.status === "critical" ? "critical" : evaluation.status === "warning" ? "warning" : "info",
+    message: issues.length ? issues.slice(0, 5).map((issue) => String(issue.message || issue.type || "model issue")).join("; ") : "No active model alert",
+    fingerprint,
+    payload: {
+      evaluation,
+      delivery: { discord, telegram }
+    }
+  });
+  return {
+    ...evaluation,
+    alert_delivery: {
+      status: sent ? "sent" : "error",
+      discord,
+      telegram
+    }
+  };
+}
+
+async function latestD1RunPayload(env: Env, asset: string, requestedHorizons: number[], offset: number): Promise<Record<string, unknown> | null> {
+  if (!env.DB) {
+    return null;
+  }
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT payload_json, created_at_utc
+      FROM quant_runs
+      WHERE asset = ?
+      ORDER BY created_at_utc DESC
+      LIMIT 30
+    `).bind(asset).all();
+    let matches = 0;
+    for (const row of results || []) {
+      const payloadRaw = stringOrNull(objectValue(row).payload_json);
+      if (!payloadRaw) {
+        continue;
+      }
+      const payload = objectValue(JSON.parse(payloadRaw));
+      const horizons = Array.isArray(payload.horizons) ? payload.horizons.map(Number) : [];
+      if (!sameNumberArray(horizons, requestedHorizons)) {
+        continue;
+      }
+      if (matches === offset) {
+        return {
+          ...payload,
+          d1_created_at_utc: objectValue(row).created_at_utc,
+          d1_created_at_paris: stringOrNull(objectValue(row).created_at_utc) ? parisIso(new Date(String(objectValue(row).created_at_utc))) : null
+        };
+      }
+      matches += 1;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function evaluateRunModelIssues(mode: string, payload: Record<string, unknown> | null, config: Record<string, number>): Record<string, unknown>[] {
+  if (!payload) {
+    return [{
+      level: "WARNING",
+      type: "run_absent",
+      mode,
+      message: `${mode} run is absent from D1 cache`
+    }];
+  }
+  const archiveId = stringOrNull(payload.archive_id) || "absent";
+  const frames = Array.isArray(payload.frames) ? payload.frames.map((item) => objectValue(item)) : [];
+  const issues: Record<string, unknown>[] = [];
+  for (const frame of frames) {
+    const horizon = numberOrNull(frame.horizon);
+    const runId = stringOrNull(frame.run_id) || "absent";
+    const risk = objectValue(frame.risk_metrics);
+    const confidence = objectValue(frame.confidence);
+    const regime = objectValue(frame.regime_distribution);
+    const var95 = numberOrNull(risk.var_95);
+    const confidenceScore = numberOrNull(confidence.score);
+    const transition = numberOrNull(regime.non_classified_transition);
+    if (var95 !== null && var95 >= Number(config.var95_threshold)) {
+      issues.push({
+        level: var95 >= 0.45 ? "CRITICAL" : "WARNING",
+        type: "var95_high",
+        mode,
+        horizon,
+        value: var95,
+        threshold: config.var95_threshold,
+        archive_id: archiveId,
+        run_id: runId,
+        message: `${mode} ${horizon}d VaR95 ${formatPercent(var95)} exceeds ${formatPercent(Number(config.var95_threshold))}`
+      });
+    }
+    if (confidenceScore !== null && confidenceScore < Number(config.confidence_threshold)) {
+      issues.push({
+        level: confidenceScore <= 35 ? "CRITICAL" : "WARNING",
+        type: "confidence_low",
+        mode,
+        horizon,
+        value: confidenceScore,
+        threshold: config.confidence_threshold,
+        archive_id: archiveId,
+        run_id: runId,
+        message: `${mode} ${horizon}d confidence ${confidenceScore}/100 below ${config.confidence_threshold}/100`
+      });
+    }
+    if (transition !== null && transition >= Number(config.transition_threshold)) {
+      issues.push({
+        level: transition >= 0.35 ? "CRITICAL" : "WARNING",
+        type: "transition_high",
+        mode,
+        horizon,
+        value: transition,
+        threshold: config.transition_threshold,
+        archive_id: archiveId,
+        run_id: runId,
+        message: `${mode} ${horizon}d transition ${formatPercent(transition)} exceeds ${formatPercent(Number(config.transition_threshold))}`
+      });
+    }
+  }
+  return issues;
+}
+
+function compareRunBias(mode: string, current: Record<string, unknown> | null, previous: Record<string, unknown> | null, config: Record<string, number>): Record<string, unknown>[] {
+  if (!current || !previous) {
+    return [];
+  }
+  const threshold = Number(config.bias_delta_threshold);
+  const previousByHorizon = new Map<number, Record<string, unknown>>();
+  for (const frame of Array.isArray(previous.frames) ? previous.frames.map((item) => objectValue(item)) : []) {
+    const horizon = numberOrNull(frame.horizon);
+    if (horizon !== null) {
+      previousByHorizon.set(horizon, frame);
+    }
+  }
+  const issues: Record<string, unknown>[] = [];
+  for (const frame of Array.isArray(current.frames) ? current.frames.map((item) => objectValue(item)) : []) {
+    const horizon = numberOrNull(frame.horizon);
+    if (horizon === null) {
+      continue;
+    }
+    const previousFrame = previousByHorizon.get(horizon);
+    if (!previousFrame) {
+      continue;
+    }
+    const currentProbUp = numberOrNull(objectValue(frame.distribution).prob_up);
+    const previousProbUp = numberOrNull(objectValue(previousFrame.distribution).prob_up);
+    if (currentProbUp === null || previousProbUp === null) {
+      continue;
+    }
+    const delta = currentProbUp - previousProbUp;
+    if (Math.abs(delta) >= threshold) {
+      issues.push({
+        level: Math.abs(delta) >= threshold * 2 ? "CRITICAL" : "WARNING",
+        type: "bias_shift",
+        mode,
+        horizon,
+        value: delta,
+        threshold,
+        archive_id: current.archive_id,
+        previous_archive_id: previous.archive_id,
+        run_id: frame.run_id,
+        previous_run_id: previousFrame.run_id,
+        message: `${mode} ${horizon}d P(up) changed by ${formatPercent(delta)} vs previous run`
+      });
+    }
+  }
+  return issues;
+}
+
+function compactRunReference(payload: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!payload) {
+    return null;
+  }
+  return {
+    archive_id: payload.archive_id,
+    report_date_utc: payload.report_date_utc,
+    report_date_paris: payload.report_date_paris,
+    reference_spot: payload.reference_spot,
+    reference_spot_timestamp_utc: payload.reference_spot_timestamp_utc,
+    reference_spot_timestamp_paris: payload.reference_spot_timestamp_paris,
+    horizons: payload.horizons,
+    d1_created_at_utc: payload.d1_created_at_utc,
+    d1_created_at_paris: payload.d1_created_at_paris
+  };
+}
+
+function modelAlertFingerprint(evaluation: Record<string, unknown>): string {
+  const issues = Array.isArray(evaluation.issues) ? evaluation.issues.map((item) => objectValue(item)) : [];
+  const archiveIds = objectValue(evaluation.latest_runs);
+  const quick = objectValue(archiveIds.quick);
+  const deep = objectValue(archiveIds.deep);
+  const issueKey = issues
+    .map((issue) => `${issue.type}:${issue.mode}:${issue.horizon}:${issue.level}`)
+    .sort()
+    .join("|");
+  return `model:${evaluation.status}:${quick.archive_id || "noquick"}:${deep.archive_id || "nodeep"}:${issueKey}`;
+}
+
+function formatModelAlertText(evaluation: Record<string, unknown>, manual: boolean): string {
+  const latestRuns = objectValue(evaluation.latest_runs);
+  const quick = objectValue(latestRuns.quick);
+  const deep = objectValue(latestRuns.deep);
+  const issues = Array.isArray(evaluation.issues) ? evaluation.issues.map((item) => objectValue(item)) : [];
+  const topIssues = issues.length
+    ? issues.slice(0, 10).map((issue) => `- ${issue.level}: ${issue.message}`).join("\n")
+    : "- No active model alert at current thresholds.";
+  const header = manual ? "Quant BTC Model Alert TEST" : "Quant BTC Model Alert";
+  return [
+    header,
+    `Level: ${String(evaluation.status || "unknown").toUpperCase()}`,
+    `Issues: ${issues.length}`,
+    ``,
+    topIssues,
+    ``,
+    `Quick archive: ${quick.archive_id || "absent"}`,
+    `Deep archive: ${deep.archive_id || "absent"}`,
+    `Spot quick: ${quick.reference_spot || "absent"}`,
+    `Spot deep: ${deep.reference_spot || "absent"}`,
+    ``,
+    `Rule: probabilistic risk alert, not trading advice.`,
+    `UTC: ${evaluation.checked_at_utc || new Date().toISOString()}`,
+    `Paris: ${evaluation.checked_at_paris || parisIso(new Date())}`
+  ].join("\n");
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(2)}%`;
 }
 
 async function sendOpsAlertIfNeeded(env: Env, fingerprint: string, message: string, status: Record<string, unknown>): Promise<void> {
@@ -2719,6 +3051,10 @@ function parseNullableNumber(value: unknown): number | null {
 
 function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function clampFloat(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
