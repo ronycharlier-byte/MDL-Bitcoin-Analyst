@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import math
 import os
+import ipaddress
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -20,8 +22,10 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 
 ROOT = Path(__file__).resolve().parent
@@ -40,20 +44,24 @@ DEFAULT_MULTIFRAME_HORIZONS = [7, 30, 90, 180, 365]
 RATE_LIMIT_RUNS_PER_MINUTE = int(os.getenv("RATE_LIMIT_RUNS_PER_MINUTE", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "45"))
+MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", "65536"))
 MAX_SPOT_AGE_SECONDS = int(os.getenv("MAX_SPOT_AGE_SECONDS", "180"))
 MAX_FUNDAMENTAL_AGE_SECONDS = int(os.getenv("MAX_FUNDAMENTAL_AGE_SECONDS", "21600"))
 MAX_RUN_AGE_SECONDS = int(os.getenv("MAX_RUN_AGE_SECONDS", "21600"))
 MULTI_SEED_RUNS = max(1, int(os.getenv("MULTI_SEED_RUNS", "5")))
 MULTI_SEED_SIMULATIONS = max(100, int(os.getenv("MULTI_SEED_SIMULATIONS", "250")))
-API_VERSION = "1.9.0"
+API_VERSION = "2.0.0"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "quant_btc_model_v1")
-SCHEMA_VERSION = "gpt_action_schema_v1.9.0"
+SCHEMA_VERSION = "analysis_contract_v2.0.0"
 CLIENT_KEY_PREFIX = "qbtc"
 BILLING_SUCCESS_URL = os.getenv("BILLING_SUCCESS_URL", "https://chat.openai.com/")
 BILLING_CANCEL_URL = os.getenv("BILLING_CANCEL_URL", "https://chat.openai.com/")
 SOURCE_POLICY = "bitget_required_no_exchange_fallback"
 USER_DISPLAY_TIMEZONE = "Europe/Paris"
 PARIS_TZ = ZoneInfo(USER_DISPLAY_TIMEZONE)
+API_DOCS_ENABLED = os.getenv("ENABLE_API_DOCS", "0").strip().lower() in {"1", "true", "yes"}
+TRUSTED_PROXY_HEADERS = os.getenv("TRUSTED_PROXY_HEADERS", "0").strip().lower() in {"1", "true", "yes"}
+ALLOWED_HOSTS = [item.strip() for item in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",") if item.strip()]
 TIMEZONE_POLICY = (
     "Source timestamps are UTC. User-facing GPT answers must show both UTC and Europe/Paris "
     "when a report date or spot timestamp is cited."
@@ -115,10 +123,18 @@ from logging_utils import setup_logger  # noqa: E402
 from market_data import fetch_farside_etf_flow_history, load_fundamental_features, load_market_prices  # noqa: E402
 from position_sizing import position_sizing_summary  # noqa: E402
 from risk_metrics import compute_risk_metrics  # noqa: E402
+from run_manifest import build_run_manifest  # noqa: E402
 from simulation_utils import seed_for, summarize_simulation  # noqa: E402
 from stress_tests import run_stress_tests  # noqa: E402
 from backtest import run_backtest  # noqa: E402
 from durable_store import persist_run, persist_usage, storage_status  # noqa: E402
+from contract_validation import (  # noqa: E402
+    ContractViolation,
+    ErrorCode,
+    canonicalize_analysis_payload,
+    error_payload,
+    validate_analysis_payload,
+)
 
 
 FAST_MODEL_REGISTRY = {
@@ -144,7 +160,174 @@ app = FastAPI(
         "Probabilistic Bitcoin quantitative model API. Outputs are scenarios, "
         "probabilities, distributions and risk metrics, never deterministic predictions."
     ),
+    docs_url="/docs" if API_DOCS_ENABLED else None,
+    redoc_url="/redoc" if API_DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if API_DOCS_ENABLED else None,
 )
+
+
+class RequestSizeLimitMiddleware:
+    def __init__(self, app, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        content_length = headers.get(b"content-length")
+        if content_length:
+            try:
+                if int(content_length) > self.max_body_bytes:
+                    response = JSONResponse(
+                        error_payload(
+                            ErrorCode.INVALID_REQUEST,
+                            "Request body exceeds the configured maximum size.",
+                            uuid.uuid4().hex,
+                            details={"max_body_bytes": self.max_body_bytes},
+                        ),
+                        status_code=413,
+                    )
+                    await response(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+
+        consumed = 0
+
+        async def limited_receive():
+            nonlocal consumed
+            message = await receive()
+            if message.get("type") == "http.request":
+                consumed += len(message.get("body", b""))
+                if consumed > self.max_body_bytes:
+                    raise HTTPException(status_code=413, detail="Request body exceeds the configured maximum size.")
+            return message
+
+        await self.app(scope, limited_receive, send)
+
+
+app.add_middleware(RequestSizeLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Cache-Control"] = "no-store" if request.url.path not in {"/health", "/live"} else "no-cache"
+    return response
+
+
+@app.middleware("http")
+async def request_observability(request: Request, call_next):
+    supplied_request_id = request.headers.get("x-request-id")
+    request_id = (
+        supplied_request_id
+        if supplied_request_id
+        and len(supplied_request_id) <= 128
+        and all(character.isalnum() or character in "._:-" for character in supplied_request_id)
+        else uuid.uuid4().hex
+    )
+    request.state.request_id = request_id
+    started_at = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        setup_logger("quant_btc_model_api").info(
+            "request_complete",
+            extra={
+                "request_id": request_id,
+                "route": request.url.path,
+                "method": request.method,
+                "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
+                "status_code": status_code,
+            },
+        )
+
+
+def _error_code_for_http(exc: HTTPException) -> ErrorCode:
+    if exc.status_code in {401, 403}:
+        return ErrorCode.AUTHENTICATION_REQUIRED
+    if exc.status_code == 429:
+        return ErrorCode.RATE_LIMITED
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    legacy = str(detail.get("error") or "").lower()
+    return {
+        "authentication_service_unconfigured": ErrorCode.AUTHENTICATION_REQUIRED,
+        "reference_spot_stale": ErrorCode.SPOT_STALE,
+        "mock_market_data_detected": ErrorCode.SPOT_MISSING,
+        "non_bitget_market_source_detected": ErrorCode.BITGET_UNAVAILABLE,
+        "client_quota_exceeded": ErrorCode.RATE_LIMITED,
+        "model_execution_failed": ErrorCode.MODEL_EXECUTION_FAILED,
+    }.get(legacy, ErrorCode.INVALID_REQUEST if exc.status_code < 500 else ErrorCode.INTERNAL_ERROR)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex
+    details = exc.detail if isinstance(exc.detail, dict) else {}
+    message = str(details.get("message") or details.get("warning") or exc.detail or "Request failed.")
+    return JSONResponse(
+        error_payload(
+            _error_code_for_http(exc),
+            message,
+            request_id,
+            retryable=exc.status_code in {429, 502, 503, 504},
+            details=details,
+        ),
+        status_code=exc.status_code,
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex
+    return JSONResponse(
+        error_payload(
+            ErrorCode.INVALID_REQUEST,
+            "Request validation failed.",
+            request_id,
+            details={"errors": exc.errors()},
+        ),
+        status_code=422,
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def internal_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex
+    setup_logger("quant_btc_model_api").error(
+        "request_failed",
+        extra={
+            "request_id": request_id,
+            "route": request.url.path,
+            "method": request.method,
+            "status_code": 500,
+            "error_code": ErrorCode.INTERNAL_ERROR.value,
+        },
+    )
+    return JSONResponse(
+        error_payload(
+            ErrorCode.INTERNAL_ERROR,
+            "The API could not complete the request.",
+            request_id,
+            retryable=False,
+            details={"error_type": type(exc).__name__},
+        ),
+        status_code=500,
+        headers={"X-Request-ID": request_id},
+    )
 
 
 def init_runtime_db() -> None:
@@ -283,6 +466,8 @@ class MultiFrameRunRequest(BaseModel):
 
 
 class RunResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     run_id: str
     asset: str
     horizon: int
@@ -296,7 +481,11 @@ class RunResponse(BaseModel):
     risk_metrics: dict[str, Any]
     stress_tests: list[dict[str, Any]]
     confidence: dict[str, Any]
-    position_sizing: dict[str, Any]
+    position_sizing: dict[str, Any] | None = Field(
+        default=None,
+        description="Deprecated internal diagnostic; omitted from canonical external analysis responses.",
+        json_schema_extra={"deprecated": True},
+    )
     version: dict[str, Any]
     archive: dict[str, Any] | None = None
     cache: dict[str, Any] | None = None
@@ -403,19 +592,26 @@ def require_api_key(
 ) -> None:
     expected = os.getenv("QUANT_API_KEY")
     if not expected:
-        return
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "authentication_service_unconfigured",
+                "message": "Authentication service is unavailable; protected routes fail closed.",
+            },
+        )
     bearer = None
     if authorization and authorization.lower().startswith("bearer "):
         bearer = authorization.split(" ", 1)[1].strip()
     supplied = bearer or x_api_key
-    if supplied != expected:
+    if not supplied or not hmac.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 
 def client_key(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()
+    if TRUSTED_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",", 1)[0].strip()
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
@@ -467,7 +663,9 @@ def require_rate_limit(request: Request) -> None:
 
 
 def hash_client_key(client_key: str) -> str:
-    secret = os.getenv("CLIENT_KEY_HASH_SECRET") or os.getenv("QUANT_API_KEY") or "quant_btc_default_client_hash_secret"
+    secret = os.getenv("CLIENT_KEY_HASH_SECRET") or os.getenv("QUANT_API_KEY")
+    if not secret:
+        raise HTTPException(status_code=503, detail="CLIENT_KEY_HASH_SECRET is not configured.")
     return hmac.new(secret.encode("utf-8"), client_key.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
@@ -737,10 +935,10 @@ def create_checkout_session(payload: BillingCheckoutRequest) -> dict[str, Any]:
             "mode": result.get("mode"),
             "version": version_payload(),
         }
-    except Exception as exc:
+    except Exception:
         return {
             "status": "error",
-            "error": str(exc),
+            "error_code": "CHECKOUT_PROVIDER_UNAVAILABLE",
             "plan": payload.plan,
             "warning": "Checkout was not created; no payment was taken.",
             "version": version_payload(),
@@ -777,9 +975,38 @@ def list_alert_subscriptions(client_id: str | None = None) -> list[dict[str, Any
         return []
 
 
+def _allowed_webhook_hosts() -> set[str]:
+    return {
+        item.strip().lower().rstrip(".")
+        for item in os.getenv("ALERT_WEBHOOK_ALLOWED_HOSTS", "").split(",")
+        if item.strip()
+    }
+
+
+def _validate_webhook_target(url: str, *, internal_hosts: set[str] | None = None) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme != "https" or not host or parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="Webhook target must be an HTTPS URL without embedded credentials.")
+    allowed = _allowed_webhook_hosts() | (internal_hosts or set())
+    if host not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook host is not allowlisted. Configure ALERT_WEBHOOK_ALLOWED_HOSTS explicitly.",
+        )
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)}
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="Webhook host could not be resolved safely.") from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise HTTPException(status_code=400, detail="Webhook target resolves to a non-public address.")
+
+
 def create_alert_subscription(payload: AlertSubscriptionRequest, client: dict[str, Any] | None) -> dict[str, Any]:
-    if payload.channel in {"webhook", "discord"} and not payload.target.lower().startswith("https://"):
-        raise HTTPException(status_code=400, detail="Webhook and Discord alert targets must be HTTPS URLs.")
+    if payload.channel in {"webhook", "discord"}:
+        _validate_webhook_target(payload.target)
     if payload.channel == "email" and "@" not in payload.target:
         raise HTTPException(status_code=400, detail="Email alert target must be an email address.")
     now = time.time()
@@ -814,6 +1041,7 @@ def alert_level_value(level: str) -> int:
 
 
 def send_json_webhook(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    _validate_webhook_target(url, internal_hosts={"api.telegram.org"})
     body = json.dumps(payload, ensure_ascii=True, default=str).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -821,7 +1049,12 @@ def send_json_webhook(url: str, payload: dict[str, Any]) -> dict[str, Any]:
         method="POST",
         headers={"content-type": "application/json", "user-agent": "quant-btc-model-alerts/1.0"},
     )
-    with urllib.request.urlopen(request, timeout=12) as response:
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    with opener.open(request, timeout=12) as response:
         return {"status": "sent", "http_status": response.status}
 
 
@@ -868,8 +1101,8 @@ def dispatch_alerts_to_subscriptions(client: dict[str, Any] | None, alerts: list
                     result = send_json_webhook(email_webhook, {"to": subscription["target"], **message})
             else:
                 result = {"status": "skipped", "reason": "unknown_channel"}
-        except Exception as exc:
-            result = {"status": "error", "error": str(exc)}
+        except Exception:
+            result = {"status": "error", "error": "alert_delivery_failed"}
         deliveries.append({"subscription_id": subscription["subscription_id"], "channel": subscription["channel"], **result})
     return {
         "status": "sent_or_attempted" if deliveries else "skipped",
@@ -1384,6 +1617,19 @@ def attach_archive(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload.get("provenance_summary"), dict):
         payload["provenance_summary"]["archive_id"] = archive_id
     payload["archive"] = archive
+    canonicalize_analysis_payload(payload, endpoint=endpoint)
+    payload["run_manifest"] = build_run_manifest(payload, endpoint)
+    try:
+        validate_analysis_payload(payload)
+    except ContractViolation as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(exc.code),
+                "message": str(exc),
+                "details": exc.details,
+            },
+        ) from exc
     try:
         archive_dir.mkdir(parents=True, exist_ok=True)
         response_json = json.dumps(payload, ensure_ascii=True, indent=2, default=str)
@@ -1419,14 +1665,14 @@ def attach_archive(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
                 ),
             )
             conn.commit()
-    except Exception as exc:
-        archive.update({"status": "failed", "error": str(exc)})
+    except Exception:
+        archive.update({"status": "failed", "error_code": "STORAGE_UNAVAILABLE"})
     try:
         payload["durable_storage"] = persist_run(payload)
-    except Exception as exc:
+    except Exception:
         payload["durable_storage"] = {
             "status": "error",
-            "error": str(exc),
+            "error_code": "STORAGE_UNAVAILABLE",
             "note": "Runtime archive was attempted, but durable external persistence failed.",
         }
     return archive
@@ -1471,8 +1717,8 @@ def latest_runtime_archive() -> dict[str, Any]:
             "timezone_policy": TIMEZONE_POLICY,
             "age_seconds": max(0, int(time.time() - created_at)),
         }
-    except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+    except Exception:
+        return {"status": "error", "error_code": "STORAGE_UNAVAILABLE"}
 
 
 def latest_external_archive() -> dict[str, Any]:
@@ -1497,8 +1743,8 @@ def latest_external_archive() -> dict[str, Any]:
             "fundamental_absent_fields": (payload.get("fundamental_inputs") or {}).get("absent_fields"),
             "note": "Bundled GitHub archive snapshot; may lag the live runtime archive.",
         }
-    except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+    except Exception:
+        return {"status": "error", "error_code": "ARCHIVE_NOT_FOUND"}
 
 
 def list_runtime_archives(asset: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
@@ -1694,8 +1940,8 @@ def backtest_summary_payload(asset: str = "BTC") -> dict[str, Any]:
             ],
             "version": version_payload(),
         }
-    except Exception as exc:
-        return {"status": "error", "error": str(exc), "rows": [], "version": version_payload()}
+    except Exception:
+        return {"status": "error", "error_code": "BACKTEST_UNAVAILABLE", "rows": [], "version": version_payload()}
 
 
 def dashboard_html() -> str:
@@ -1739,6 +1985,7 @@ def dashboard_html() -> str:
     <div id="alerts" class="grid"></div>
   </main>
   <script>
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
     const fmtPct = v => v == null ? "absent" : (v * 100).toFixed(2) + "%";
     const fmtUsd = v => v == null ? "absent" : "$" + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
     async function loadRun() {
@@ -1752,12 +1999,12 @@ def dashboard_html() -> str:
         ["Archive", archive.archive_id || "absent"],
         ["Date UTC", prov.report_date_utc || "absent"],
         ["Statut", data.status || "absent"]
-      ].map(([k,v]) => `<div class='card'><div class='muted'>${k}</div><strong>${v}</strong></div>`).join("");
+      ].map(([k,v]) => `<div class='card'><div class='muted'>${esc(k)}</div><strong>${esc(v)}</strong></div>`).join("");
       document.getElementById("frames").innerHTML = `<table><tr><th>Horizon</th><th>Médiane</th><th>P10</th><th>P90</th><th>P(up)</th><th>VaR95</th><th>CVaR95</th><th>Conf.</th></tr>${(data.frames || []).map(f => {
         const d = f.distribution || {}, r = f.risk_metrics || {}, c = f.confidence || {};
-        return `<tr><td>${f.horizon}j</td><td>${fmtUsd(d.median_price)}</td><td>${fmtUsd(d.p10_price)}</td><td>${fmtUsd(d.p90_price)}</td><td>${fmtPct(d.prob_up)}</td><td>${fmtPct(r.var_95)}</td><td>${fmtPct(r.cvar_95)}</td><td>${c.score ?? "absent"}/100</td></tr>`;
+        return `<tr><td>${esc(f.horizon)}j</td><td>${esc(fmtUsd(d.median_price))}</td><td>${esc(fmtUsd(d.p10_price))}</td><td>${esc(fmtUsd(d.p90_price))}</td><td>${esc(fmtPct(d.prob_up))}</td><td>${esc(fmtPct(r.var_95))}</td><td>${esc(fmtPct(r.cvar_95))}</td><td>${esc(c.score ?? "absent")}/100</td></tr>`;
       }).join("")}</table>`;
-      document.getElementById("alerts").innerHTML = (data.alerts || []).map(a => `<div class='card ${a.level === "blocker" ? "bad" : "warn"}'><strong>${a.type}</strong><div>${a.message || ""}</div></div>`).join("") || "<div class='card'>Aucune alerte.</div>";
+      document.getElementById("alerts").innerHTML = (data.alerts || []).map(a => `<div class='card ${a.level === "blocker" ? "bad" : "warn"}'><strong>${esc(a.type)}</strong><div>${esc(a.message || "")}</div></div>`).join("") || "<div class='card'>Aucune alerte.</div>";
     }
     loadRun();
   </script>
@@ -1978,10 +2225,9 @@ def run_cli(payload: RunRequest) -> dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail={
+                "error": "model_execution_failed",
                 "message": "Model run failed.",
-                "stdout": completed.stdout[-4000:],
-                "stderr": completed.stderr[-4000:],
-                "parsed": parsed,
+                "return_code": completed.returncode,
             },
         )
     run_id = parsed.get("run_id")
@@ -2120,8 +2366,8 @@ def fetch_bitget_liquidity_snapshot(asset: str) -> dict[str, Any]:
             "order_book_imbalance_1pct": imbalance_1,
             "estimated_slippage_note": "Depth is top-50 level not full market impact; use as liquidity proxy only.",
         }
-    except Exception as exc:
-        return {"status": "absent", "source": "bitget_spot_orderbook", "error": str(exc)}
+    except Exception:
+        return {"status": "absent", "source": "bitget_spot_orderbook", "reason": "provider_unavailable"}
 
 
 def fetch_options_snapshot() -> dict[str, Any]:
@@ -2165,8 +2411,8 @@ def fetch_options_snapshot() -> dict[str, Any]:
             "max_pain_status": "absent_not_computed_without_full_chain_by_expiry",
             "note": "Options data are used as context only; BTC spot source policy remains Bitget-only.",
         }
-    except Exception as exc:
-        return {"status": "absent", "source": "deribit_options_public_api", "error": str(exc)}
+    except Exception:
+        return {"status": "absent", "source": "deribit_options_public_api", "reason": "provider_unavailable"}
 
 
 def etf_flow_trends(logger) -> dict[str, Any]:
@@ -2316,12 +2562,13 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
             f"{payload.asset.upper()}_{model_name}_{horizon}d_fast_"
             f"{batch_started_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
         )
+        frame_seed = seed_for(run_id)
         kwargs = {
             "returns": returns,
             "spot": spot,
             "horizon": horizon,
             "simulations": payload.simulations,
-            "seed": seed_for(run_id),
+            "seed": frame_seed,
         }
         if model_name in {"correlation", "correlation_model"}:
             kwargs["fundamentals"] = fundamentals
@@ -2356,6 +2603,7 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
                     "asset": payload.asset.upper(),
                     "horizon": horizon,
                     "simulations": payload.simulations,
+                    "seed": frame_seed,
                     "model": model_name,
                     "provenance": {
                         "source": "fast_runtime_multi_frame",
@@ -2400,8 +2648,8 @@ def fast_multi_frame_results(payload: MultiFrameRunRequest, horizons: list[int],
                     "warning": "Fast multi-frame runtime: probabilistic output only, no deterministic forecast.",
                 }
             )
-        except Exception as exc:
-            errors.append({"horizon": horizon, "status_code": 500, "detail": str(exc)})
+        except Exception:
+            errors.append({"horizon": horizon, "status_code": 500, "error_code": "MODEL_EXECUTION_FAILED"})
 
     return {
         "price_frame": price_frame,
@@ -2484,8 +2732,7 @@ def build_run_response(payload: RunRequest) -> RunResponse:
     )
 
 
-@app.get("/health")
-def health() -> dict[str, Any]:
+def liveness_payload() -> dict[str, Any]:
     checked_at = utc_now()
     return {
         "status": "ok",
@@ -2497,6 +2744,48 @@ def health() -> dict[str, Any]:
         "timestamp_paris": paris_iso(checked_at),
         "timezone_policy": TIMEZONE_POLICY,
     }
+
+
+@app.get("/live")
+def live() -> dict[str, Any]:
+    return liveness_payload()
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    """Compatibility alias for /live."""
+    return liveness_payload()
+
+
+@app.get("/ready")
+def ready() -> Response:
+    checks: dict[str, Any] = {
+        "runtime_db": "unknown",
+        "contract_schema": "present" if (ROOT / "contracts" / "analysis.schema.json").exists() else "absent",
+        "api_auth": "configured" if os.getenv("QUANT_API_KEY") else "absent",
+    }
+    try:
+        with sqlite3.connect(API_RUNTIME_DB) as conn:
+            conn.execute("SELECT 1").fetchone()
+        checks["runtime_db"] = "ready"
+    except sqlite3.Error:
+        checks["runtime_db"] = "unavailable"
+    is_ready = all(
+        (
+            checks["runtime_db"] == "ready",
+            checks["contract_schema"] == "present",
+            checks["api_auth"] == "configured",
+        )
+    )
+    now = utc_now()
+    payload = {
+        "status": "ok" if is_ready else "error",
+        "ready": is_ready,
+        "checks": checks,
+        "timestamp_utc": now.isoformat(),
+        "timestamp_paris": paris_iso(now),
+    }
+    return JSONResponse(payload, status_code=200 if is_ready else 503)
 
 
 @app.get("/version")
@@ -2587,7 +2876,12 @@ def audit() -> dict[str, Any]:
     return audit_payload()
 
 
-@app.post("/run", response_model=RunResponse, dependencies=[Depends(require_api_key), Depends(require_rate_limit)])
+@app.post(
+    "/run",
+    response_model=RunResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_api_key), Depends(require_rate_limit)],
+)
 def run_model(payload: RunRequest, client: dict[str, Any] = Depends(client_context)) -> RunResponse:
     key = cache_key_for("/run", pydantic_payload(payload))
     cached = cache_get(key)

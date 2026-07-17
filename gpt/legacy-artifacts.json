@@ -1,0 +1,13 @@
+{
+  "status": "legacy_compatibility_inventory",
+  "canonical_openapi": "gpt/actions/openapi.yaml",
+  "canonical_instructions": "gpt/instructions/quant_btc_analyst.system.md",
+  "policy": "Files outside the canonical paths are retained for traceability only and must not be uploaded as the production GPT contract.",
+  "legacy_roots": [
+    "gpt_action_openapi.yaml",
+    "cloudflare-worker/gpt_action_openapi.cloudflare.yaml",
+    "cloudflare-worker/gpt_action_openapi.cloudflare.deployed.json",
+    "gpt_custom_upload_bundle/",
+    "governance_export/gpt_instructions.md"
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "status": "ok",
+  "asset": "BTC",
+  "response_type": "standard",
+  "archive_id": "archive_contract_fixture_001",
+  "analysis_id": "archive_contract_fixture_001",
+  "provenance": {
+    "report_generated_at_utc": "2026-07-17T12:00:00Z",
+    "report_generated_at_local": "2026-07-17T14:00:00+02:00",
+    "timezone": "Europe/Paris",
+    "archive_created_at_utc": "2026-07-17T12:00:01Z",
+    "api_version": "2.0.0",
+    "worker_version": "2.0.0",
+    "model_version": "fixture-v1",
+    "schema_version": "2.0.0",
+    "git_commit": "fixture",
+    "runtime": "test",
+    "cache": {
+      "status": "miss",
+      "age_seconds": 0,
+      "freshness_threshold_seconds": 45,
+      "freshness_class": "recent"
+    },
+    "spot": {
+      "value": 102345.67,
+      "currency": "USDT",
+      "source": "bitget_public_market_api",
+      "observed_at_utc": "2026-07-17T11:59:30Z",
+      "observed_at_local": "2026-07-17T13:59:30+02:00",
+      "age_seconds": 30,
+      "status": "real"
+    }
+  },
+  "data_inventory": [
+    {
+      "field": "spot",
+      "value": 102345.67,
+      "status": "real",
+      "source": "bitget_public_market_api",
+      "observed_at_utc": "2026-07-17T11:59:30Z",
+      "unit": "USDT",
+      "limitations": []
+    },
+    {
+      "field": "liquidations",
+      "value": null,
+      "status": "absent",
+      "source": null,
+      "observed_at_utc": null,
+      "unit": null,
+      "limitations": ["No validated source was available for this run."]
+    }
+  ],
+  "frames": [
+    {
+      "horizon_days": 30,
+      "run_id": "run_contract_fixture_30d",
+      "model_name": "ensemble",
+      "model_version": "fixture-v1",
+      "simulation_count": 5000,
+      "probability_up": 0.56,
+      "quantiles": {
+        "p10": -0.22,
+        "median": 0.03,
+        "p90": 0.31
+      },
+      "regimes": {
+        "bull": 0.30,
+        "bear": 0.20,
+        "range": 0.40,
+        "transition": 0.10
+      },
+      "risk": {
+        "var95_loss": 0.28,
+        "cvar95_loss": 0.35,
+        "var99_loss": 0.39,
+        "cvar99_loss": 0.47,
+        "loss_sign_convention": "positive_loss",
+        "status": "inferred"
+      },
+      "confidence": {
+        "score": 61,
+        "status": "inferred"
+      },
+      "monte_carlo": {
+        "status": "inferred"
+      },
+      "stability": {
+        "status": "inferred"
+      },
+      "warnings": [],
+      "status": "inferred"
+    }
+  ],
+  "backtests": {},
+  "alerts": [],
+  "warnings": ["Probabilistic scenario, not a deterministic forecast."],
+  "limitations": ["Fixture values are synthetic and are not market observations."],
+  "policy": {
+    "user_effect": "information_only",
+    "execution_authority": "none",
+    "financial_advice": false,
+    "paper_trading": "mock_only",
+    "live_trading": "blocked"
+  }
+}

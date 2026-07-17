@@ -50,11 +50,12 @@ gpt_custom_upload_bundle/gpt_action_openapi.cloudflare.deployed.yaml
 Redeploy command:
 
 ```powershell
-cd C:\Users\ronyc\Desktop\Corpus\quant_btc_model\cloudflare-worker
+git clone https://github.com/ronycharlier-byte/MDL-Bitcoin-Analyst.git
+cd MDL-Bitcoin-Analyst\cloudflare-worker
 npm run deploy:schema
 ```
 
-Wrangler is authenticated on this machine for the Cloudflare account used during deployment.
+Authentication and deployment approval must be configured explicitly on the target machine.
 
 Live data note:
 

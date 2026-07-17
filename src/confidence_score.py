@@ -8,31 +8,89 @@ def _bounded(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return float(max(lo, min(hi, value)))
 
 
-def data_quality_score(price_frame: pd.DataFrame, fundamentals: pd.DataFrame | None) -> tuple[float, list[str]]:
-    notes = []
+def data_quality_dimensions(
+    price_frame: pd.DataFrame,
+    fundamentals: pd.DataFrame | None,
+) -> tuple[dict[str, float], list[str]]:
+    notes: list[str] = []
     if price_frame is None or price_frame.empty:
-        return 0.0, ["No market price history."]
-    status = set(price_frame["statut"].dropna().astype(str).str.lower())
-    if "real" in status and "mock" not in status:
-        score = 70.0
-    elif "mock" in status:
-        score = 20.0
+        return {
+            "freshness": 0.0,
+            "completeness": 0.0,
+            "consistency": 0.0,
+            "source_integrity": 0.0,
+            "temporal_alignment": 0.0,
+        }, ["No market price history."]
+
+    statuses = set(price_frame.get("statut", pd.Series(dtype=str)).dropna().astype(str).str.lower())
+    if "real" in statuses and "mock" not in statuses:
+        source_integrity = 100.0
+    elif "mock" in statuses:
+        source_integrity = 0.0
         notes.append("Market prices are tagged MOCK.")
     else:
-        score = 10.0
-        notes.append("Market prices are missing or incomplete.")
-    close_ratio = pd.to_numeric(price_frame["close"], errors="coerce").notna().mean()
-    score *= float(close_ratio)
+        source_integrity = 25.0
+        notes.append("Market price source status is unknown or incomplete.")
+
+    close = pd.to_numeric(price_frame.get("close", pd.Series(dtype=float)), errors="coerce")
+    close_ratio = float(close.notna().mean()) if len(price_frame) else 0.0
+    positive_close_ratio = float((close.dropna() > 0).mean()) if close.notna().any() else 0.0
+    completeness = 70.0 * close_ratio
+    consistency = 60.0 * positive_close_ratio
+
+    price_timestamps = pd.to_datetime(price_frame.get("timestamp", pd.Series(dtype=str)), utc=True, errors="coerce")
+    valid_price_timestamps = price_timestamps.dropna()
+    freshness = 0.0
+    if not valid_price_timestamps.empty:
+        age_days = max(0.0, (pd.Timestamp.now(tz="UTC") - valid_price_timestamps.max()).total_seconds() / 86400.0)
+        freshness = 100.0 if age_days <= 2 else 50.0 if age_days <= 7 else 0.0
+        consistency += 20.0 if valid_price_timestamps.is_monotonic_increasing else 0.0
+        consistency += 20.0 if not valid_price_timestamps.duplicated().any() else 0.0
+    else:
+        notes.append("Market timestamps are absent or invalid.")
+
+    temporal_alignment = 0.0
     if fundamentals is None or fundamentals.empty:
-        score -= 20.0
         notes.append("Fundamental feature table is empty.")
     else:
         feature_columns = [c for c in fundamentals.columns if c not in {"timestamp", "asset", "source", "statut"}]
-        available = fundamentals[feature_columns].notna().mean().mean() if feature_columns else 0.0
-        score += 30.0 * float(available)
+        available = float(fundamentals[feature_columns].notna().mean().mean()) if feature_columns else 0.0
+        completeness += 30.0 * available
         if available < 0.25:
             notes.append("Most fundamental features are NULL.")
-    return _bounded(score), notes
+        fundamental_timestamps = pd.to_datetime(
+            fundamentals.get("timestamp", pd.Series(dtype=str)),
+            utc=True,
+            errors="coerce",
+        ).dropna()
+        if not valid_price_timestamps.empty and not fundamental_timestamps.empty:
+            delta_days = abs((valid_price_timestamps.max() - fundamental_timestamps.max()).total_seconds()) / 86400.0
+            temporal_alignment = 100.0 if delta_days <= 2 else 50.0 if delta_days <= 7 else 0.0
+        else:
+            notes.append("Price/fundamental temporal alignment cannot be established.")
+
+    return {
+        "freshness": _bounded(freshness),
+        "completeness": _bounded(completeness),
+        "consistency": _bounded(consistency),
+        "source_integrity": _bounded(source_integrity),
+        "temporal_alignment": _bounded(temporal_alignment),
+    }, notes
+
+
+def data_quality_score(price_frame: pd.DataFrame, fundamentals: pd.DataFrame | None) -> tuple[float, list[str]]:
+    dimensions, notes = data_quality_dimensions(price_frame, fundamentals)
+    return _data_quality_composite(dimensions), notes
+
+
+def _data_quality_composite(dimensions: dict[str, float]) -> float:
+    return _bounded(
+        0.25 * dimensions["freshness"]
+        + 0.25 * dimensions["completeness"]
+        + 0.20 * dimensions["consistency"]
+        + 0.20 * dimensions["source_integrity"]
+        + 0.10 * dimensions["temporal_alignment"]
+    )
 
 
 def model_stability_score(risk_metrics: dict, distribution: dict) -> tuple[float, list[str]]:
@@ -72,18 +130,32 @@ def compute_confidence_score(
     distribution: dict,
     backtest_rows: list[dict],
 ) -> dict:
-    data_score, data_notes = data_quality_score(price_frame, fundamentals)
+    data_dimensions, data_notes = data_quality_dimensions(price_frame, fundamentals)
+    data_score = _data_quality_composite(data_dimensions)
     stability, stability_notes = model_stability_score(risk_metrics, distribution)
     backtest, backtest_notes = backtest_score(backtest_rows)
     uncertainty, uncertainty_notes = uncertainty_score(distribution)
     score = 0.35 * data_score + 0.25 * stability + 0.25 * backtest + 0.15 * uncertainty
+    interval_width = max(float(distribution.get("p90_return", 0.0)) - float(distribution.get("p10_return", 0.0)), 0.0)
+    classified = sum(float(distribution.get(name, 0.0) or 0.0) for name in ("prob_bull", "prob_bear", "prob_range"))
     return {
         "score": int(round(_bounded(score))),
+        "status": "inferred",
         "components": {
             "data_quality": round(data_score, 2),
+            "data_quality_dimensions": {name: round(value, 2) for name, value in data_dimensions.items()},
             "model_stability": round(stability, 2),
             "backtest": round(backtest, 2),
             "uncertainty": round(uncertainty, 2),
+        },
+        "uncertainty_dimensions": {
+            "aleatoric_uncertainty": round(min(interval_width / 1.5, 1.0), 4),
+            "parameter_uncertainty": None,
+            "model_uncertainty": round(1.0 - stability / 100.0, 4),
+            "regime_uncertainty": round(max(0.0, 1.0 - min(classified, 1.0)), 4),
+            "data_quality_uncertainty": round(1.0 - data_score / 100.0, 4),
+            "monte_carlo_sampling_error": None,
+            "scale": "0_to_1_higher_is_more_uncertain",
         },
         "notes": data_notes + stability_notes + backtest_notes + uncertainty_notes,
     }

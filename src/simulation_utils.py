@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 import pandas as pd
 
@@ -68,4 +70,6 @@ def summarize_simulation(terminal_prices: np.ndarray, spot: float) -> dict:
 
 
 def seed_for(name: str, base_seed: int = DEFAULT_SEED) -> int:
-    return abs(hash((name, base_seed))) % (2**32 - 1)
+    payload = f"{base_seed}:{name}".encode()
+    digest = hashlib.sha256(payload).digest()
+    return int.from_bytes(digest[:8], "big") % (2**32 - 1)

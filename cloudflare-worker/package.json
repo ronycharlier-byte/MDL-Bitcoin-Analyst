@@ -1,6 +1,6 @@
 {
   "name": "quant-btc-model-worker",
-  "version": "1.31.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,11 +8,19 @@
     "deploy": "wrangler deploy",
     "deploy:strategy": "wrangler deploy --config wrangler.strategy.toml",
     "deploy:schema": "powershell -ExecutionPolicy Bypass -File ./deploy_and_write_schema.ps1",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src test --max-warnings 0",
+    "format:check": "prettier --check src/contracts.ts test package.json tsconfig.json vitest.config.ts eslint.config.js prettier.config.js"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260504.0",
-    "typescript": "^5.8.2",
-    "wrangler": "^4.50.0"
+    "@cloudflare/workers-types": "5.20260717.1",
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "prettier": "3.9.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "3.2.7",
+    "wrangler": "4.112.0"
   }
 }

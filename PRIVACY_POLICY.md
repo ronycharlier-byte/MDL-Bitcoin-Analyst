@@ -12,7 +12,7 @@ When a user requests an analysis, the GPT may send:
 - selected model name;
 - runtime flags such as `skip_corpus` or `no_online`.
 
-The GPT should not send personal information to the API.
+The GPT should not send personal information to the API. Telegram operation may process the configured owner chat ID, username, command text, callback data and update ID solely to authenticate, deduplicate and answer commands.
 
 ## Data Returned By The API
 
@@ -32,11 +32,13 @@ Outputs are probabilistic research information only. They are not financial advi
 
 ## Data Retention
 
-The API may generate logs and model run artifacts for debugging, provenance, and system reliability. These artifacts are not intended to contain personal data.
+The API may generate logs and model run artifacts for debugging, provenance, and system reliability. These artifacts are not intended to contain personal data. Telegram update IDs used for replay protection should be removed after the configured retention window (recommended seven days); Telegram sessions and alert subscriptions should be deleted when disabled or after a verified deletion request. Analysis archives are retained according to the operator's documented policy, recommended no longer than 365 days absent a legal/audit need.
+
+Secrets, full webhook URLs, raw client keys and unrelated Telegram message content must not be written to logs or archives. See `docs/SECURITY.md` for the deletion scope across SQLite, D1 and external mirrors.
 
 ## Third-Party Data Sources
 
-The system may use public market data sources such as Bitget and Stooq.
+The system may use public market/fundamental sources and service providers such as Bitget, Stooq, Cloudflare, Render, Telegram and configured alert/storage providers. Their own privacy policies apply.
 
 ## Contact
 

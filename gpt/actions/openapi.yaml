@@ -1,0 +1,241 @@
+openapi: 3.1.0
+info:
+  title: MDL Bitcoin Analyst canonical action
+  version: 2.0.0
+  description: >-
+    Read-only probabilistic Bitcoin research action. It cannot execute trades,
+    provide personalized financial advice, or authorize external side effects.
+servers:
+  - url: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
+    description: Cloudflare edge facade for the protected Render engine.
+paths:
+  /live:
+    get:
+      operationId: getServiceLiveness
+      summary: Check whether the edge service process is reachable.
+      responses:
+        "200":
+          description: Liveness only; not proof of model or data readiness.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /status:
+    get:
+      operationId: getResearchServiceStatus
+      summary: Read versions, capabilities and non-authoritative service status.
+      responses:
+        "200":
+          description: Service metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /analyze:
+    post:
+      operationId: runQuickProbabilisticAnalysis
+      summary: Run or retrieve a quick multi-horizon probabilistic BTC analysis.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisRequest"
+      responses:
+        "200":
+          description: Canonical analysis response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisResponse"
+        default:
+          $ref: "#/components/responses/StableError"
+  /analyze-deep:
+    post:
+      operationId: runDeepProbabilisticAnalysis
+      summary: Run or retrieve a deeper probabilistic BTC analysis with explicit uncertainty.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisRequest"
+      responses:
+        "200":
+          description: Canonical analysis response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisResponse"
+        default:
+          $ref: "#/components/responses/StableError"
+  /latest:
+    get:
+      operationId: getLatestArchivedAnalysis
+      summary: Retrieve the latest archived analysis without starting a new run.
+      responses:
+        "200":
+          description: Latest archived response or a stable not-found error.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AnalysisResponse"
+                  - $ref: "#/components/schemas/ErrorResponse"
+        default:
+          $ref: "#/components/responses/StableError"
+  /history:
+    get:
+      operationId: listArchivedAnalyses
+      summary: List analysis archive metadata without creating or modifying data.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: Archive metadata list.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          $ref: "#/components/responses/StableError"
+components:
+  responses:
+    StableError:
+      description: Stable machine-readable error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    AnalysisRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        asset:
+          type: string
+          const: BTC
+          default: BTC
+        fresh:
+          type: boolean
+          default: false
+        simulations:
+          type: integer
+          minimum: 100
+          maximum: 10000
+        horizons:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+            maximum: 3650
+    AnalysisResponse:
+      type: object
+      required:
+        - status
+        - asset
+        - response_type
+        - archive_id
+        - provenance
+        - data_inventory
+        - frames
+        - warnings
+        - limitations
+        - policy
+      properties:
+        status:
+          type: string
+          enum: [ok, partial]
+        asset:
+          type: string
+          const: BTC
+        response_type:
+          type: string
+          enum: [standard, quick, deep, comparison]
+        archive_id:
+          type: string
+          minLength: 1
+        provenance:
+          type: object
+          additionalProperties: true
+        data_inventory:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        frames:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: true
+        backtests:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items: {}
+        alerts:
+          type: array
+          items: {}
+        warnings:
+          type: array
+          items:
+            type: string
+        limitations:
+          type: array
+          items:
+            type: string
+        policy:
+          type: object
+          required: [user_effect, execution_authority, financial_advice, paper_trading, live_trading]
+          properties:
+            user_effect:
+              type: string
+              const: information_only
+            execution_authority:
+              type: string
+              const: none
+            financial_advice:
+              type: boolean
+              const: false
+            paper_trading:
+              type: string
+              const: mock_only
+            live_trading:
+              type: string
+              const: blocked
+          additionalProperties: false
+      additionalProperties: true
+    ErrorResponse:
+      type: object
+      required: [status, error_code, message, retryable, details, request_id]
+      properties:
+        status:
+          type: string
+          const: error
+        error_code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+        request_id:
+          type: string
+      additionalProperties: false

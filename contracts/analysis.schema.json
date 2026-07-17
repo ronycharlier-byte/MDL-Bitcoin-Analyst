@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mdl-bitcoin-analyst.local/contracts/analysis.schema.json",
+  "title": "MDL Bitcoin Analyst canonical analysis",
+  "type": "object",
+  "required": [
+    "status",
+    "asset",
+    "response_type",
+    "archive_id",
+    "analysis_id",
+    "provenance",
+    "data_inventory",
+    "frames",
+    "backtests",
+    "alerts",
+    "warnings",
+    "limitations",
+    "policy"
+  ],
+  "properties": {
+    "status": { "enum": ["ok", "partial"] },
+    "asset": { "const": "BTC" },
+    "response_type": { "enum": ["standard", "quick", "deep", "comparison"] },
+    "archive_id": { "type": "string", "minLength": 1 },
+    "analysis_id": { "type": "string", "minLength": 1 },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "data_inventory": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/observedValue" }
+    },
+    "frames": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/frame" }
+    },
+    "backtests": { "type": ["object", "array"] },
+    "alerts": { "type": "array" },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "limitations": { "type": "array", "items": { "type": "string" } },
+    "policy": {
+      "type": "object",
+      "required": ["user_effect", "execution_authority", "financial_advice", "paper_trading", "live_trading"],
+      "properties": {
+        "user_effect": { "const": "information_only" },
+        "execution_authority": { "const": "none" },
+        "financial_advice": { "const": false },
+        "paper_trading": { "const": "mock_only" },
+        "live_trading": { "const": "blocked" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "dataStatus": {
+      "enum": ["real", "inferred", "absent", "mock", "mock_paper", "unknown", "stale", "ambiguous_status"]
+    },
+    "observedValue": {
+      "type": "object",
+      "required": ["field", "value", "status", "source", "observed_at_utc", "unit", "limitations"],
+      "properties": {
+        "field": { "type": "string" },
+        "value": {},
+        "status": { "$ref": "#/$defs/dataStatus" },
+        "source": { "type": ["string", "null"] },
+        "observed_at_utc": { "type": ["string", "null"], "format": "date-time" },
+        "unit": { "type": ["string", "null"] },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["timezone", "cache", "spot"],
+      "properties": {
+        "report_generated_at_utc": { "type": ["string", "null"], "format": "date-time" },
+        "report_generated_at_local": { "type": ["string", "null"], "format": "date-time" },
+        "timezone": { "const": "Europe/Paris" },
+        "archive_created_at_utc": { "type": ["string", "null"], "format": "date-time" },
+        "api_version": { "type": ["string", "null"] },
+        "worker_version": { "type": ["string", "null"] },
+        "model_version": { "type": ["string", "null"] },
+        "schema_version": { "type": ["string", "null"] },
+        "git_commit": { "type": ["string", "null"] },
+        "runtime": { "type": ["string", "null"] },
+        "cache": {
+          "type": "object",
+          "required": ["status", "age_seconds", "freshness_threshold_seconds", "freshness_class"],
+          "properties": {
+            "status": { "enum": ["hit", "miss"] },
+            "age_seconds": { "type": "number", "minimum": 0 },
+            "freshness_threshold_seconds": { "type": "number", "minimum": 0 },
+            "freshness_class": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "spot": {
+          "type": "object",
+          "required": ["value", "currency", "source", "observed_at_utc", "observed_at_local", "age_seconds", "status"],
+          "properties": {
+            "value": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+            "currency": { "const": "USDT" },
+            "source": { "type": ["string", "null"] },
+            "observed_at_utc": { "type": ["string", "null"], "format": "date-time" },
+            "observed_at_local": { "type": ["string", "null"], "format": "date-time" },
+            "age_seconds": { "type": ["number", "null"], "minimum": 0 },
+            "status": { "$ref": "#/$defs/dataStatus" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "frame": {
+      "type": "object",
+      "required": [
+        "horizon_days",
+        "run_id",
+        "model_name",
+        "model_version",
+        "simulation_count",
+        "probability_up",
+        "quantiles",
+        "regimes",
+        "risk",
+        "confidence",
+        "monte_carlo",
+        "stability",
+        "warnings",
+        "status"
+      ],
+      "properties": {
+        "horizon_days": { "type": "integer", "minimum": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "model_name": { "type": "string", "minLength": 1 },
+        "model_version": { "type": "string", "minLength": 1 },
+        "simulation_count": { "type": "integer", "minimum": 1 },
+        "probability_up": { "type": "number", "minimum": 0, "maximum": 1 },
+        "quantiles": {
+          "type": "object",
+          "required": ["p10", "median", "p90"],
+          "properties": {
+            "p10": { "type": "number" },
+            "median": { "type": "number" },
+            "p90": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "regimes": {
+          "type": "object",
+          "required": ["bull", "bear", "range", "transition"],
+          "properties": {
+            "bull": { "type": "number", "minimum": 0, "maximum": 1 },
+            "bear": { "type": "number", "minimum": 0, "maximum": 1 },
+            "range": { "type": "number", "minimum": 0, "maximum": 1 },
+            "transition": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "risk": { "type": "object" },
+        "confidence": { "type": "object" },
+        "monte_carlo": { "type": "object" },
+        "stability": { "type": "object" },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "status": { "$ref": "#/$defs/dataStatus" }
+      }
+    }
+  }
+}

@@ -1,7 +1,24 @@
+import json
 import logging
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 
 from config import LOG_PATH, ensure_directories
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "level": record.levelname.lower(),
+            "service": record.name,
+            "message": record.getMessage(),
+        }
+        for field in ("request_id", "route", "method", "duration_ms", "status_code", "archive_id", "error_code"):
+            value = getattr(record, field, None)
+            if value is not None:
+                payload[field] = value
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def setup_logger(name: str = "quant_btc_model") -> logging.Logger:
@@ -13,10 +30,7 @@ def setup_logger(name: str = "quant_btc_model") -> logging.Logger:
     if logger.handlers:
         return logger
 
-    formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
+    formatter = JsonFormatter()
     file_handler = RotatingFileHandler(
         LOG_PATH,
         maxBytes=2_000_000,

@@ -1,4 +1,6 @@
-﻿interface Env {
+import { canonicalizeAnalysis, stableError, validateCanonicalAnalysis } from "./contracts";
+
+interface Env {
   DB?: D1Database;
   WORKER_SERVICE_NAME?: string;
   MAX_SIMULATIONS?: string;
@@ -8,6 +10,8 @@
   RATE_LIMIT_RUNS_PER_MINUTE?: string;
   RATE_LIMIT_WINDOW_SECONDS?: string;
   RENDER_API_BASE?: string;
+  RENDER_API_KEY?: string;
+  WORKER_ADMIN_TOKEN?: string;
   DEEP_RATE_LIMIT_RUNS_PER_MINUTE?: string;
   DEEP_RATE_LIMIT_WINDOW_SECONDS?: string;
   QUICK_CACHE_MAX_SECONDS?: string;
@@ -16,6 +20,7 @@
   DISCORD_WEBHOOK_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
   OPS_MONITOR_ALERT_COOLDOWN_SECONDS?: string;
   OPS_DAILY_SUMMARY_PARIS_HOUR?: string;
   TELEGRAM_DIRECT_MIN_LEVEL?: string;
@@ -28,7 +33,6 @@
   MODEL_ALERT_COOLDOWN_SECONDS?: string;
   MODEL_ALERT_QUICK_REFRESH_SECONDS?: string;
   MODEL_ALERT_DEEP_REFRESH_SECONDS?: string;
-  TRADING_MODE?: string;
   TRADING_DEFAULT_NOTIONAL_USDT?: string;
   TRADING_MAX_NOTIONAL_USDT?: string;
   TRADING_MIN_CONFIDENCE?: string;
@@ -37,11 +41,6 @@
   TRADING_BUY_PROB_UP?: string;
   TRADING_SELL_PROB_UP?: string;
   TRADING_MAX_SPOT_AGE_SECONDS?: string;
-  TRADING_LIVE_CONFIRMATION?: string;
-  TRADING_TELEGRAM_APPROVAL_ENABLED?: string;
-  BITGET_API_KEY?: string;
-  BITGET_API_SECRET?: string;
-  BITGET_API_PASSPHRASE?: string;
   STRATEGY_MIN_ENSEMBLE_SCORE?: string;
   STRATEGY_MIN_AGREEMENT?: string;
 }
@@ -94,13 +93,16 @@ interface RateLimitResult {
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
-  "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type, x-client-key, x-ingest-secret"
+  "access-control-allow-headers": "content-type, x-client-key",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer",
+  "cache-control": "no-store"
 };
 
-const WORKER_VERSION = "1.31.0";
-const SCHEMA_VERSION = "gpt_action_cloudflare_schema_v1.31.0";
+const WORKER_VERSION = "2.0.0";
+const SCHEMA_VERSION = "analysis_contract_v2.0.0";
 const MODEL_VERSION = "cloudflare_render_bitget_bridge_v1";
 const DEFAULT_WORKER_SERVICE_NAME = "quant-btc-model-lite-worker";
 const DEFAULT_RENDER_API_BASE = "https://quant-btc-model-api.onrender.com";
@@ -129,7 +131,6 @@ const TRADING_MAX_TRANSITION_DEFAULT = 0.30;
 const TRADING_BUY_PROB_UP_DEFAULT = 0.58;
 const TRADING_SELL_PROB_UP_DEFAULT = 0.42;
 const TRADING_MAX_SPOT_AGE_SECONDS_DEFAULT = 180;
-const BITGET_SPOT_PLACE_ORDER_PATH = "/api/v2/spot/trade/place-order";
 const STRATEGY_MIN_ENSEMBLE_SCORE_DEFAULT = 25;
 const STRATEGY_MIN_AGREEMENT_DEFAULT = 0.55;
 const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: number[]; simulations: number; description: string }> = {
@@ -179,6 +180,151 @@ const ANALYSIS_PRESETS: Record<string, { name: string; label: string; horizons: 
 const USER_DISPLAY_TIMEZONE = "Europe/Paris";
 const TIMEZONE_POLICY = "Source timestamps are UTC. User-facing GPT answers must show both UTC and Europe/Paris when citing report dates or spot timestamps.";
 const rateLimitBuckets = new Map<string, number[]>();
+const REQUEST_IDS = new WeakMap<Request, string>();
+const POST_ONLY_MUTATION_PATHS = new Set([
+  "/analyze-deep",
+  "/analyze",
+  "/run-quick",
+  "/run-tactical",
+  "/run-deep",
+  "/quick",
+  "/tactical",
+  "/deep",
+  "/run",
+  "/multi-run",
+  "/multiRun",
+  "/ops/monitor",
+  "/ops/test-alert",
+  "/ops/test-summary",
+  "/realtime/collect",
+  "/model-alerts/refresh",
+  "/model-alerts/test",
+  "/telegram/setup-webhook",
+  "/alert-rules",
+  "/alert-rules/evaluate",
+  "/deep-jobs",
+  "/deep-jobs/process",
+  "/trading/cleanup-paper-tests",
+  "/trading/paper-report/refresh",
+  "/trading/paper-order",
+  "/trading/propose",
+  "/strategies/deep-paper-order",
+  "/strategies/performance/refresh",
+  "/strategies/paper-order",
+  "/strategies/propose-trade"
+]);
+
+function timingSafeEqualText(left: string | null, right: string | null): boolean {
+  if (!left || !right || left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+function requestId(request: Request): string {
+  const existing = REQUEST_IDS.get(request);
+  if (existing) return existing;
+  const supplied = request.headers.get("x-request-id") || request.headers.get("cf-ray");
+  const value = supplied && supplied.length <= 128 && /^[A-Za-z0-9._:-]+$/.test(supplied)
+    ? supplied
+    : crypto.randomUUID();
+  REQUEST_IDS.set(request, value);
+  return value;
+}
+
+async function observeWorkerRequest(
+  request: Request,
+  env: Env,
+  handler: () => Promise<Response>
+): Promise<Response> {
+  const startedAt = Date.now();
+  const id = requestId(request);
+  let statusCode = 500;
+  try {
+    const response = await handler();
+    statusCode = response.status;
+    response.headers.set("x-request-id", id);
+    return response;
+  } finally {
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: statusCode >= 500 ? "error" : statusCode >= 400 ? "warning" : "info",
+      service: workerServiceName(env),
+      request_id: id,
+      route: new URL(request.url).pathname,
+      method: request.method,
+      duration_ms: Date.now() - startedAt,
+      status_code: statusCode,
+      event: "request_complete"
+    }));
+  }
+}
+
+class WorkerRequestError extends Error {
+  constructor(
+    readonly statusCode: number,
+    readonly errorCode: "INVALID_REQUEST" | "AUTHENTICATION_REQUIRED",
+    message: string,
+    readonly details: Record<string, unknown> = {}
+  ) {
+    super(message);
+    this.name = "WorkerRequestError";
+  }
+}
+
+function workerAdminDenial(request: Request, env: Env): Response | null {
+  const expected = stringOrNull(env.WORKER_ADMIN_TOKEN);
+  const authorization = request.headers.get("authorization");
+  const bearer = authorization?.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : null;
+  const supplied = request.headers.get("x-admin-token") || bearer;
+  if (expected && timingSafeEqualText(supplied, expected)) return null;
+  return json(
+    stableError(
+      "AUTHENTICATION_REQUIRED",
+      expected ? "Worker administrator authentication failed." : "WORKER_ADMIN_TOKEN is not configured; administrative routes fail closed.",
+      requestId(request),
+      false
+    ),
+    expected ? 401 : 503
+  );
+}
+
+function canonicalAnalysisJson(payload: Record<string, unknown>, request: Request): Response {
+  if (payload.error) {
+    const upstreamStatus = numberOrNull(payload.render_status);
+    const rateLimited = upstreamStatus === 429;
+    return json(
+      stableError(
+        rateLimited ? "RATE_LIMITED" : "MODEL_EXECUTION_FAILED",
+        rateLimited ? "The upstream analysis rate limit was reached." : "The analysis engine could not complete the request.",
+        requestId(request),
+        Boolean(payload.retryable) || rateLimited || Boolean(upstreamStatus && upstreamStatus >= 500),
+        {
+          upstream_error_code: stringOrNull(payload.upstream_error_code),
+          upstream_request_id: stringOrNull(payload.upstream_request_id),
+          upstream_status: upstreamStatus
+        }
+      ),
+      rateLimited ? 429 : 502
+    );
+  }
+  const issues = validateCanonicalAnalysis(payload);
+  if (issues.length) {
+    return json(
+      stableError(
+        "SCHEMA_VALIDATION_FAILED",
+        "The analysis response failed canonical contract validation.",
+        requestId(request),
+        false,
+        { issues }
+      ),
+      502
+    );
+  }
+  return json(payload);
+}
 
 export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -193,6 +339,7 @@ export default {
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return await observeWorkerRequest(request, env, async () => {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -200,7 +347,7 @@ export default {
     }
 
     try {
-      if (url.pathname === "/health" && request.method === "GET") {
+      if ((url.pathname === "/health" || url.pathname === "/live") && request.method === "GET") {
         const now = new Date();
         return json({
           status: "ok",
@@ -271,8 +418,8 @@ export default {
             "legal_pages",
             "paper_trading_engine",
             "gpt_trade_proposals",
-            "telegram_trade_approval",
-            "bitget_live_trading_guarded_disabled_by_default",
+            "telegram_trade_approval_blocked",
+            "live_execution_absent",
             "quant_strategy_engine_v1",
             "strategy_ensemble_scoring",
             "strategy_signal_persistence",
@@ -301,7 +448,7 @@ export default {
           worker_version: WORKER_VERSION,
           always_awake_target: true,
           runtime: "cloudflare_worker_free_tier",
-          endpoints: ["/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/test", "/client-summary", "/realtime/status", "/realtime/collect", "/realtime/ingest", "/market/capabilities", "/market/realtime-capabilities", "/assets/supported", "/options/summary", "/risk/live-readiness", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/trading/paper-pnl", "/trading/paper-portfolio", "/trading/paper-report", "/trading/cleanup-paper-tests", "/strategies/status", "/strategies/deep-summary", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/performance", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/sales", "/onboarding", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
+          endpoints: ["/live", "/health", "/version", "/status", "/audit", "/ops/status", "/ops/monitor", "/ops/test-alert", "/ops/test-summary", "/model-alerts/status", "/model-alerts/refresh", "/model-alerts/test", "/client-summary", "/realtime/status", "/realtime/collect", "/realtime/ingest", "/market/capabilities", "/market/realtime-capabilities", "/assets/supported", "/options/summary", "/risk/live-readiness", "/telegram/webhook", "/telegram/setup-webhook", "/alert-rules", "/alert-rules/evaluate", "/deep-jobs", "/trading/status", "/trading/signal", "/trading/orders", "/trading/paper-order", "/trading/propose", "/trading/approve", "/trading/paper-pnl", "/trading/paper-portfolio", "/trading/paper-report", "/trading/paper-report/refresh", "/trading/cleanup-paper-tests", "/strategies/status", "/strategies/deep-summary", "/strategies/deep-signal", "/strategies/deep-paper-order", "/strategies/performance", "/strategies/performance/refresh", "/strategies/signal", "/strategies/ensemble", "/strategies/signals", "/strategies/paper-order", "/strategies/propose-trade", "/backtests", "/sales", "/onboarding", "/legal", "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/refund", "/run", "/multi-run", "/multiRun", "/run-quick", "/run-tactical", "/run-deep", "/quick", "/tactical", "/deep", "/analyze", "/analyze-deep", "/latest", "/history", "/compare-runs", "/alerts", "/alerts/subscribe", "/alerts/subscriptions", "/backtest-summary", "/billing/plans", "/billing/checkout", "/clients/register", "/clients/me", "/usage-summary", "/d1/status", "/dashboard", "/pdf-report"],
           runtime_controls: {
             max_simulations: getMaxSimulations(env),
             default_simulations: clampInt(parseNumber(env.DEFAULT_SIMULATIONS, 2000), 100, getMaxSimulations(env)),
@@ -357,7 +504,7 @@ export default {
           backend_routing: {
             cloudflare_default: "Use this Worker first for no-sleep fresh BTC analysis; it bridges requests to the Render Bitget full engine.",
             render_full_engine: "Render remains the Bitget-backed Python/numpy engine behind this Worker.",
-            recommended_gpt_flow: "Call auditQuantBtcLiteSystem, then runQuantBtcMultiFrame for complete analysis or runQuantBtcModel for one explicit horizon."
+            recommended_gpt_flow: "Use the canonical status operation, then POST /analyze or /analyze-deep; reuse one archive_id per answer."
           },
           user_display_timezone: USER_DISPLAY_TIMEZONE,
           timezone_policy: TIMEZONE_POLICY,
@@ -372,7 +519,7 @@ export default {
             "A user-facing answer must not truncate run_id values unless it also provides the full run_id in the provenance section.",
             "Spot freshness, Monte Carlo error, multi-seed stability, alerts and run comparison diagnostics must be surfaced when present.",
             "Cloudflare Workers free tier cannot keep a permanent Bitget WebSocket collector alive; realtime snapshots are collected by polling and can be enriched through authenticated /realtime/ingest.",
-            "Trading is paper-only unless TRADING_MODE=live, Bitget trade secrets are configured, and an explicit owner approval/confirmation is supplied."
+            "Trading is mock-paper only. Live exchange execution is absent and cannot be enabled by configuration."
           ],
           timestamp: now.toISOString(),
           timestamp_utc: now.toISOString(),
@@ -398,16 +545,22 @@ export default {
         return json(await buildOpsStatus(env));
       }
 
-      if (url.pathname === "/ops/monitor" && request.method === "GET") {
+      if (url.pathname === "/ops/monitor" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         const status = await runOperationalMonitor(env, true);
         return json(status, status.status === "ok" ? 200 : 503);
       }
 
-      if (url.pathname === "/ops/test-alert" && request.method === "GET") {
+      if (url.pathname === "/ops/test-alert" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await sendOpsTestAlert(env));
       }
 
-      if (url.pathname === "/ops/test-summary" && request.method === "GET") {
+      if (url.pathname === "/ops/test-summary" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await sendDailyOpsSummary(env, true));
       }
 
@@ -415,11 +568,25 @@ export default {
         return json(await realtimeStatus(env));
       }
 
-      if (url.pathname === "/realtime/collect" && request.method === "GET") {
+      if (url.pathname === "/realtime/collect" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await collectRealtimeMarketSnapshot(env, "manual"));
       }
 
       if (url.pathname === "/realtime/ingest" && request.method === "POST") {
+        const configuredSecret = stringOrNull(env.REALTIME_INGEST_SECRET);
+        if (!configuredSecret || !timingSafeEqualText(request.headers.get("x-ingest-secret"), configuredSecret)) {
+          return json(
+            stableError(
+              "AUTHENTICATION_REQUIRED",
+              configuredSecret ? "Realtime ingest authentication failed." : "Realtime ingest is unavailable.",
+              requestId(request),
+              false
+            ),
+            configuredSecret ? 401 : 503
+          );
+        }
         return json(await ingestRealtimeSnapshot(env, request));
       }
 
@@ -440,14 +607,22 @@ export default {
       }
 
       if (url.pathname === "/model-alerts/status" && request.method === "GET") {
-        const input = await readInput(request, url);
-        const refreshStatus = wantsFreshRun(input)
-          ? await refreshModelAlertRunsIfNeeded(env, true)
-          : { status: "not_requested", reason: "status endpoint is cache-only unless fresh=true is provided" };
+        return json(await evaluateLatestModelAlerts(env, {
+          status: "not_requested",
+          reason: "GET status endpoints are strictly cache-only"
+        }));
+      }
+
+      if (url.pathname === "/model-alerts/refresh" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
+        const refreshStatus = await refreshModelAlertRunsIfNeeded(env, true);
         return json(await evaluateLatestModelAlerts(env, refreshStatus));
       }
 
-      if (url.pathname === "/model-alerts/test" && request.method === "GET") {
+      if (url.pathname === "/model-alerts/test" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         const input = await readInput(request, url);
         return json(await runModelAlertMonitor(env, true, true, wantsFreshRun(input)));
       }
@@ -457,34 +632,48 @@ export default {
       }
 
       if (url.pathname === "/telegram/webhook" && request.method === "POST") {
-        return json(await handleTelegramWebhook(env, await readJson(request)));
+        return json(await handleTelegramWebhook(env, request));
       }
 
-      if (url.pathname === "/telegram/setup-webhook" && request.method === "GET") {
+      if (url.pathname === "/telegram/setup-webhook" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await setupTelegramWebhook(env, request));
       }
 
       if (url.pathname === "/alert-rules" && request.method === "GET") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await listCustomAlertRules(env, url.searchParams.get("chat_id") || undefined));
       }
 
       if (url.pathname === "/alert-rules" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await createCustomAlertRule(env, await readJson(request)));
       }
 
-      if (url.pathname === "/alert-rules/evaluate" && request.method === "GET") {
+      if (url.pathname === "/alert-rules/evaluate" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await evaluateCustomAlertRules(env));
       }
 
       if (url.pathname === "/deep-jobs" && request.method === "GET") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await listDeepJobs(env, clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50)));
       }
 
       if (url.pathname === "/deep-jobs" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await createDeepJob(env, await readJson(request)));
       }
 
-      if (url.pathname === "/deep-jobs/process" && request.method === "GET") {
+      if (url.pathname === "/deep-jobs/process" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await processDeepJobQueue(env));
       }
 
@@ -493,39 +682,63 @@ export default {
       }
 
       if (url.pathname === "/trading/signal" && request.method === "GET") {
-        return json(await buildTradingSignal(env, await readInput(request, url)));
+        return json(await buildTradingSignal(env, {
+          ...await readInput(request, url),
+          refresh: false,
+          no_realtime_refresh: true
+        }));
       }
 
       if (url.pathname === "/trading/orders" && request.method === "GET") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await listTradeOrders(env, clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50)));
       }
 
       if (url.pathname === "/trading/paper-pnl" && request.method === "GET") {
-        return json(await paperTradingPnl(env));
+        return json(await paperTradingPnl(env, false));
       }
 
       if (url.pathname === "/trading/paper-portfolio" && request.method === "GET") {
-        return json(await paperPortfolioState(env));
+        return json(await paperPortfolioState(env, false));
       }
 
       if (url.pathname === "/trading/paper-report" && request.method === "GET") {
-        return json(await paperTradingReport(env));
+        return json(await paperTradingReport(env, false));
       }
 
-      if (url.pathname === "/trading/cleanup-paper-tests" && request.method === "GET") {
+      if (url.pathname === "/trading/paper-report/refresh" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
+        return json(await paperTradingReport(env, true));
+      }
+
+      if (url.pathname === "/trading/cleanup-paper-tests" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await cleanupPaperTestOrders(env, await readInput(request, url)));
       }
 
-      if (url.pathname === "/trading/paper-order" && (request.method === "POST" || request.method === "GET")) {
+      if (url.pathname === "/trading/paper-order" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await createPaperTradeOrder(env, await readInput(request, url), "gpt_action"));
       }
 
-      if (url.pathname === "/trading/propose" && (request.method === "POST" || request.method === "GET")) {
+      if (url.pathname === "/trading/propose" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await proposeTradeOrder(env, await readInput(request, url), "gpt_action"));
       }
 
-      if (url.pathname === "/trading/approve" && (request.method === "POST" || request.method === "GET")) {
-        return json(await approveTradeOrder(env, await readInput(request, url), "gpt_action"));
+      if (url.pathname === "/trading/approve") {
+        return json(stableError(
+          "EXECUTION_FORBIDDEN",
+          "Approval and live execution are disabled by governance policy.",
+          requestId(request),
+          false,
+          { execution_authority: "none", live_trading: "blocked" }
+        ), 403);
       }
 
       if (url.pathname === "/strategies/status" && request.method === "GET") {
@@ -537,30 +750,56 @@ export default {
       }
 
       if (url.pathname === "/strategies/performance" && request.method === "GET") {
-        return json(await strategyPerformanceReport(env));
+        return json(await strategyPerformanceReport(env, false));
+      }
+
+      if (url.pathname === "/strategies/performance/refresh" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
+        return json(await strategyPerformanceReport(env, true));
       }
 
       if (url.pathname === "/strategies/deep-signal" && request.method === "GET") {
-        return json(await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: 30, no_realtime_refresh: true }));
+        return json(await buildStrategySignal(env, {
+          asset: "BTC",
+          preset: "deep",
+          horizon: 30,
+          refresh: false,
+          no_realtime_refresh: true,
+          no_persist: true
+        }));
       }
 
-      if (url.pathname === "/strategies/deep-paper-order" && request.method === "GET") {
+      if (url.pathname === "/strategies/deep-paper-order" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await createStrategyPaperOrder(env, { asset: "BTC", preset: "deep", horizon: 30, no_realtime_refresh: true }, "gpt_strategy_action"));
       }
 
       if ((url.pathname === "/strategies/signal" || url.pathname === "/strategies/ensemble") && request.method === "GET") {
-        return json(await buildStrategySignal(env, await readInput(request, url)));
+        return json(await buildStrategySignal(env, {
+          ...await readInput(request, url),
+          refresh: false,
+          no_realtime_refresh: true,
+          no_persist: true
+        }));
       }
 
       if (url.pathname === "/strategies/signals" && request.method === "GET") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await listStrategySignals(env, clampInt(parseNumber(url.searchParams.get("limit"), 10), 1, 50)));
       }
 
-      if (url.pathname === "/strategies/paper-order" && (request.method === "POST" || request.method === "GET")) {
+      if (url.pathname === "/strategies/paper-order" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await createStrategyPaperOrder(env, await readInput(request, url), "gpt_strategy_action"));
       }
 
-      if (url.pathname === "/strategies/propose-trade" && (request.method === "POST" || request.method === "GET")) {
+      if (url.pathname === "/strategies/propose-trade" && request.method === "POST") {
+        const denial = workerAdminDenial(request, env);
+        if (denial) return denial;
         return json(await proposeStrategyTradeOrder(env, await readInput(request, url), "gpt_strategy_action"));
       }
 
@@ -611,8 +850,7 @@ export default {
         return new Response(null, {
           status: 200,
           headers: {
-            "content-type": "text/html; charset=utf-8",
-            "access-control-allow-origin": "*"
+            "content-type": "text/html; charset=utf-8"
           }
         });
       }
@@ -625,7 +863,7 @@ export default {
         return Response.redirect(renderUrl(`/pdf-report${url.search}`, env), 302);
       }
 
-      if (url.pathname === "/analyze-deep" && (request.method === "POST" || request.method === "GET")) {
+      if (url.pathname === "/analyze-deep" && request.method === "POST") {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
@@ -637,7 +875,7 @@ export default {
         if (!wantsFreshRun(input)) {
           const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), cachePolicy(env).fresh_seconds, "hit", "/analyze-deep");
           if (cached) {
-            return json(cached);
+            return canonicalAnalysisJson(cached, request);
           }
         }
         const deepRateLimit = checkDeepRateLimit(request, env);
@@ -646,7 +884,7 @@ export default {
           if (staleCached) {
             staleCached.warning = "Deep compute quota is exhausted, so a warning-age D1 cache fallback is returned. Do not present it as a fresh live run.";
             staleCached.deep_compute_rate_limit = publicRateLimit(deepRateLimit);
-            return json(staleCached);
+            return canonicalAnalysisJson(staleCached, request);
           }
           return json(deepRateLimitResponse(deepRateLimit), 429);
         }
@@ -671,16 +909,16 @@ export default {
               message: result.message,
               render_status: result.render_status
             };
-            return json(staleCached);
+            return canonicalAnalysisJson(staleCached, request);
           }
         }
         result.cloudflare_d1 = result.error
           ? { status: "skipped", target: "cloudflare_d1", reason: "engine_error_or_absent_live_output" }
           : queueD1RunPersist(result, "/analyze-deep", body, env, ctx);
-        return json(compactAnalyzeResponse(result, publicRateLimit(rateLimit), env));
+        return canonicalAnalysisJson(compactAnalyzeResponse(result, publicRateLimit(rateLimit)), request);
       }
 
-      if (url.pathname === "/analyze" && (request.method === "POST" || request.method === "GET")) {
+      if (url.pathname === "/analyze" && request.method === "POST") {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
@@ -692,7 +930,7 @@ export default {
         if (!wantsFreshRun(input)) {
           const cached = await latestCachedAnalyzeResponse(env, body, presetPath, publicRateLimit(rateLimit), cachePolicy(env).fresh_seconds);
           if (cached) {
-            return json(cached);
+            return canonicalAnalysisJson(cached, request);
           }
         }
         const result = await proxyRenderPost("/multi-run", body, env, request);
@@ -716,16 +954,16 @@ export default {
               message: result.message,
               render_status: result.render_status
             };
-            return json(staleCached);
+            return canonicalAnalysisJson(staleCached, request);
           }
         }
         result.cloudflare_d1 = result.error
           ? { status: "skipped", target: "cloudflare_d1", reason: "engine_error_or_absent_live_output" }
           : queueD1RunPersist(result, "/analyze", body, env, ctx);
-        return json(compactAnalyzeResponse(result, publicRateLimit(rateLimit), env));
+        return canonicalAnalysisJson(compactAnalyzeResponse(result, publicRateLimit(rateLimit)), request);
       }
 
-      if (ANALYSIS_PRESETS[url.pathname] && (request.method === "POST" || request.method === "GET")) {
+      if (ANALYSIS_PRESETS[url.pathname] && request.method === "POST") {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
@@ -741,10 +979,10 @@ export default {
           analysis_preset: preset.name
         };
         result.cloudflare_d1 = queueD1RunPersist(result, url.pathname, body, env, ctx);
-        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+        return canonicalAnalysisJson({ ...result, rate_limit: publicRateLimit(rateLimit) }, request);
       }
 
-      if (url.pathname === "/run" && (request.method === "POST" || request.method === "GET")) {
+      if (url.pathname === "/run" && request.method === "POST") {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
@@ -754,15 +992,15 @@ export default {
           const body = normalizeRenderMultiRunPayload(input, env);
           const result = await proxyRenderPost("/multi-run", body, env, request);
           result.cloudflare_d1 = queueD1RunPersist(result, "/multi-run", body, env, ctx);
-          return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+          return canonicalAnalysisJson({ ...result, rate_limit: publicRateLimit(rateLimit) }, request);
         }
         const body = normalizeRenderRunPayload(input, env);
         const result = await proxyRenderPost("/run", body, env, request);
         result.cloudflare_d1 = queueD1RunPersist(result, "/run", body, env, ctx);
-        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+        return canonicalAnalysisJson({ ...result, rate_limit: publicRateLimit(rateLimit) }, request);
       }
 
-      if ((url.pathname === "/multi-run" || url.pathname === "/multiRun") && (request.method === "POST" || request.method === "GET")) {
+      if ((url.pathname === "/multi-run" || url.pathname === "/multiRun") && request.method === "POST") {
         const rateLimit = checkRateLimit(request, env);
         if (!rateLimit.allowed) {
           return json(rateLimitResponse(rateLimit), 429);
@@ -770,35 +1008,62 @@ export default {
         const body = normalizeRenderMultiRunPayload(await readInput(request, url), env);
         const result = await proxyRenderPost("/multi-run", body, env, request);
         result.cloudflare_d1 = queueD1RunPersist(result, "/multi-run", body, env, ctx);
-        return json({ ...result, rate_limit: publicRateLimit(rateLimit) });
+        return canonicalAnalysisJson({ ...result, rate_limit: publicRateLimit(rateLimit) }, request);
       }
 
+      if (POST_ONLY_MUTATION_PATHS.has(url.pathname)) {
+        return json(stableError(
+          "METHOD_NOT_ALLOWED",
+          "This state-changing endpoint accepts POST only.",
+          requestId(request),
+          false,
+          { path: url.pathname, allowed_methods: ["POST"] }
+        ), 405);
+      }
       return json({ error: "not_found", path: url.pathname }, 404);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return json({
-        error: "quant_lite_run_failed",
-        message,
-        data_status: {
-          model_output: "absent",
-          market_data: "absent"
-        },
-        warning: "No deterministic prediction was produced."
-      }, 500);
+      if (error instanceof WorkerRequestError) {
+        return json(stableError(
+          error.errorCode,
+          error.message,
+          requestId(request),
+          false,
+          error.details
+        ), error.statusCode);
+      }
+      return json(stableError(
+        "INTERNAL_ERROR",
+        "The Worker could not complete the request.",
+        requestId(request),
+        false,
+        { error_type: error instanceof Error ? error.name : "UnknownError" }
+      ), 500);
     }
+    });
   }
 };
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
-  try {
-    const parsed = await request.json();
-    if (!parsed || typeof parsed !== "object") {
-      return {};
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return {};
+  const maximumBytes = 64 * 1024;
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > maximumBytes) {
+    throw new WorkerRequestError(413, "INVALID_REQUEST", "Request body exceeds 64 KiB.", { maximum_bytes: maximumBytes });
   }
+  const text = await request.text();
+  if (new TextEncoder().encode(text).byteLength > maximumBytes) {
+    throw new WorkerRequestError(413, "INVALID_REQUEST", "Request body exceeds 64 KiB.", { maximum_bytes: maximumBytes });
+  }
+  if (!text.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new WorkerRequestError(400, "INVALID_REQUEST", "Request body must be valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new WorkerRequestError(400, "INVALID_REQUEST", "Request body must be a JSON object.");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 async function readInput(request: Request, url: URL): Promise<Record<string, unknown>> {
@@ -952,7 +1217,7 @@ function shouldRouteRunAsMultiFrame(input: Record<string, unknown>): boolean {
   return false;
 }
 
-function renderProxyHeaders(request?: Request, includeJson = false): HeadersInit {
+function renderProxyHeaders(env: Env, request?: Request, includeJson = false): HeadersInit {
   const headers: Record<string, string> = {
     "accept": "application/json",
     "user-agent": "quant-btc-model-cloudflare-bitget-bridge/1.0"
@@ -964,25 +1229,28 @@ function renderProxyHeaders(request?: Request, includeJson = false): HeadersInit
   if (clientKey) {
     headers["x-client-key"] = clientKey;
   }
+  if (env.RENDER_API_KEY) {
+    headers.authorization = `Bearer ${env.RENDER_API_KEY}`;
+  }
   return headers;
 }
 
 async function proxyRenderGet(path: string, env: Env, request?: Request): Promise<Record<string, unknown>> {
-  const response = await fetch(renderUrl(path, env), {
+  const response = await fetchWithTimeout(renderUrl(path, env), {
     method: "GET",
-    headers: renderProxyHeaders(request),
+    headers: renderProxyHeaders(env, request),
     cf: { cacheTtl: 0, cacheEverything: false }
-  });
+  }, 20_000);
   return await parseRenderResponse(response, path);
 }
 
 async function proxyRenderPost(path: string, payload: Record<string, unknown>, env: Env, request?: Request): Promise<Record<string, unknown>> {
-  const response = await fetch(renderUrl(path, env), {
+  const response = await fetchWithTimeout(renderUrl(path, env), {
     method: "POST",
-    headers: renderProxyHeaders(request, true),
+    headers: renderProxyHeaders(env, request, true),
     body: JSON.stringify(payload),
     cf: { cacheTtl: 0, cacheEverything: false }
-  });
+  }, 55_000);
   const result = await parseRenderResponse(response, path);
   return withBridgeMetadata(result, path, env);
 }
@@ -993,14 +1261,17 @@ async function parseRenderResponse(response: Response, path: string): Promise<Re
   try {
     parsed = text ? JSON.parse(text) : {};
   } catch {
-    parsed = { raw_response: text.slice(0, 1000) };
+    parsed = {};
   }
   if (!response.ok) {
+    const upstream = objectValue(parsed);
     return {
       error: "render_bitget_bridge_failed",
       message: `Render Bitget bridge ${path} failed with HTTP ${response.status}.`,
       render_status: response.status,
-      render_response: parsed,
+      upstream_error_code: stringOrNull(upstream.error_code),
+      upstream_request_id: stringOrNull(upstream.request_id),
+      retryable: Boolean(upstream.retryable) || response.status >= 500,
       data_status: {
         market_prices: "absent",
         simulation_results: "absent",
@@ -1250,11 +1521,11 @@ async function d1Status(env: Env): Promise<Record<string, unknown>> {
       checked_at_utc: new Date().toISOString(),
       checked_at_paris: parisIso(new Date())
     };
-  } catch (error) {
+  } catch {
     return {
       status: "error",
       target: "cloudflare_d1",
-      error: error instanceof Error ? error.message : String(error)
+      error_code: "STORAGE_UNAVAILABLE"
     };
   }
 }
@@ -1630,11 +1901,12 @@ async function collectRealtimeMarketSnapshot(env: Env, trigger: string): Promise
       created_at_utc: now.toISOString(),
       created_at_paris: parisIso(now)
     };
-  } catch (error) {
+  } catch {
     return {
       status: "error",
       trigger,
-      message: error instanceof Error ? error.message : String(error),
+      error_code: "BITGET_UNAVAILABLE",
+      message: "Realtime market snapshot collection failed.",
       data_status: {
         bitget_spot: "absent",
         orderbook: "absent",
@@ -1658,7 +1930,7 @@ async function ingestRealtimeSnapshot(env: Env, request: Request): Promise<Recor
   if (!configuredSecret) {
     return {
       status: "blocked",
-      message: "REALTIME_INGEST_SECRET is not configured. Set it before enabling external WebSocket collector ingestion.",
+      message: "Realtime ingest is unavailable.",
       data_status: {
         websocket_ingest: "absent",
         stored_snapshot: "absent"
@@ -1666,7 +1938,7 @@ async function ingestRealtimeSnapshot(env: Env, request: Request): Promise<Recor
     };
   }
   const providedSecret = request.headers.get("x-ingest-secret");
-  if (providedSecret !== configuredSecret) {
+  if (!timingSafeEqualText(providedSecret, configuredSecret)) {
     return {
       status: "forbidden",
       message: "Invalid realtime ingest secret.",
@@ -1777,10 +2049,11 @@ async function realtimeStatus(env: Env): Promise<Record<string, unknown>> {
       created_at_utc: createdAt,
       created_at_paris: createdAt ? parisIso(new Date(createdAt)) : null
     };
-  } catch (error) {
+  } catch {
     return {
       status: "error",
-      message: error instanceof Error ? error.message : String(error)
+      error_code: "MODEL_EXECUTION_FAILED",
+      message: "Deep job processing failed."
     };
   }
 }
@@ -1882,42 +2155,30 @@ async function optionsSummary(env: Env): Promise<Record<string, unknown>> {
 async function liveReadiness(env: Env): Promise<Record<string, unknown>> {
   const config = getTradingConfig(env);
   const realtime = await realtimeStatus(env);
-  const blockers: string[] = [];
-  const warnings: string[] = [];
-  const mode = String(config.mode);
-  const keysConfigured = config.bitget_trade_secrets === "configured";
   const spotAge = numberOrNull(realtime.age_seconds);
   const maxSpotAge = Number(config.max_spot_age_seconds);
-
-  if (mode !== "live") blockers.push("TRADING_MODE is not live.");
-  if (!keysConfigured) blockers.push("Bitget trade API secrets are absent.");
-  if (config.live_confirmation !== "configured" && config.telegram_approval_enabled !== true) {
-    blockers.push("No explicit live confirmation or Telegram owner approval is configured.");
-  }
-  if (realtime.status !== "ok") warnings.push("Realtime Bitget snapshot is absent or stale.");
-  if (spotAge !== null && spotAge > maxSpotAge) warnings.push(`Spot age ${spotAge}s exceeds max ${maxSpotAge}s.`);
+  const dataReady = realtime.status === "ok" && spotAge !== null && spotAge <= maxSpotAge;
 
   return {
-    status: blockers.length ? "blocked" : warnings.length ? "warning" : "ready",
-    live_trading_ready: blockers.length === 0,
-    mode,
-    blockers,
-    warnings,
-    requirements: {
-      trading_mode_live: mode === "live",
-      bitget_trade_secrets: keysConfigured ? "configured" : "absent",
-      approval_gate: config.live_confirmation === "configured" || config.telegram_approval_enabled === true ? "configured" : "absent",
-      max_notional_usdt: config.max_notional_usdt,
-      max_spot_age_seconds: config.max_spot_age_seconds,
-      withdraw_permission_policy: "must_be_disabled_on_exchange_api_key"
-    },
+    status: "blocked",
+    data_ready: dataReady,
+    model_ready: false,
+    risk_ready: false,
+    infrastructure_ready: false,
+    policy_release_allowed: false,
+    human_approval_present: false,
+    execution_authority: "none",
+    live_trading_ready: false,
+    live_trading_ready_deprecated: true,
+    blockers: ["Live trading is forbidden by governance policy and no exchange execution adapter is present."],
+    max_spot_age_seconds: maxSpotAge,
     realtime_snapshot: realtime,
     data_status: {
-      exchange_execution: blockers.length ? "absent" : "guarded_available",
+      exchange_execution: "absent",
       price: numberOrNull(realtime.price) !== null ? "real" : "absent",
       strategy_scores: "inferred"
     },
-    warning: "Even when ready, GPT must not send live trades autonomously; explicit owner approval is required.",
+    warning: "Readiness dimensions are informational only. Execution authority remains none.",
     checked_at_utc: new Date().toISOString(),
     checked_at_paris: parisIso(new Date())
   };
@@ -1958,8 +2219,8 @@ async function fetchRealtimeSnapshot(env: Env): Promise<Record<string, unknown>>
         note: "Cloudflare Worker free tier cannot keep a permanent public WebSocket collector alive; liquidation capture requires an external long-running collector."
       }
     };
-  } catch (error) {
-    return await fetchRenderBitgetRealtimeSnapshot(env, error instanceof Error ? error.message : String(error));
+  } catch {
+    return await fetchRenderBitgetRealtimeSnapshot(env, "direct_provider_unavailable");
   }
 }
 
@@ -1974,7 +2235,7 @@ async function fetchRenderBitgetRealtimeSnapshot(env: Env, directError: string):
     no_online: false
   }, env);
   if (result.error) {
-    throw new Error(`Bitget direct failed (${directError}); Render Bitget bridge failed: ${result.message || result.error}`);
+    throw new Error("Bitget market data is unavailable through both configured public paths.");
   }
   const provenance = objectValue(result.provenance_summary);
   const sharedSpot = objectValue(provenance.shared_spot_snapshot);
@@ -2020,10 +2281,10 @@ async function fetchRenderBitgetRealtimeSnapshot(env: Env, directError: string):
 }
 
 async function fetchBitgetTickerSnapshot(): Promise<Record<string, unknown>> {
-  const response = await fetch("https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT", {
+  const response = await fetchWithTimeout("https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT", {
     headers: { "accept": "application/json", "user-agent": "quant-btc-model-worker-realtime/1.0" },
     cf: { cacheTtl: 0, cacheEverything: false }
-  });
+  }, 10_000);
   if (!response.ok) {
     throw new Error(`Bitget ticker HTTP ${response.status}`);
   }
@@ -2047,10 +2308,10 @@ async function fetchBitgetTickerSnapshot(): Promise<Record<string, unknown>> {
 }
 
 async function fetchBitgetOrderBookSnapshot(): Promise<Record<string, unknown>> {
-  const response = await fetch("https://api.bitget.com/api/v2/spot/market/orderbook?symbol=BTCUSDT&type=step0&limit=50", {
+  const response = await fetchWithTimeout("https://api.bitget.com/api/v2/spot/market/orderbook?symbol=BTCUSDT&type=step0&limit=50", {
     headers: { "accept": "application/json", "user-agent": "quant-btc-model-worker-realtime/1.0" },
     cf: { cacheTtl: 0, cacheEverything: false }
-  });
+  }, 10_000);
   if (!response.ok) {
     throw new Error(`Bitget orderbook HTTP ${response.status}`);
   }
@@ -2235,10 +2496,11 @@ async function processDeepJobQueue(env: Env): Promise<Record<string, unknown>> {
       completed_at_utc: finished.toISOString(),
       completed_at_paris: parisIso(finished)
     };
-  } catch (error) {
+  } catch {
     return {
       status: "error",
-      message: error instanceof Error ? error.message : String(error)
+      error_code: "MODEL_EXECUTION_FAILED",
+      message: "Deep job processing failed."
     };
   } finally {
     await releaseD1Lock(env, String(lock.name), String(lock.owner));
@@ -2256,10 +2518,8 @@ async function notifyDeepJob(env: Env, row: Record<string, unknown>, text: strin
 }
 
 function getTradingConfig(env: Env): Record<string, unknown> {
-  const mode = String(env.TRADING_MODE || "paper").toLowerCase() === "live" ? "live" : "paper";
-  const keysConfigured = Boolean(env.BITGET_API_KEY && env.BITGET_API_SECRET && env.BITGET_API_PASSPHRASE);
   return {
-    mode,
+    mode: "paper",
     symbol: "BTCUSDT",
     default_notional_usdt: clampFloat(parseNumber(env.TRADING_DEFAULT_NOTIONAL_USDT, TRADING_DEFAULT_NOTIONAL_USDT_DEFAULT), 1, 100000),
     max_notional_usdt: clampFloat(parseNumber(env.TRADING_MAX_NOTIONAL_USDT, TRADING_MAX_NOTIONAL_USDT_DEFAULT), 1, 100000),
@@ -2269,10 +2529,11 @@ function getTradingConfig(env: Env): Record<string, unknown> {
     buy_prob_up: clampFloat(parseNumber(env.TRADING_BUY_PROB_UP, TRADING_BUY_PROB_UP_DEFAULT), 0.01, 0.99),
     sell_prob_up: clampFloat(parseNumber(env.TRADING_SELL_PROB_UP, TRADING_SELL_PROB_UP_DEFAULT), 0.01, 0.99),
     max_spot_age_seconds: clampInt(parseNumber(env.TRADING_MAX_SPOT_AGE_SECONDS, TRADING_MAX_SPOT_AGE_SECONDS_DEFAULT), 15, 3600),
-    bitget_trade_secrets: keysConfigured ? "configured" : "absent",
-    live_confirmation: env.TRADING_LIVE_CONFIRMATION ? "configured" : "absent",
-    telegram_approval_enabled: parseBoolean(env.TRADING_TELEGRAM_APPROVAL_ENABLED, false),
-    live_ready: mode === "live" && keysConfigured
+    bitget_trade_secrets: "unsupported",
+    telegram_approval_enabled: false,
+    live_ready: false,
+    execution_authority: "none",
+    live_trading: "blocked_by_policy"
   };
 }
 
@@ -2281,13 +2542,14 @@ function tradingPublicStatus(env: Env): Record<string, unknown> {
   return {
     mode: config.mode,
     paper_trading: "enabled",
-    live_trading: config.live_ready ? "guarded_available" : "disabled",
+    live_trading: "blocked",
+    execution_authority: "none",
     exchange: "Bitget spot BTCUSDT",
     order_policy: [
       "GPT may request a probabilistic signal, create paper orders and create proposals.",
-      "Live orders are disabled unless TRADING_MODE=live and Bitget trade secrets are configured.",
-      "Live execution also requires explicit owner approval through Telegram or a confirmation code.",
-      "Withdraw/transfer permissions must never be enabled on the Bitget API key."
+      "Live exchange execution is not implemented and cannot be enabled by environment variables.",
+      "All paper orders are mock_paper records with no exchange side effect.",
+      "Human review remains mandatory before any out-of-repository action."
     ],
     risk_gates: {
       min_confidence: config.min_confidence,
@@ -2310,7 +2572,7 @@ async function tradingStatus(env: Env): Promise<Record<string, unknown>> {
     d1: env.DB ? "configured" : "absent",
     checked_at_utc: new Date().toISOString(),
     checked_at_paris: parisIso(new Date()),
-    warning: "Trading outputs are infrastructure actions, not financial advice."
+    warning: "Trading-named compatibility outputs are non-prescriptive mock-paper states, not financial advice or execution."
   };
 }
 
@@ -2361,7 +2623,14 @@ async function strategyStatus(env: Env): Promise<Record<string, unknown>> {
 }
 
 async function buildStrategySummary(env: Env): Promise<Record<string, unknown>> {
-  const signal = await buildStrategySignal(env, { asset: "BTC", preset: "deep", horizon: 30 });
+  const signal = await buildStrategySignal(env, {
+    asset: "BTC",
+    preset: "deep",
+    horizon: 30,
+    refresh: false,
+    no_realtime_refresh: true,
+    no_persist: true
+  });
   const portfolio = await paperPortfolioCompact(env, numberOrNull(objectValue(signal.provenance).realtime_spot));
   const gates = Array.isArray(signal.gates) ? signal.gates.map((item) => objectValue(item)) : [];
   const blockingGates = gates.filter((gateItem) => gateItem.passed !== true).map((gateItem) => ({
@@ -2410,6 +2679,13 @@ async function buildStrategySummary(env: Env): Promise<Record<string, unknown>> 
     },
     conclusion: strategyConclusion(signal, blockingGates),
     data_status: signal.data_status,
+    policy: {
+      user_effect: "information_only",
+      execution_authority: "none",
+      financial_advice: false,
+      paper_trading: "mock_only",
+      live_trading: "blocked"
+    },
     warning: "Resume compact pour GPT: probabiliste, pas conseil financier."
   };
 }
@@ -2437,7 +2713,7 @@ async function buildClientSummary(env: Env): Promise<Record<string, unknown>> {
     strategy_score: strategy.score ?? null,
     strategy_agreement: strategy.agreement ?? null,
     reason_main: mainReason,
-    suggested_action: clientSuggestedAction(strategy, risk),
+    research_next_step: clientResearchNextStep(strategy, risk),
     spot: {
       price: realtime.price ?? objectValue(strategy.provenance).realtime_spot ?? null,
       age_seconds: realtime.age_seconds ?? objectValue(strategy.provenance).realtime_spot_age_seconds ?? null,
@@ -2466,6 +2742,13 @@ async function buildClientSummary(env: Env): Promise<Record<string, unknown>> {
       strategy_scores: "inferred",
       paper_portfolio: "mock_paper",
       non_bitget_fallback: "absent"
+    },
+    policy: {
+      user_effect: "information_only",
+      execution_authority: "none",
+      financial_advice: false,
+      paper_trading: "mock_only",
+      live_trading: "blocked"
     },
     client_text: "",
     warning: "Resume client court; probabiliste uniquement, pas conseil financier.",
@@ -2498,7 +2781,7 @@ function clientRiskLabel(frame: Record<string, unknown>, modelAlerts: Record<str
   return "modere";
 }
 
-function clientSuggestedAction(strategy: Record<string, unknown>, risk: string): string {
+function clientResearchNextStep(strategy: Record<string, unknown>, risk: string): string {
   const action = String(strategy.action || "hold");
   if (risk === "critique") return "attendre; verifier les alertes avant toute lecture directionnelle";
   if (action === "hold") return "surveiller; pas de trade operationnel valide par les gates";
@@ -2517,7 +2800,7 @@ function formatClientSummaryText(summary: Record<string, unknown>): string {
       `Risque: ${summary.risk}`,
       `Strategie: ${summary.strategy_action}`,
       `Score: ${summary.strategy_score ?? "absent"} | Accord: ${formatMaybePercent(summary.strategy_agreement)}`,
-      `Action: ${summary.suggested_action}`
+      `Prochaine verification: ${summary.research_next_step}`
     ]),
     telegramSection("Pourquoi", [summary.reason_main || "absent"]),
     telegramSection("Frame cle", [
@@ -2592,7 +2875,6 @@ async function buildStrategySignal(env: Env, input: Record<string, unknown>): Pr
     ensemble_score: strategy.ensemble_score,
     agreement: strategy.agreement,
     confidence: strategy.confidence,
-    suggested_notional_usdt: strategy.side === "buy" ? getTradingConfig(env).default_notional_usdt : null,
     strategies: strategy.strategies,
     gates: strategy.gates,
     provenance: {
@@ -2624,7 +2906,9 @@ async function buildStrategySignal(env: Env, input: Record<string, unknown>): Pr
     },
     warning: "Signal de strategie probabiliste uniquement; pas une prediction certaine ni un conseil financier."
   };
-  result.d1_persist = await persistStrategySignal(env, result);
+  result.d1_persist = parseBoolean(input.no_persist, false)
+    ? { status: "skipped", reason: "cache_only_read" }
+    : await persistStrategySignal(env, result);
   return result;
 }
 
@@ -2803,8 +3087,15 @@ function strategyScore(name: string, scoreRaw: number, weight: number, rationale
   return {
     name,
     score: Number(score.toFixed(2)),
+    score_range: { minimum: -100, maximum: 100 },
     weight,
     direction: score > 8 ? "positive" : score < -8 ? "negative" : "neutral",
+    status: "inferred",
+    strategy_version: MODEL_VERSION,
+    historical_calibration: {
+      status: "absent",
+      reason: "No strategy-specific out-of-sample calibration series is attached to this score."
+    },
     rationale,
     inputs
   };
@@ -2860,8 +3151,8 @@ async function persistStrategySignal(env: Env, signal: Record<string, unknown>):
       new Date().toISOString()
     ).run();
     return { status: "stored", target: "cloudflare_d1" };
-  } catch (error) {
-    return { status: "error", message: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { status: "error", error_code: "STORAGE_UNAVAILABLE", message: "Strategy signal persistence failed." };
   }
 }
 
@@ -2887,12 +3178,12 @@ async function listStrategySignals(env: Env, limit: number): Promise<Record<stri
         };
       })
     };
-  } catch (error) {
-    return { status: "error", signals: [], message: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { status: "error", signals: [], error_code: "STORAGE_UNAVAILABLE", message: "Strategy signals are unavailable." };
   }
 }
 
-async function strategyPerformanceReport(env: Env): Promise<Record<string, unknown>> {
+async function strategyPerformanceReport(env: Env, refreshSnapshots = false): Promise<Record<string, unknown>> {
   if (!env.DB) {
     return { status: "absent", message: "D1 is required for strategy performance tracking." };
   }
@@ -2908,9 +3199,12 @@ async function strategyPerformanceReport(env: Env): Promise<Record<string, unkno
     `).all();
     const signals = (results || []).map((row) => parseStoredStrategySignal(objectValue(row))).filter(Boolean);
     const evaluated = signals.map((signal) => evaluateStrategySignalPerformance(signal, markPrice));
-    const due = markPrice !== null
+    const due = refreshSnapshots && markPrice !== null
       ? await upsertDueStrategyPerformanceSnapshots(env, signals, markPrice)
-      : { status: "skipped", reason: "mark_price_absent" };
+      : {
+          status: "skipped",
+          reason: refreshSnapshots ? "mark_price_absent" : "cache_only_read"
+        };
     const latestSnapshots = await latestStrategyPerformanceSnapshots(env, 50);
     const candidateRows = evaluated.filter((row) => row.action !== "hold");
     const returns = evaluated.map((row) => strictNumberOrNull(row.return_pct)).filter((value): value is number => value !== null);
@@ -2940,10 +3234,11 @@ async function strategyPerformanceReport(env: Env): Promise<Record<string, unkno
       checked_at_utc: new Date().toISOString(),
       checked_at_paris: parisIso(new Date())
     };
-  } catch (error) {
+  } catch {
     return {
       status: "error",
-      message: error instanceof Error ? error.message : String(error),
+      error_code: "STORAGE_UNAVAILABLE",
+      message: "Strategy performance data are unavailable.",
       migration_hint: "Run D1 migration 0007_strategy_performance.sql if the strategy_performance_snapshots table is absent."
     };
   }
@@ -3089,12 +3384,10 @@ async function latestStrategyPerformanceSnapshots(env: Env, limit: number): Prom
   }
 }
 
-function strategySignalToTradingSignal(strategy: Record<string, unknown>, env: Env): Record<string, unknown> {
+function strategySignalToTradingSignal(strategy: Record<string, unknown>): Record<string, unknown> {
   const provenance = objectValue(strategy.provenance);
   const selected = objectValue(strategy.selected_frame);
   const side = normalizeTradingSide(strategy.side);
-  const spot = numberOrNull(provenance.realtime_spot) || numberOrNull(provenance.reference_spot);
-  const notional = side === "buy" ? Number(getTradingConfig(env).default_notional_usdt) : null;
   return {
     status: strategy.status,
     asset: strategy.asset,
@@ -3102,8 +3395,6 @@ function strategySignalToTradingSignal(strategy: Record<string, unknown>, env: E
     signal: side === "buy" ? "strategy_buy_candidate" : side === "sell" ? "strategy_sell_or_reduce_candidate" : "no_trade",
     side,
     order_type: "market",
-    suggested_notional_usdt: notional,
-    suggested_size_base: side === "buy" && spot && notional ? notional / spot : null,
     gates: strategy.gates,
     provenance: {
       ...provenance,
@@ -3132,7 +3423,7 @@ function strategySignalToTradingSignal(strategy: Record<string, unknown>, env: E
 
 async function createStrategyPaperOrder(env: Env, input: Record<string, unknown>, createdBy: string): Promise<Record<string, unknown>> {
   const strategy = await buildStrategySignal(env, input);
-  const signal = strategySignalToTradingSignal(strategy, env);
+  const signal = strategySignalToTradingSignal(strategy);
   const order = await createTradeOrder(env, input, signal, "paper", "paper_filled", createdBy);
   return { ...order, strategy_signal: strategy };
 }
@@ -3140,7 +3431,7 @@ async function createStrategyPaperOrder(env: Env, input: Record<string, unknown>
 async function proposeStrategyTradeOrder(env: Env, input: Record<string, unknown>, createdBy: string): Promise<Record<string, unknown>> {
   const requestedMode = String(input.mode || "paper").toLowerCase() === "live" ? "live" : "paper";
   const strategy = await buildStrategySignal(env, input);
-  const signal = strategySignalToTradingSignal(strategy, env);
+  const signal = strategySignalToTradingSignal(strategy);
   const status = requestedMode === "live" ? "pending_live_approval" : "pending_paper_approval";
   const order = await createTradeOrder(env, input, signal, requestedMode, status, createdBy);
   const chatId = stringOrNull(input.chat_id) || stringOrNull(env.TELEGRAM_CHAT_ID);
@@ -3200,7 +3491,7 @@ async function buildTradingSignal(env: Env, input: Record<string, unknown>): Pro
   }
 
   let realtime = await realtimeStatus(env);
-  if (realtime.status !== "ok") {
+  if (realtime.status !== "ok" && !parseBoolean(input.no_realtime_refresh, false)) {
     await collectRealtimeMarketSnapshot(env, "trading_signal");
     realtime = await realtimeStatus(env);
   }
@@ -3226,9 +3517,7 @@ async function buildTradingSignal(env: Env, input: Record<string, unknown>): Pro
   const buyAllowed = gates.every((item) => item.passed);
   const sellCandidate = probUp !== null && probUp <= Number(config.sell_prob_up) && confidenceScore !== null && confidenceScore >= Number(config.min_confidence);
   const side = buyAllowed ? "buy" : sellCandidate ? "sell" : "hold";
-  const signal = buyAllowed ? "paper_buy_candidate" : sellCandidate ? "reduce_candidate_no_position_check" : "no_trade";
-  const sizeUsdt = Math.min(Number(config.default_notional_usdt), Number(config.max_notional_usdt));
-  const sizeBase = side === "buy" && spot ? sizeUsdt / spot : null;
+  const signal = buyAllowed ? "buy_candidate" : sellCandidate ? "sell_or_reduce_candidate" : "hold";
   const runId = stringOrNull(frame.run_id);
   return {
     status: "ok",
@@ -3237,10 +3526,11 @@ async function buildTradingSignal(env: Env, input: Record<string, unknown>): Pro
     signal,
     side,
     order_type: "market",
-    suggested_notional_usdt: side === "buy" ? sizeUsdt : null,
-    suggested_size_base: sizeBase,
     gates,
-    decision_policy: "All buy gates must pass. Otherwise no trade is recommended by the execution engine.",
+    decision_policy: "Internal non-prescriptive state only. It must not be presented as a recommendation or order instruction.",
+    user_effect: "information_only",
+    execution_authority: "none",
+    financial_advice: false,
     provenance: {
       archive_id: payload.archive_id,
       run_id: runId,
@@ -3274,16 +3564,33 @@ async function buildTradingSignal(env: Env, input: Record<string, unknown>): Pro
 }
 
 function gate(name: string, passed: boolean, detail: string): Record<string, unknown> {
-  return { name, passed, detail };
+  return {
+    gate_id: name,
+    name,
+    observed: passed,
+    threshold: true,
+    operator: "is",
+    status: passed ? "pass" : "fail",
+    severity: "blocking",
+    reason: detail,
+    passed,
+    detail
+  };
 }
 
 function strategyGate(name: string, passed: boolean, observed: string, threshold: string): Record<string, unknown> {
+  const detail = passed ? `${observed} OK (${threshold})` : `${observed} fails (${threshold})`;
   return {
+    gate_id: name,
     name,
-    passed,
     observed,
     threshold,
-    detail: passed ? `${observed} OK (${threshold})` : `${observed} fails (${threshold})`
+    operator: "policy_predicate",
+    status: passed ? "pass" : "fail",
+    severity: "blocking",
+    reason: detail,
+    passed,
+    detail
   };
 }
 
@@ -3301,8 +3608,18 @@ async function createPaperTradeOrder(env: Env, input: Record<string, unknown>, c
 
 async function proposeTradeOrder(env: Env, input: Record<string, unknown>, createdBy: string): Promise<Record<string, unknown>> {
   const requestedMode = String(input.mode || "paper").toLowerCase() === "live" ? "live" : "paper";
+  if (requestedMode === "live") {
+    return {
+      status: "blocked",
+      error_code: "EXECUTION_FORBIDDEN",
+      message: "Live trading is forbidden by governance policy.",
+      retryable: false,
+      details: { execution_authority: "none", live_trading: "blocked" },
+      request_id: randomRunSuffix()
+    };
+  }
   const signal = await buildTradingSignal(env, input);
-  const status = requestedMode === "live" ? "pending_live_approval" : "pending_paper_approval";
+  const status = "pending_mock_paper_approval";
   const order = await createTradeOrder(env, input, signal, requestedMode, status, createdBy);
   const chatId = stringOrNull(input.chat_id) || stringOrNull(env.TELEGRAM_CHAT_ID);
   if (chatId && order.status !== "error") {
@@ -3311,9 +3628,7 @@ async function proposeTradeOrder(env: Env, input: Record<string, unknown>, creat
   return {
     ...order,
     notification: chatId ? "telegram_sent_or_attempted" : "telegram_absent",
-    approval_policy: requestedMode === "live"
-      ? "A live order is not sent until /trading/approve is called with confirmation or Telegram owner approval."
-      : "Paper proposal can be approved without live exchange execution."
+    approval_policy: "Mock-paper proposal only. Approval updates the simulation journal and never contacts an exchange."
   };
 }
 
@@ -3328,12 +3643,20 @@ async function createTradeOrder(
   if (!env.DB) {
     return { status: "error", message: "D1 is required for the trading journal." };
   }
+  if (mode !== "paper") {
+    return {
+      status: "blocked",
+      error_code: "EXECUTION_FORBIDDEN",
+      message: "Only mock paper orders are supported.",
+      execution_authority: "none"
+    };
+  }
   if (signal.status !== "ok") {
     return { status: "error", message: "Trading signal is absent; no order created.", signal };
   }
   const side = normalizeTradingSide(input.side || signal.side);
   const force = parseBoolean(input.force, false);
-  if (side === "hold" || (!force && signal.signal === "no_trade")) {
+  if (side === "hold" || (!force && signal.signal === "hold")) {
     return {
       status: "blocked",
       message: "No trade created because risk gates did not pass. Use force=true only for paper/manual testing.",
@@ -3346,9 +3669,9 @@ async function createTradeOrder(
   const clientOid = `qbtc_${now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomRunSuffix()}`.slice(0, 32);
   const spot = numberOrNull(objectValue(signal.provenance).realtime_spot);
   const maxNotional = Number(config.max_notional_usdt);
-  const requestedNotional = numberOrNull(input.size_usdt) || numberOrNull(signal.suggested_notional_usdt) || Number(config.default_notional_usdt);
+  const requestedNotional = numberOrNull(input.size_usdt) || Number(config.default_notional_usdt);
   const sizeUsdt = side === "buy" ? Math.min(Math.max(requestedNotional, 1), maxNotional) : null;
-  const requestedBase = numberOrNull(input.size_base) || numberOrNull(signal.suggested_size_base);
+  const requestedBase = numberOrNull(input.size_base);
   const sizeBase = side === "sell" ? requestedBase : (side === "buy" && spot && sizeUsdt ? sizeUsdt / spot : requestedBase);
   const orderType = normalizeOrderType(input.order_type);
   const limitPrice = orderType === "limit" ? (numberOrNull(input.limit_price) || spot) : null;
@@ -3406,11 +3729,10 @@ async function createTradeOrder(
     data_status: {
       price: "real",
       model_outputs: "inferred",
-      order: mode === "paper" ? "mock" : "pending"
+      order: "mock_paper"
     },
-    warning: mode === "paper"
-      ? "Paper order only; no exchange order was sent."
-      : "Live proposal only; no exchange order was sent until explicit approval."
+    execution_authority: "none",
+    warning: "Mock paper order only; no exchange order was sent and live execution is unavailable."
   };
 }
 
@@ -3438,135 +3760,13 @@ async function approveTradeOrder(env: Env, input: Record<string, unknown>, sourc
     return { status: "paper_approved_filled", order_id: orderId, message: "Paper order approved; no exchange order was sent." };
   }
 
-  const liveAuth = canApproveLiveTrade(env, input, source);
-  if (!liveAuth.allowed) {
-    return { status: "blocked", order_id: orderId, reason: liveAuth.reason, message: "Live order was not sent." };
-  }
-  const execution = await placeBitgetSpotOrder(env, row);
-  const finalStatus = execution.status === "sent" ? "live_sent" : "live_error";
-  await env.DB.prepare(`
-    UPDATE trade_orders SET status = ?, exchange_order_id = ?, execution_json = ?, error = ?,
-      approved_by = ?, approved_at_utc = ?, executed_at_utc = ?, updated_at_utc = ?
-    WHERE order_id = ?
-  `).bind(
-    finalStatus,
-    stringOrNull(objectValue(execution.exchange_response).orderId) || stringOrNull(objectValue(objectValue(execution.exchange_response).data).orderId),
-    JSON.stringify(execution),
-    finalStatus === "live_error" ? stringOrNull(execution.message) || stringOrNull(execution.error) : null,
-    source,
-    now.toISOString(),
-    now.toISOString(),
-    now.toISOString(),
-    orderId
-  ).run();
-  await persistTradeEvent(env, orderId, "live_execution", finalStatus, finalStatus === "live_sent" ? "Live Bitget order sent." : "Live Bitget order failed.", execution);
   return {
-    status: finalStatus,
+    status: "blocked",
+    error_code: "EXECUTION_FORBIDDEN",
     order_id: orderId,
-    execution,
-    warning: "Live exchange response returned by Bitget; verify directly in Bitget before relying on position state."
+    execution_authority: "none",
+    message: "Historical live-mode rows cannot be approved or executed."
   };
-}
-
-function canApproveLiveTrade(env: Env, input: Record<string, unknown>, source: string): Record<string, unknown> {
-  const config = getTradingConfig(env);
-  if (config.live_ready !== true) {
-    return { allowed: false, reason: "TRADING_MODE is not live or Bitget trade secrets are absent." };
-  }
-  if (source === "telegram_owner" && config.telegram_approval_enabled === true) {
-    return { allowed: true, reason: "telegram_owner_approval" };
-  }
-  const expected = stringOrNull(env.TRADING_LIVE_CONFIRMATION);
-  const provided = stringOrNull(input.confirmation) || stringOrNull(input.approval_code);
-  if (expected && provided === expected) {
-    return { allowed: true, reason: "confirmation_code_valid" };
-  }
-  return { allowed: false, reason: "Live approval requires Telegram owner approval or TRADING_LIVE_CONFIRMATION." };
-}
-
-async function placeBitgetSpotOrder(env: Env, order: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const apiKey = stringOrNull(env.BITGET_API_KEY);
-  const apiSecret = stringOrNull(env.BITGET_API_SECRET);
-  const passphrase = stringOrNull(env.BITGET_API_PASSPHRASE);
-  if (!apiKey || !apiSecret || !passphrase) {
-    return { status: "error", error: "bitget_trade_secrets_absent" };
-  }
-  const side = normalizeTradingSide(order.side);
-  const orderType = normalizeOrderType(order.order_type);
-  const sizeUsdt = numberOrNull(order.size_usdt);
-  const sizeBase = numberOrNull(order.size_base);
-  if (side === "sell" && !sizeBase) {
-    return { status: "error", error: "sell_size_base_absent", message: "Spot market sell requires base coin size." };
-  }
-  const size = side === "buy" && orderType === "market" ? sizeUsdt : sizeBase;
-  if (!size || size <= 0) {
-    return { status: "error", error: "order_size_absent" };
-  }
-  const body: Record<string, unknown> = {
-    symbol: stringOrNull(order.symbol) || "BTCUSDT",
-    side,
-    orderType,
-    size: formatOrderNumber(size),
-    clientOid: stringOrNull(order.client_oid) || `qbtc_${randomRunSuffix()}`
-  };
-  if (orderType === "limit") {
-    const limitPrice = numberOrNull(order.limit_price);
-    if (!limitPrice) {
-      return { status: "error", error: "limit_price_absent" };
-    }
-    body.force = "gtc";
-    body.price = formatOrderNumber(limitPrice);
-  }
-  const timestamp = String(Date.now());
-  const bodyText = JSON.stringify(body);
-  const signature = await bitgetSign(apiSecret, timestamp, "POST", BITGET_SPOT_PLACE_ORDER_PATH, bodyText);
-  const response = await fetch(`https://api.bitget.com${BITGET_SPOT_PLACE_ORDER_PATH}`, {
-    method: "POST",
-    headers: {
-      "ACCESS-KEY": apiKey,
-      "ACCESS-SIGN": signature,
-      "ACCESS-PASSPHRASE": passphrase,
-      "ACCESS-TIMESTAMP": timestamp,
-      "locale": "en-US",
-      "content-type": "application/json"
-    },
-    body: bodyText,
-    cf: { cacheTtl: 0, cacheEverything: false }
-  });
-  const text = await response.text();
-  let parsed: unknown = {};
-  try {
-    parsed = text ? JSON.parse(text) : {};
-  } catch {
-    parsed = { raw_response: text.slice(0, 1000) };
-  }
-  const payload = objectValue(parsed);
-  const ok = response.ok && (payload.code === "00000" || payload.msg === "success");
-  return {
-    status: ok ? "sent" : "error",
-    http_status: response.status,
-    exchange: "bitget",
-    endpoint: BITGET_SPOT_PLACE_ORDER_PATH,
-    request: { ...body, size: body.size },
-    exchange_response: payload,
-    message: ok ? "Bitget spot order accepted." : stringOrNull(payload.msg) || `HTTP ${response.status}`
-  };
-}
-
-async function bitgetSign(secret: string, timestamp: string, method: string, requestPath: string, body: string): Promise<string> {
-  const payload = `${timestamp}${method.toUpperCase()}${requestPath}${body}`;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return arrayBufferToBase64(signature);
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
 }
 
 async function listTradeOrders(env: Env, limit: number): Promise<Record<string, unknown>> {
@@ -3594,15 +3794,20 @@ async function listTradeOrders(env: Env, limit: number): Promise<Record<string, 
   };
 }
 
-async function paperTradingPnl(env: Env): Promise<Record<string, unknown>> {
+async function paperTradingPnl(env: Env, refresh = false): Promise<Record<string, unknown>> {
   if (!env.DB) {
     return { status: "absent", message: "D1 is required for paper PnL." };
   }
-  const realtime = await freshRealtimeForPaper(env);
+  const realtime = await freshRealtimeForPaper(env, refresh);
   const markPrice = numberOrNull(realtime.price);
   const orders = await paperFilledOrders(env, 100);
   const rows = orders.map((order) => paperPnlForOrder(order, markPrice));
-  const snapshots = markPrice ? await upsertDuePaperPnlSnapshots(env, orders, markPrice) : { status: "skipped", reason: "mark_price_absent" };
+  const snapshots = refresh && markPrice
+    ? await upsertDuePaperPnlSnapshots(env, orders, markPrice)
+    : {
+        status: "skipped",
+        reason: refresh ? "mark_price_absent" : "cache_only_read"
+      };
   const total = rows.reduce((sum, row) => sum + (numberOrNull(row.pnl_usdt) || 0), 0);
   return {
     status: "ok",
@@ -3623,11 +3828,11 @@ async function paperTradingPnl(env: Env): Promise<Record<string, unknown>> {
   };
 }
 
-async function paperPortfolioState(env: Env): Promise<Record<string, unknown>> {
+async function paperPortfolioState(env: Env, refresh = false): Promise<Record<string, unknown>> {
   if (!env.DB) {
     return { status: "absent", message: "D1 is required for paper portfolio state." };
   }
-  const realtime = await freshRealtimeForPaper(env);
+  const realtime = await freshRealtimeForPaper(env, refresh);
   const markPrice = numberOrNull(realtime.price);
   const orders = await paperFilledOrders(env, 500);
   let buyBase = 0;
@@ -3685,13 +3890,16 @@ async function paperPortfolioState(env: Env): Promise<Record<string, unknown>> {
   };
 }
 
-async function paperTradingReport(env: Env): Promise<Record<string, unknown>> {
+async function paperTradingReport(env: Env, refresh = false): Promise<Record<string, unknown>> {
   if (!env.DB) {
     return { status: "absent", message: "D1 is required for paper trading reports." };
   }
+  if (refresh) {
+    await freshRealtimeForPaper(env, true);
+  }
   const [pnl, portfolio, orders, snapshots] = await Promise.all([
-    paperTradingPnl(env),
-    paperPortfolioState(env),
+    paperTradingPnl(env, refresh),
+    paperPortfolioState(env, false),
     listTradeOrders(env, 50),
     latestPaperPnlSnapshots(env, 50)
   ]);
@@ -3818,10 +4026,10 @@ async function cleanupPaperTestOrders(env: Env, input: Record<string, unknown>):
   };
 }
 
-async function freshRealtimeForPaper(env: Env): Promise<Record<string, unknown>> {
+async function freshRealtimeForPaper(env: Env, refresh = false): Promise<Record<string, unknown>> {
   let realtime = await realtimeStatus(env);
   const age = numberOrNull(realtime.age_seconds);
-  if (realtime.status !== "ok" || age === null || age > Number(getTradingConfig(env).max_spot_age_seconds)) {
+  if (refresh && (realtime.status !== "ok" || age === null || age > Number(getTradingConfig(env).max_spot_age_seconds))) {
     await collectRealtimeMarketSnapshot(env, "paper_pnl");
     realtime = await realtimeStatus(env);
   }
@@ -3982,10 +4190,6 @@ function normalizeTradingSide(value: unknown): string {
 
 function normalizeOrderType(value: unknown): string {
   return String(value || "market").toLowerCase() === "limit" ? "limit" : "market";
-}
-
-function formatOrderNumber(value: number): string {
-  return value >= 1 ? value.toFixed(2).replace(/\.?0+$/, "") : value.toFixed(8).replace(/\.?0+$/, "");
 }
 
 function safeTradingInput(input: Record<string, unknown>): Record<string, unknown> {
@@ -4382,7 +4586,7 @@ async function checkRenderHealth(env: Env): Promise<Record<string, unknown>> {
     try {
       body = text ? JSON.parse(text) : {};
     } catch {
-      body = { raw_response: text.slice(0, 500) };
+      body = {};
     }
     return {
       status: response.ok ? "ok" : "error",
@@ -4390,11 +4594,11 @@ async function checkRenderHealth(env: Env): Promise<Record<string, unknown>> {
       latency_ms: Date.now() - started,
       body: objectValue(body)
     };
-  } catch (error) {
+  } catch {
     return {
       status: "error",
       latency_ms: Date.now() - started,
-      error: error instanceof Error ? error.message : String(error)
+      error_code: "MODEL_EXECUTION_FAILED"
     };
   }
 }
@@ -4437,10 +4641,11 @@ async function latestD1CacheSummary(env: Env, asset: string, requestedHorizons: 
       status: "absent",
       message: `No D1 cache found for horizons ${requestedHorizons.join(",")}`
     };
-  } catch (error) {
+  } catch {
     return {
       status: "error",
-      message: error instanceof Error ? error.message : String(error)
+      error_code: "STORAGE_UNAVAILABLE",
+      message: "The cache summary is unavailable."
     };
   }
 }
@@ -4700,7 +4905,7 @@ async function refreshPresetForModelAlerts(
       horizons: compact.horizons,
       simulations: body.simulations
     };
-  } catch (error) {
+  } catch {
     return {
       status: "refresh_failed",
       preset: preset.name,
@@ -4708,7 +4913,8 @@ async function refreshPresetForModelAlerts(
       previous_cache_status: before.status,
       previous_cache_age_seconds: beforeAge,
       latency_ms: Date.now() - started,
-      message: error instanceof Error ? error.message : String(error)
+      error_code: "MODEL_EXECUTION_FAILED",
+      message: "The cache refresh failed."
     };
   } finally {
     await releaseD1Lock(env, String(lock.name), String(lock.owner));
@@ -5370,7 +5576,7 @@ async function sendDiscordOpsAlert(env: Env, title: string, message: string, sta
     return { status: "absent" };
   }
   try {
-    const response = await fetch(webhook, {
+    const response = await fetchWithTimeout(webhook, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -5384,16 +5590,16 @@ async function sendDiscordOpsAlert(env: Env, title: string, message: string, sta
           }
         ]
       })
-    });
+    }, 10_000);
     return {
       status: response.ok ? "sent" : "error",
       http_status: response.status
     };
-  } catch (error) {
+  } catch {
     // Discord delivery is best-effort; /ops/status remains the source of truth.
     return {
       status: "error",
-      error: error instanceof Error ? error.message : String(error)
+      error_code: "DELIVERY_FAILED"
     };
   }
 }
@@ -5409,40 +5615,62 @@ async function sendTelegramOpsAlert(env: Env, text: string): Promise<Record<stri
   return await sendTelegramMessage(env, config.chatId, text);
 }
 
+export function splitTelegramText(text: string, maximumLength = 3700): string[] {
+  if (text.length <= maximumLength) return [text];
+  const parts: string[] = [];
+  let remaining = text;
+  while (remaining.length > maximumLength) {
+    const window = remaining.slice(0, maximumLength);
+    const candidates = [window.lastIndexOf("\n\n"), window.lastIndexOf("\n"), window.lastIndexOf(" ")];
+    const splitAt = Math.max(...candidates, Math.floor(maximumLength * 0.6));
+    parts.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+  if (remaining) parts.push(remaining);
+  return parts.map((part, index) => parts.length > 1 ? `[${index + 1}/${parts.length}]\n${part}` : part);
+}
+
 async function sendTelegramMessage(env: Env, chatId: string, text: string, replyMarkup?: Record<string, unknown>): Promise<Record<string, unknown>> {
   const config = getTelegramConfig(env);
   if (!config) {
     return { status: "absent" };
   }
   try {
-    const response = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        disable_web_page_preview: true,
-        reply_markup: replyMarkup
-      })
-    });
-    const textBody = await response.text();
-    let body: unknown = {};
-    try {
-      body = textBody ? JSON.parse(textBody) : {};
-    } catch {
-      body = { raw_response: textBody.slice(0, 500) };
+    const parts = splitTelegramText(text);
+    let lastStatus = 200;
+    for (let index = 0; index < parts.length; index += 1) {
+      const response = await fetchWithTimeout(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: parts[index],
+          disable_web_page_preview: true,
+          reply_markup: index === parts.length - 1 ? replyMarkup : undefined
+        })
+      }, 12_000);
+      lastStatus = response.status;
+      const body = objectValue(await response.json().catch(() => ({})));
+      if (!response.ok || body.ok === false) {
+        return {
+          status: response.status === 429 ? "rate_limited" : "error",
+          http_status: response.status,
+          retry_after_seconds: numberOrNull(objectValue(body.parameters).retry_after),
+          telegram_ok: body.ok,
+          description: body.description
+        };
+      }
     }
     return {
-      status: response.ok && objectValue(body).ok !== false ? "sent" : "error",
-      http_status: response.status,
-      telegram_ok: objectValue(body).ok,
-      description: objectValue(body).description
+      status: "sent",
+      http_status: lastStatus,
+      messages_sent: parts.length
     };
-  } catch (error) {
+  } catch {
     // Telegram delivery is best-effort; /ops/status remains the source of truth.
     return {
       status: "error",
-      error: error instanceof Error ? error.message : String(error)
+      error_code: "DELIVERY_FAILED"
     };
   }
 }
@@ -5452,23 +5680,21 @@ async function setupTelegramWebhook(env: Env, request: Request): Promise<Record<
   if (!config) {
     return { status: "absent", message: "Telegram secrets are not configured." };
   }
-  const url = new URL(request.url);
-  const chatId = url.searchParams.get("chat_id");
-  if (chatId !== config.chatId) {
-    return {
-      status: "forbidden",
-      message: "Pass ?chat_id=<TELEGRAM_CHAT_ID> to confirm webhook setup for the configured owner chat."
-    };
+  const webhookSecret = stringOrNull(env.TELEGRAM_WEBHOOK_SECRET);
+  if (!webhookSecret) {
+    return { status: "blocked", message: "TELEGRAM_WEBHOOK_SECRET is required before webhook setup." };
   }
+  const url = new URL(request.url);
   const webhookUrl = `${url.origin}/telegram/webhook`;
-  const response = await fetch(`https://api.telegram.org/bot${config.token}/setWebhook`, {
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${config.token}/setWebhook`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       url: webhookUrl,
+      secret_token: webhookSecret,
       allowed_updates: ["message", "callback_query"]
     })
-  });
+  }, 12_000);
   const body = objectValue(await response.json().catch(() => ({})));
   return {
     status: response.ok && body.ok !== false ? "ok" : "error",
@@ -5480,7 +5706,32 @@ async function setupTelegramWebhook(env: Env, request: Request): Promise<Record<
   };
 }
 
-async function handleTelegramWebhook(env: Env, update: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function handleTelegramWebhook(env: Env, request: Request): Promise<Record<string, unknown>> {
+  const expectedSecret = stringOrNull(env.TELEGRAM_WEBHOOK_SECRET);
+  const providedSecret = request.headers.get("x-telegram-bot-api-secret-token");
+  if (!expectedSecret || !timingSafeEqualText(providedSecret, expectedSecret)) {
+    throw new WorkerRequestError(401, "AUTHENTICATION_REQUIRED", "Telegram webhook authentication failed.");
+  }
+  if (!env.DB) {
+    return { status: "blocked", reason: "d1_required_for_webhook_idempotency" };
+  }
+  const update = await readJson(request);
+  const updateId = numberOrNull(update.update_id);
+  if (updateId === null || !Number.isInteger(updateId) || updateId < 0) {
+    throw new WorkerRequestError(400, "INVALID_REQUEST", "Telegram update_id must be a non-negative integer.");
+  }
+  const messageForAge = objectValue(update.message || objectValue(update.callback_query).message);
+  const messageUnix = numberOrNull(messageForAge.date);
+  if (messageUnix !== null && Date.now() / 1000 - messageUnix > 10 * 60) {
+    return { status: "ignored", reason: "stale_update", update_id: updateId };
+  }
+  const inserted = await env.DB.prepare(`
+    INSERT OR IGNORE INTO telegram_updates (update_id, received_at_utc)
+    VALUES (?, ?)
+  `).bind(updateId, new Date().toISOString()).run();
+  if (Number(inserted.meta.changes || 0) === 0) {
+    return { status: "duplicate", update_id: updateId };
+  }
   const message = objectValue(update.message || objectValue(update.callback_query).message);
   const callback = objectValue(update.callback_query);
   const chat = objectValue(message.chat);
@@ -5495,7 +5746,7 @@ async function handleTelegramWebhook(env: Env, update: Record<string, unknown>):
   const text = stringOrNull(callback.data) || stringOrNull(message.text) || "/help";
   await upsertTelegramSession(env, chatId, chat, text);
   const response = await handleTelegramCommand(env, chatId, text);
-  return { status: "ok", chat_id: chatId, command: text, response };
+  return { status: "ok", update_id: updateId, chat_id: chatId, command: text, response };
 }
 
 async function upsertTelegramSession(env: Env, chatId: string, chat: Record<string, unknown>, command: string): Promise<void> {
@@ -5747,7 +5998,7 @@ async function createRuleFromTelegram(env: Env, chatId: string, args: string[]):
       message: "Format: /rule var95 365 > 0.40 ou /rule btc_price > 85000"
     };
   }
-  let metric = args[0];
+  const metric = args[0];
   let horizon: number | null = null;
   let operator = args[1];
   let thresholdRaw = args[2];
@@ -5954,7 +6205,7 @@ async function dashboardHtml(env: Env): Promise<string> {
     listDeepJobs(env, 5),
     strategyPerformanceReport(env),
     liveReadiness(env),
-    buildClientSummary(env).catch((error) => ({ status: "error", message: error instanceof Error ? error.message : String(error) }))
+    buildClientSummary(env).catch(() => ({ status: "error", error_code: "MODEL_EXECUTION_FAILED", message: "Client summary is unavailable." }))
   ]);
   const paper = await paperPortfolioCompact(env, numberOrNull(objectValue(realtime).price));
   const latestRuns = objectValue(alerts.latest_runs);
@@ -6004,7 +6255,7 @@ async function dashboardHtml(env: Env): Promise<string> {
       ${dashboardCard("Deep jobs", String((objectValue(jobs).jobs as unknown[])?.length || 0), "file locale D1", "pill")}
       ${dashboardCard("Strategie", String(strategyPerformance.latest_action || "absent"), `score suivi: ${strategyPerformance.candidate_count ?? 0} candidats`, statusClass(strategyPerformance.status))}
       ${dashboardCard("Paper portfolio", `${paper.net_position_btc ?? 0} BTC`, `PnL ${paper.unrealized_pnl_usdt ?? 0} USDT`, statusClass(paper.status))}
-      ${dashboardCard("Live trading", String(liveReady.status || "blocked"), "approval + Bitget gates", statusClass(liveReady.status))}
+      ${dashboardCard("Live execution", String(liveReady.status || "blocked"), "forbidden; no exchange adapter", statusClass(liveReady.status))}
     </section>
     <section class="card" style="margin-top:14px">
       <h2>Resume client</h2>
@@ -6027,7 +6278,7 @@ async function dashboardHtml(env: Env): Promise<string> {
       <div class="card"><h2>Live readiness</h2>${dashboardLiveReadiness(liveReady)}</div>
     </section>
     <section class="grid" style="margin-top:14px">
-      <div class="card"><h2>Actions</h2><p><a href="/client-summary">Resume client JSON</a></p><p><a href="/realtime/collect">Collecter snapshot Bitget</a></p><p><a href="/strategies/performance">Verifier performance strategies</a></p><p><a href="/trading/paper-report">Rapport paper trading</a></p><p><a href="/risk/live-readiness">Verifier live readiness</a></p><p><a href="/model-alerts/test">Tester alerte modele Telegram</a></p><p><a href="/deep-jobs/process">Traiter un job deep</a></p></div>
+      <div class="card"><h2>Lectures</h2><p><a href="/client-summary">Resume client JSON</a></p><p><a href="/strategies/performance">Verifier performance strategies</a></p><p><a href="/trading/paper-report">Rapport paper trading mock</a></p><p><a href="/risk/live-readiness">Verifier les dimensions de readiness (execution toujours bloquee)</a></p><p>Les collectes, tests d'alerte et jobs deep exigent un POST admin authentifie et ne sont jamais declenches par un lien GET.</p></div>
       <div class="card"><h2>Produit</h2><p><a href="/sales">Page Whop</a></p><p><a href="/onboarding">Onboarding utilisateur</a></p><p><a href="/market/realtime-capabilities">Capacites realtime</a></p><p><a href="/backtests">Backtests JSON</a></p></div>
       <div class="card"><h2>Legal</h2><p><a href="/legal/privacy">Privacy</a></p><p><a href="/legal/terms">Terms</a></p><p><a href="/legal/disclaimer">Disclaimer</a></p><p><a href="/legal/refund">Refund</a></p></div>
     </section>
@@ -6123,7 +6374,7 @@ async function salesPageHtml(env: Env): Promise<string> {
     <section class="grid">
       <div class="panel"><h2>Ce que le client recoit</h2><ul><li>Analyse BTC multi-frame quick/deep.</li><li>Resume client court: biais, risque, strategie, raison, action.</li><li>Alertes Telegram propres: CRITICAL direct, WARNING en digest.</li><li>Paper trading et suivi PnL hypothetique.</li></ul></div>
       <div class="panel"><h2>Pricing indicatif Whop</h2><ul><li>Starter: 29-49 EUR/mois, analyses + Telegram.</li><li>Pro: 79-149 EUR/mois, deep, strategies, dashboard, paper.</li><li>Founders: 199 EUR/mois, acces early + feedback direct.</li></ul></div>
-      <div class="panel"><h2>Limites explicites</h2><ul><li>Aucun conseil financier.</li><li>Les outputs sont inferred, pas des certitudes.</li><li>Les backtests peuvent montrer une sous-calibration du risque.</li><li>Le live trading reel reste desactive par defaut.</li></ul></div>
+      <div class="panel"><h2>Limites explicites</h2><ul><li>Aucun conseil financier.</li><li>Les outputs sont inferred, pas des certitudes.</li><li>Les backtests peuvent montrer une sous-calibration du risque.</li><li>Le trading reel est interdit et aucun adaptateur d'execution n'est present.</li></ul></div>
     </section>
     <section class="panel" style="margin-top:14px"><h2>Promesse propre</h2><p>Quant BTC Model aide a lire le marche en probabilites: distribution, regimes, VaR/CVaR, confidence, contexte ETF/liquidite/options quand disponible, puis transforme tout cela en un etat operationnel prudent: hold, buy candidate, sell/reduce candidate ou paper only.</p><p class="muted">Version ${WORKER_VERSION}. Page concue pour servir de base Whop; ajouter captures GPT/Telegram dans Whop directement.</p></section>
   </main>
@@ -6352,6 +6603,7 @@ function compactRunPayload(result: Record<string, unknown>): Record<string, unkn
     reference_spot_timestamp_paris: objectValue(frames[0]).reference_spot_timestamp_paris,
     reference_spot_source: objectValue(frames[0]).reference_spot_source,
     data_status: result.data_status,
+    run_manifest: result.run_manifest,
     alerts: result.alerts,
     backtest_diagnostics: result.backtest_diagnostics,
     context: {
@@ -6449,7 +6701,7 @@ function compactCachedAnalyzeResponse(
   const preset = ANALYSIS_PRESETS[presetPath];
   const ageSeconds = Math.max(0, Math.round((Date.now() - new Date(cachedAtUtc).getTime()) / 1000));
   const cacheLabel = cacheStatus === "hit" ? "fresh" : "warning_age";
-  return {
+  const compact = {
     status: "ok",
     asset: stringOrNull(payload.asset) || "BTC",
     model: stringOrNull(payload.model) || "ensemble",
@@ -6537,12 +6789,12 @@ function compactCachedAnalyzeResponse(
     generated_at_utc: new Date().toISOString(),
     generated_at_paris: parisIso(new Date())
   };
+  return canonicalizeAnalysis(compact);
 }
 
 function compactAnalyzeResponse(
   result: Record<string, unknown>,
-  rateLimit: Record<string, unknown>,
-  env: Env
+  rateLimit: Record<string, unknown>
 ): Record<string, unknown> {
   const archive = objectValue(result.archive);
   const version = objectValue(result.version);
@@ -6564,7 +6816,7 @@ function compactAnalyzeResponse(
   const runIds = Array.isArray(archive.run_ids)
     ? archive.run_ids
     : frames.map((frame) => objectValue(frame).run_id).filter(Boolean);
-  return {
+  const compact = {
     status,
     error: result.error,
     message: result.message,
@@ -6631,6 +6883,7 @@ function compactAnalyzeResponse(
       timezone_policy: TIMEZONE_POLICY
     },
     data_status: result.data_status,
+    run_manifest: result.run_manifest,
     freshness: compactFreshness(objectValue(result.freshness)),
     frames,
     alerts: compactAlerts(result.alerts),
@@ -6652,6 +6905,7 @@ function compactAnalyzeResponse(
     generated_at_utc: new Date().toISOString(),
     generated_at_paris: parisIso(new Date())
   };
+  return status === "ok" || status === "partial" ? canonicalizeAnalysis(compact) : compact;
 }
 
 function compactAnalyzeFrame(frame: Record<string, unknown>): Record<string, unknown> {
@@ -6663,8 +6917,13 @@ function compactAnalyzeFrame(frame: Record<string, unknown>): Record<string, unk
   const stability = objectValue(frame.multi_seed_stability);
   const provenance = objectValue(frame.provenance);
   return {
-    horizon: frame.horizon,
+    horizon: frame.horizon ?? frame.horizon_days,
+    horizon_days: frame.horizon_days ?? frame.horizon,
     run_id: frame.run_id,
+    model_name: frame.model_name ?? frame.model,
+    model_version: frame.model_version ?? objectValue(frame.version).model_version,
+    simulation_count: frame.simulation_count ?? frame.simulations,
+    seed: frame.seed,
     report_date_utc: provenance.report_date_utc || provenance.report_date,
     report_date_paris: provenance.report_date_paris,
     reference_spot: provenance.reference_spot,
@@ -6862,14 +7121,14 @@ function normalizeRatio(value: unknown): number | null {
 
 async function warmRenderBitgetBridge(env: Env): Promise<void> {
   try {
-    await fetch(renderUrl("/health", env), {
+    await fetchWithTimeout(renderUrl("/health", env), {
       method: "GET",
       headers: {
         "accept": "application/json",
         "user-agent": "quant-btc-model-cloudflare-render-warmer/1.0"
       },
       cf: { cacheTtl: 0, cacheEverything: false }
-    });
+    }, 10_000);
   } catch {
     // Scheduled warmup is best-effort only; request handlers still report bridge failures explicitly.
   }
@@ -6903,7 +7162,6 @@ function checkRateLimitWithPolicy(request: Request, limit: number, windowSeconds
   const now = Date.now();
   const windowMs = windowSeconds * 1000;
   const clientKey = request.headers.get("cf-connecting-ip")
-    || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
     || "unknown-client";
   const key = `${scope}:${clientKey}`;
   const existing = rateLimitBuckets.get(key) || [];
@@ -7144,7 +7402,7 @@ async function runQuantLite(
   };
 }
 
-async function runQuantLiteMultiFrame(input: MultiRunRequest, env: Env): Promise<Record<string, unknown>> {
+export async function runQuantLiteMultiFrame(input: MultiRunRequest, env: Env): Promise<Record<string, unknown>> {
   const asset = normalizeAsset(input.asset);
   if (asset !== "BTC") {
     throw new Error("Only BTC is supported by the quant-lite Worker.");
@@ -7258,9 +7516,8 @@ async function fetchMarketCandles(): Promise<MarketCandles> {
       source: "bitget_btcusdt_spot_candles",
       status: "real"
     };
-  } catch (error) {
-    const bitgetMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Bitget market data unavailable. No non-Bitget exchange fallback is allowed. Bitget error: ${bitgetMessage}.`);
+  } catch {
+    throw new Error("Bitget market data unavailable. No non-Bitget exchange fallback is allowed.");
   }
 }
 
@@ -7335,7 +7592,7 @@ async function fetchFundamentalSnapshot(): Promise<FundamentalSnapshot> {
 async function fetchBitgetFundingRate(): Promise<{ value: number | null; source: string | null; warning: string }> {
   const url = "https://api.bitget.com/api/v2/mix/market/current-fund-rate?symbol=BTCUSDT&productType=usdt-futures";
   try {
-    const response = await fetch(url, { headers: { "accept": "application/json" } });
+    const response = await fetchWithTimeout(url, { headers: { "accept": "application/json" } }, 10_000);
     if (!response.ok) {
       return { value: null, source: null, warning: `HTTP ${response.status}` };
     }
@@ -7349,15 +7606,15 @@ async function fetchBitgetFundingRate(): Promise<{ value: number | null; source:
     return value === null
       ? { value: null, source: null, warning: "fundingRate missing" }
       : { value, source: "bitget_current_fund_rate", warning: "" };
-  } catch (error) {
-    return { value: null, source: null, warning: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { value: null, source: null, warning: "provider_unavailable" };
   }
 }
 
 async function fetchBitgetOpenInterest(): Promise<{ value: number | null; source: string | null; warning: string }> {
   const url = "https://api.bitget.com/api/v2/mix/market/open-interest?symbol=BTCUSDT&productType=usdt-futures";
   try {
-    const response = await fetch(url, { headers: { "accept": "application/json" } });
+    const response = await fetchWithTimeout(url, { headers: { "accept": "application/json" } }, 10_000);
     if (!response.ok) {
       return { value: null, source: null, warning: `HTTP ${response.status}` };
     }
@@ -7372,20 +7629,20 @@ async function fetchBitgetOpenInterest(): Promise<{ value: number | null; source
     return value === null
       ? { value: null, source: null, warning: "openInterestList size missing" }
       : { value, source: "bitget_open_interest", warning: "" };
-  } catch (error) {
-    return { value: null, source: null, warning: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { value: null, source: null, warning: "provider_unavailable" };
   }
 }
 
 async function fetchStooqQuote(symbol: string, source: string): Promise<{ value: number | null; source: string | null; warning: string }> {
   const url = `https://stooq.com/q/l/?s=${encodeURIComponent(symbol)}&i=d`;
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         "accept": "text/plain,text/csv,*/*",
         "user-agent": "quant-btc-model-lite-worker/1.0"
       }
-    });
+    }, 10_000);
     if (!response.ok) {
       return { value: null, source: null, warning: `HTTP ${response.status}` };
     }
@@ -7401,8 +7658,8 @@ async function fetchStooqQuote(symbol: string, source: string): Promise<{ value:
     return value === null
       ? { value: null, source: null, warning: "close missing in Stooq response" }
       : { value, source, warning: "" };
-  } catch (error) {
-    return { value: null, source: null, warning: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { value: null, source: null, warning: "provider_unavailable" };
   }
 }
 
@@ -7417,11 +7674,11 @@ async function fetchBitgetCandles(): Promise<Candle[]> {
     url.searchParams.set("endTime", String(endTime));
     url.searchParams.set("limit", "200");
 
-    const response = await fetch(url.toString(), {
+    const response = await fetchWithTimeout(url.toString(), {
       headers: {
         "accept": "application/json"
       }
-    });
+    }, 12_000);
 
     if (!response.ok) {
       throw new Error(`Bitget candles request failed with HTTP ${response.status}.`);
@@ -7933,7 +8190,9 @@ function html(markup: string, status = 200): Response {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
-      "access-control-allow-origin": "*"
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "referrer-policy": "no-referrer"
     }
   });
 }

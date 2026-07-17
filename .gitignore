@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 .env
 .env.*
+!.env.example
+.coverage
+htmlcov/
 data/quant_model.db
 data/raw/*
 data/processed/*

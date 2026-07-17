@@ -50,7 +50,7 @@ gpt_custom_upload_bundle/gpt_action_openapi.cloudflare.deployed.yaml
 Redeploy command:
 
 ```powershell
-cd C:\Users\ronyc\Desktop\Corpus\quant_btc_model\cloudflare-worker
+cd cloudflare-worker
 npm run deploy:schema
 ```
 

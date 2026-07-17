@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mdl-bitcoin-analyst.local/contracts/error.schema.json",
+  "title": "MDL Bitcoin Analyst stable error",
+  "type": "object",
+  "required": ["status", "error_code", "message", "retryable", "details", "request_id"],
+  "properties": {
+    "status": { "const": "error" },
+    "error_code": {
+      "enum": [
+        "INVALID_REQUEST",
+        "UNSUPPORTED_ASSET",
+        "BITGET_UNAVAILABLE",
+        "SPOT_MISSING",
+        "SPOT_STALE",
+        "MARKET_HISTORY_INSUFFICIENT",
+        "FUNDAMENTAL_SOURCE_UNAVAILABLE",
+        "ARCHIVE_NOT_FOUND",
+        "ARCHIVE_MISMATCH",
+        "SPOT_SNAPSHOT_MISMATCH",
+        "FRAME_COUNT_MISMATCH",
+        "QUANTILE_ORDER_INVALID",
+        "PROBABILITY_OUT_OF_RANGE",
+        "REGIME_SUM_INVALID",
+        "RISK_METRIC_INCONSISTENT",
+        "BACKTEST_UNAVAILABLE",
+        "CACHE_STALE",
+        "RATE_LIMITED",
+        "STORAGE_UNAVAILABLE",
+        "MODEL_EXECUTION_FAILED",
+        "SCHEMA_VALIDATION_FAILED",
+        "METHOD_NOT_ALLOWED",
+        "AUTHENTICATION_REQUIRED",
+        "EXECUTION_FORBIDDEN",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "message": { "type": "string" },
+    "retryable": { "type": "boolean" },
+    "details": { "type": "object" },
+    "request_id": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

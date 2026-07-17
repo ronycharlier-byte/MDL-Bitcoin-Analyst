@@ -2,7 +2,9 @@
 
 Infrastructure quantitative probabiliste pour analyser Bitcoin avec un backend live, une API publique, une gouvernance GPT Custom et une logique de risque explicite.
 
-Le système ne produit jamais de certitude ni de prix garanti. Il produit des distributions, des probabilités, des scénarios et des mesures de risque.
+Le système ne produit jamais de certitude, de conseil financier personnalisé ni de prix garanti. Il produit des distributions, des probabilités, des scénarios et des mesures de risque. Son autorité d'exécution est nulle : le trading live est bloqué et le paper trading est exclusivement `mock_paper`.
+
+Sources canoniques : `contracts/analysis.schema.json`, `gpt/actions/openapi.yaml` et `gpt/instructions/quant_btc_analyst.system.md`. Les nombreuses variantes sous `gpt_custom_upload_bundle/` sont conservées uniquement pour compatibilité et traçabilité.
 
 ## Statut Actuel
 
@@ -29,8 +31,8 @@ GET /health
 GET /version
 GET /status
 GET /audit
-GET /run?asset=BTC
-GET /multi-run?asset=BTC
+POST /analyze
+POST /analyze-deep
 GET /latest
 ```
 
@@ -54,8 +56,8 @@ GET /alerts/subscriptions
 
 Flux recommandé pour un GPT Custom :
 
-1. Appeler `auditQuantBtcLiteSystem`.
-2. Si l'audit est OK, appeler `runQuantBtcMultiFrame`.
+1. Appeler `getResearchServiceStatus`.
+2. Appeler `runQuickProbabilisticAnalysis` ou, sur demande explicite, `runDeepProbabilisticAnalysis`.
 3. Utiliser un seul `archive_id` par analyse.
 4. Citer les `model_run_id` complets.
 5. Afficher les heures en UTC et Europe/Paris.

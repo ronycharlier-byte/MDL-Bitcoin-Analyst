@@ -6,6 +6,34 @@ import numpy as np
 import pandas as pd
 
 
+def expected_calibration_error(probs: np.ndarray, events: np.ndarray, bins: int = 10) -> float | None:
+    if len(probs) == 0 or len(events) == 0:
+        return None
+    edges = np.linspace(0.0, 1.0, bins + 1)
+    error = 0.0
+    for index in range(bins):
+        high_inclusive = index == bins - 1
+        mask = (probs >= edges[index]) & ((probs <= edges[index + 1]) if high_inclusive else (probs < edges[index + 1]))
+        if np.any(mask):
+            error += float(np.mean(mask)) * abs(float(np.mean(probs[mask])) - float(np.mean(events[mask])))
+    return float(error)
+
+
+def bootstrap_mean_ci(values: np.ndarray, seed: int = 42, resamples: int = 200) -> dict[str, float] | None:
+    clean = np.asarray(values, dtype=float)
+    clean = clean[np.isfinite(clean)]
+    if clean.size < 2:
+        return None
+    rng = np.random.default_rng(seed)
+    means = np.mean(rng.choice(clean, size=(resamples, clean.size), replace=True), axis=1)
+    return {
+        "lower_95": float(np.quantile(means, 0.025)),
+        "upper_95": float(np.quantile(means, 0.975)),
+        "resamples": int(resamples),
+        "seed": int(seed),
+    }
+
+
 def _normal_forecast(window_returns: np.ndarray, horizon: int) -> dict[str, float]:
     mu = float(np.mean(window_returns))
     sigma = float(max(np.std(window_returns, ddof=1), 1e-8))
@@ -23,7 +51,9 @@ def _normal_forecast(window_returns: np.ndarray, horizon: int) -> dict[str, floa
     }
 
 
-def run_backtest(price_frame: pd.DataFrame, asset: str, model: str, horizons=(30, 90, 365), train_window: int = 365) -> list[dict]:
+def run_backtest(
+    price_frame: pd.DataFrame, asset: str, model: str, horizons=(30, 90, 365), train_window: int = 365
+) -> list[dict]:
     frame = price_frame.sort_values("timestamp").copy()
     close = pd.to_numeric(frame["close"], errors="coerce").reset_index(drop=True)
     returns = close.pct_change().dropna().reset_index(drop=True)
@@ -39,7 +69,6 @@ def run_backtest(price_frame: pd.DataFrame, asset: str, model: str, horizons=(30
         var95_breaches = []
         var99_breaches = []
         actual_returns = []
-        median_forecasts = []
         max_i = len(returns) - horizon
         if max_i <= train_window:
             results.append(
@@ -49,6 +78,8 @@ def run_backtest(price_frame: pd.DataFrame, asset: str, model: str, horizons=(30
                     "model": model,
                     "hit_rate": None,
                     "brier_score": None,
+                    "log_loss": None,
+                    "expected_calibration_error": None,
                     "calibration_error": None,
                     "mean_absolute_error": None,
                     "interval_coverage": None,
@@ -61,7 +92,13 @@ def run_backtest(price_frame: pd.DataFrame, asset: str, model: str, horizons=(30
                     "random_walk_brier_score": None,
                     "random_walk_mean_absolute_error": None,
                     "brier_skill_vs_random_walk": None,
+                    "brier_score_improvement_vs_random_walk": None,
                     "mae_skill_vs_random_walk": None,
+                    "mae_improvement_vs_random_walk": None,
+                    "period_start_utc": None,
+                    "period_end_utc": None,
+                    "train_window_days": train_window,
+                    "method": "strict_expanding_evaluation_with_rolling_train_window",
                     "observations": 0,
                     "source": "walk_forward_backtest",
                     "statut": "missing",
@@ -86,19 +123,23 @@ def run_backtest(price_frame: pd.DataFrame, asset: str, model: str, horizons=(30
             var95_breaches.append(1.0 if actual <= forecast["var95_return_threshold"] else 0.0)
             var99_breaches.append(1.0 if actual <= forecast["var99_return_threshold"] else 0.0)
             actual_returns.append(actual)
-            median_forecasts.append(median)
         probs_arr = np.asarray(probs)
         events_arr = np.asarray(events)
         actual_arr = np.asarray(actual_returns, dtype=float)
-        median_arr = np.asarray(median_forecasts, dtype=float)
         random_walk_probs = np.full_like(events_arr, 0.5, dtype=float)
         random_walk_median = np.zeros_like(actual_arr, dtype=float)
         brier = float(np.mean((probs_arr - events_arr) ** 2)) if len(probs_arr) else None
         rw_brier = float(np.mean((random_walk_probs - events_arr) ** 2)) if len(events_arr) else None
+        clipped_probs = np.clip(probs_arr, 1e-12, 1 - 1e-12)
+        log_loss = (
+            float(-np.mean(events_arr * np.log(clipped_probs) + (1 - events_arr) * np.log(1 - clipped_probs)))
+            if len(events_arr)
+            else None
+        )
         mae = float(np.mean(absolute_errors)) if absolute_errors else None
         rw_mae = float(np.mean(np.abs(random_walk_median - actual_arr))) if len(actual_arr) else None
         hit_rate = float(np.mean(hits)) if hits else None
-        rw_hit_rate = float(np.mean((random_walk_probs >= 0.5) == (events_arr > 0))) if len(events_arr) else None
+        rw_hit_rate = 0.5 if len(events_arr) else None
         results.append(
             {
                 "asset": asset.upper(),
@@ -106,7 +147,9 @@ def run_backtest(price_frame: pd.DataFrame, asset: str, model: str, horizons=(30
                 "model": model,
                 "hit_rate": hit_rate,
                 "brier_score": brier,
+                "log_loss": log_loss,
                 "calibration_error": float(abs(np.mean(probs_arr) - np.mean(events_arr))) if len(probs_arr) else None,
+                "expected_calibration_error": expected_calibration_error(probs_arr, events_arr),
                 "mean_absolute_error": mae,
                 "interval_coverage": float(np.mean(covered)) if covered else None,
                 "p10_p90_coverage": float(np.mean(p10_p90_covered)) if p10_p90_covered else None,
@@ -117,10 +160,24 @@ def run_backtest(price_frame: pd.DataFrame, asset: str, model: str, horizons=(30
                 "random_walk_hit_rate": rw_hit_rate,
                 "random_walk_brier_score": rw_brier,
                 "random_walk_mean_absolute_error": rw_mae,
-                "brier_skill_vs_random_walk": (rw_brier - brier) if rw_brier is not None and brier is not None else None,
-                "mae_skill_vs_random_walk": (rw_mae - mae) if rw_mae is not None and mae is not None else None,
+                "brier_skill_vs_random_walk": (1.0 - brier / rw_brier)
+                if rw_brier not in (None, 0.0) and brier is not None
+                else None,
+                "brier_score_improvement_vs_random_walk": (rw_brier - brier)
+                if rw_brier is not None and brier is not None
+                else None,
+                "mae_skill_vs_random_walk": (1.0 - mae / rw_mae)
+                if rw_mae not in (None, 0.0) and mae is not None
+                else None,
+                "mae_improvement_vs_random_walk": (rw_mae - mae) if rw_mae is not None and mae is not None else None,
+                "brier_score_bootstrap_ci": bootstrap_mean_ci((probs_arr - events_arr) ** 2, seed=42 + int(horizon)),
                 "calibration_bins": calibration_bins(probs_arr, events_arr),
                 "observations": int(len(probs)),
+                "period_start_utc": str(frame.iloc[train_window]["timestamp"]) if len(probs) else None,
+                "period_end_utc": str(frame.iloc[max_i - 1]["timestamp"]) if len(probs) else None,
+                "train_window_days": train_window,
+                "benchmark": "zero_drift_random_walk",
+                "method": "strict_walk_forward_rolling_train_window",
                 "source": "walk_forward_backtest",
                 "statut": status,
             }

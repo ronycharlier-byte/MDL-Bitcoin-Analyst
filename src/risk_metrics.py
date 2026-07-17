@@ -129,15 +129,22 @@ def compute_risk_metrics(simulated_returns, historical_returns=None, sample_path
     sim = clean_returns(simulated_returns)
     hist = clean_returns(historical_returns) if historical_returns is not None else sim
     drawdown_summary = (
-        drawdown_summary_from_paths(sample_paths)
-        if sample_paths is not None
-        else drawdown_summary_from_returns(sim)
+        drawdown_summary_from_paths(sample_paths) if sample_paths is not None else drawdown_summary_from_returns(sim)
     )
+    var95 = value_at_risk(sim, 0.95)
+    var99 = value_at_risk(sim, 0.99)
+    cvar95 = expected_shortfall(sim, 0.95)
+    cvar99 = expected_shortfall(sim, 0.99)
     return {
-        "var_95": value_at_risk(sim, 0.95),
-        "var_99": value_at_risk(sim, 0.99),
-        "cvar_95": expected_shortfall(sim, 0.95),
-        "cvar_99": expected_shortfall(sim, 0.99),
+        "var_95": var95,
+        "var_99": var99,
+        "cvar_95": cvar95,
+        "cvar_99": cvar99,
+        "var95_loss": var95,
+        "var99_loss": var99,
+        "cvar95_loss": cvar95,
+        "cvar99_loss": cvar99,
+        "loss_sign_convention": "positive_loss",
         "skewness": skewness(sim),
         "kurtosis": kurtosis(sim),
         "max_drawdown": drawdown_summary.get("mean_simulated_max_drawdown"),

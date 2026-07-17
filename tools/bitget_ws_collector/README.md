@@ -25,7 +25,8 @@ Pour du vrai temps reel continu, il faut un collecteur separe qui tourne :
 ## Installation
 
 ```powershell
-cd C:\Users\ronyc\Desktop\Corpus\quant_btc_model\tools\bitget_ws_collector
+git clone https://github.com/ronycharlier-byte/MDL-Bitcoin-Analyst.git
+cd MDL-Bitcoin-Analyst\tools\bitget_ws_collector
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt

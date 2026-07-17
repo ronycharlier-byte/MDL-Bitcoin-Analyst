@@ -11,7 +11,6 @@ import regime_switching
 import student_t_model
 from simulation_utils import seed_for
 
-
 MODEL_REGISTRY = {
     "monte_carlo": monte_carlo.simulate,
     "student_t": student_t_model.simulate,
@@ -23,32 +22,97 @@ MODEL_REGISTRY = {
 }
 
 
-def weights_from_backtests(model_names: list[str], backtest_rows: list[dict] | None = None) -> dict[str, float]:
+def _cap_and_normalize_weights(raw: dict[str, float], cap: float = 0.35) -> dict[str, float]:
+    if not raw:
+        return {}
+    cap = max(float(cap), 1.0 / len(raw))
+    positive = {name: max(float(value), 0.0) for name, value in raw.items()}
+    total = sum(positive.values())
+    if total <= 0:
+        return {name: 1.0 / len(positive) for name in positive}
+    remaining = dict(positive)
+    weights: dict[str, float] = {}
+    remaining_mass = 1.0
+    while remaining:
+        remaining_total = sum(remaining.values())
+        divisor = remaining_total if remaining_total > 0 else float(len(remaining))
+        proposed = {
+            name: remaining_mass * (value / divisor if remaining_total > 0 else 1.0 / divisor)
+            for name, value in remaining.items()
+        }
+        oversized = {name for name, value in proposed.items() if value > cap}
+        if not oversized:
+            weights.update(proposed)
+            break
+        for name in oversized:
+            weights[name] = cap
+            remaining.pop(name)
+        remaining_mass = max(0.0, 1.0 - sum(weights.values()))
+    return {name: float(weights[name]) for name in raw}
+
+
+def weight_diagnostics(model_names: list[str], backtest_rows: list[dict] | None = None) -> dict:
+    if not model_names:
+        return {
+            "weights": {},
+            "reason": "no_models_registered",
+            "components": {},
+            "maximum_weight": None,
+            "weight_cap": None,
+        }
     if not backtest_rows:
         equal = 1.0 / len(model_names)
-        return {name: equal for name in model_names}
+        return {
+            "weights": {name: equal for name in model_names},
+            "reason": "equal_weights_no_out_of_sample_diagnostics",
+            "components": {name: {"status": "absent"} for name in model_names},
+            "maximum_weight": equal,
+        }
 
-    raw_scores = {name: 1.0 for name in model_names}
-    for row in backtest_rows:
-        name = row.get("model")
-        if name not in raw_scores:
+    components: dict[str, dict] = {}
+    raw_scores: dict[str, float] = {}
+    for name in model_names:
+        rows = [row for row in backtest_rows if row.get("model") == name and int(row.get("observations") or 0) > 0]
+        if not rows:
+            components[name] = {"status": "absent"}
+            raw_scores[name] = 0.25
             continue
-        brier = row.get("brier_score")
-        calibration = row.get("calibration_error")
-        hit_rate = row.get("hit_rate")
-        score = 1.0
-        if brier is not None:
-            score *= 1.0 / max(float(brier), 1e-4)
-        if calibration is not None:
-            score *= 1.0 / max(float(calibration), 0.03)
-        if hit_rate is not None:
-            score *= max(float(hit_rate), 0.05)
-        raw_scores[name] = max(raw_scores[name], score)
-    total = sum(raw_scores.values())
-    if total <= 0:
-        equal = 1.0 / len(model_names)
-        return {name: equal for name in model_names}
-    return {name: float(score / total) for name, score in raw_scores.items()}
+        brier_values = [float(row["brier_score"]) for row in rows if row.get("brier_score") is not None]
+        calibration_values = [
+            float(row["calibration_error"]) for row in rows if row.get("calibration_error") is not None
+        ]
+        coverage_values = [float(row["p10_p90_coverage"]) for row in rows if row.get("p10_p90_coverage") is not None]
+        brier = float(np.mean(brier_values)) if brier_values else 0.5
+        calibration = float(np.mean(calibration_values)) if calibration_values else 1.0
+        coverage = float(np.mean(coverage_values)) if coverage_values else 0.0
+        brier_quality = float(np.clip(1.0 - brier / 0.5, 0.0, 1.0))
+        calibration_quality = float(np.clip(1.0 - calibration, 0.0, 1.0))
+        coverage_quality = float(np.clip(1.0 - abs(coverage - 0.80) / 0.80, 0.0, 1.0))
+        score = 0.45 * brier_quality + 0.35 * calibration_quality + 0.20 * coverage_quality
+        raw_scores[name] = max(score, 0.05)
+        components[name] = {
+            "status": "inferred",
+            "observations": int(sum(int(row.get("observations") or 0) for row in rows)),
+            "brier_score_mean": brier,
+            "calibration_error_mean": calibration,
+            "p10_p90_coverage_mean": coverage,
+            "quality_score": score,
+        }
+    equal = 1.0 / len(model_names)
+    raw_total = sum(raw_scores.values()) or 1.0
+    blended = {name: 0.80 * raw_scores[name] / raw_total + 0.20 * equal for name in model_names}
+    weights = _cap_and_normalize_weights(blended)
+    return {
+        "weights": weights,
+        "reason": "walk_forward_brier_calibration_coverage_with_equal_weight_shrinkage",
+        "components": components,
+        "maximum_weight": max(weights.values()),
+        "weight_cap": max(0.35, equal),
+    }
+
+
+def weights_from_backtests(model_names: list[str], backtest_rows: list[dict] | None = None) -> dict[str, float]:
+    return weight_diagnostics(model_names, backtest_rows)["weights"]
 
 
 def simulate(
@@ -61,7 +125,8 @@ def simulate(
     backtest_rows: list[dict] | None = None,
 ) -> dict:
     model_names = list(MODEL_REGISTRY.keys())
-    weights = weights_from_backtests(model_names, backtest_rows=backtest_rows)
+    diagnostics = weight_diagnostics(model_names, backtest_rows=backtest_rows)
+    weights = diagnostics["weights"]
     sims_per_model = max(200, int(np.ceil(simulations / len(model_names))))
     component_results = {}
     for name in model_names:
@@ -106,8 +171,9 @@ def simulate(
         "weights": weights,
         "component_results": component_results,
         "parameters": {
-            "weighting": "performance_error_calibration",
+            "weighting": diagnostics["reason"],
             "sims_per_component": sims_per_model,
             "weights": weights,
+            "weight_diagnostics": diagnostics,
         },
     }

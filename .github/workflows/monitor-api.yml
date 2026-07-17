@@ -18,13 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Run strict quality monitor
         env:
           CF_BASE: https://quant-btc-model-lite.mdl-bitcoin-analyst.workers.dev
           RENDER_BASE: https://quant-btc-model-api.onrender.com
-          MIN_API_VERSION: "1.8.0"
+          MIN_API_VERSION: "2.0.0"
           REQUIRED_REAL_FIELDS: etf_flows,funding_rate,open_interest,hash_rate,exchange_reserves,stablecoins_supply,dxy,us_rates,nasdaq
           ALLOWED_ABSENT_FIELDS: liquidations
         run: |
@@ -33,7 +33,7 @@ jobs:
 
       - name: Upload monitor summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quality-monitor-summary
           path: quality-monitor-summary.json
@@ -42,7 +42,7 @@ jobs:
 
       - name: Open visible monitor alert issue
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const fs = require("fs");
@@ -88,7 +88,7 @@ jobs:
 
       - name: Close resolved monitor alert issue
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const marker = "[quant-btc-monitor-alert]";

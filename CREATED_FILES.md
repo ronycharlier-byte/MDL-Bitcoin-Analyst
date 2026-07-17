@@ -2,6 +2,8 @@
 
 This document records the autonomous brick added under `quant_btc_model`.
 
+This file is historical and incomplete. The generated, exhaustive inventory in `docs/REPOSITORY_INVENTORY.md` is canonical for current/legacy/deprecated classification. Architecture and migration ownership are documented in `docs/ARCHITECTURE.md` and `docs/MIGRATION_PLAN.md`.
+
 ## Root
 
 - `README.md`: operating guide, data policy, schema overview, model list.

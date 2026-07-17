@@ -1,10 +1,22 @@
-# Quant BTC Model
+# MDL Bitcoin Analyst
 
-Autonomous probabilistic quantitative engine for Bitcoin inside this corpus.
+Probabilistic Bitcoin research engine with a Python/FastAPI quantitative backend, Cloudflare edge façade, Telegram operations and a governed GPT Custom contract.
 
-The system produces probabilities, distributions, and risk measures. It never emits certainty or a deterministic price prediction.
+The system produces probabilities, distributions, risk measures and explicit uncertainty. It never emits certainty, personalized financial advice or a deterministic price prediction. It has `execution_authority=none`: live trading is blocked and paper records are `mock_paper` only.
 
 French product/GPT Custom README: [`README_FR.md`](README_FR.md).
+
+Canonical references:
+
+- Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Data contract: [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md)
+- Security: [`docs/SECURITY.md`](docs/SECURITY.md)
+- Model governance: [`docs/MODEL_GOVERNANCE.md`](docs/MODEL_GOVERNANCE.md)
+- Migration plan: [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md)
+- GPT Action: [`gpt/actions/openapi.yaml`](gpt/actions/openapi.yaml)
+- GPT instructions: [`gpt/instructions/quant_btc_analyst.system.md`](gpt/instructions/quant_btc_analyst.system.md)
+
+Files in `gpt_custom_upload_bundle/` and older root/Worker OpenAPI files are legacy compatibility artifacts, not production sources.
 
 ## Created structure
 
@@ -34,7 +46,7 @@ quant_btc_model/
 
 ## Quick start
 
-From `C:\Users\ronyc\Desktop\Corpus\quant_btc_model`:
+From the repository root:
 
 ```powershell
 python src/main.py --asset BTC --horizon 365 --simulations 200000 --model ensemble
@@ -67,10 +79,10 @@ Worker scope:
 - Fundamentals, corpus KB and full backtest artifacts tagged as absent.
 - Simulation count capped for the free Worker runtime.
 
-GPT Action schema:
+Canonical GPT Action schema:
 
 ```text
-cloudflare-worker/gpt_action_openapi.cloudflare.yaml
+gpt/actions/openapi.yaml
 ```
 
 ## Realtime API behavior
@@ -119,14 +131,14 @@ The public API includes a short SQLite-backed cache, a SQLite-backed rate limit 
 - `model_version`
 - `schema_version`
 
-## Operational layer v1.30.0
+## Operational compatibility layer
 
 The Cloudflare Worker also includes an operational strategy layer:
 
 - `GET /strategies/deep-summary`: compact GPT strategy answer.
 - `GET /strategies/performance`: mark-to-market tracking for stored strategy signals.
 - `GET /trading/paper-report`: consolidated paper trading and virtual portfolio report.
-- `GET /risk/live-readiness`: live-trading readiness gate, blocked by default.
+- `GET /risk/live-readiness`: multi-dimensional diagnostic; policy and execution authority remain blocked/none.
 - `GET /market/realtime-capabilities`: explains polling vs permanent WebSocket limits.
 - `GET /assets/supported`: BTC production status and non-BTC roadmap.
 - `GET /options/summary`: options context from the latest archived run.
@@ -166,10 +178,10 @@ Every live multi-frame response now includes:
 
 Productization layer:
 
-- Client keys are lightweight access tokens for quota tracking and usage logs.
+- Client keys are lightweight access tokens for quota tracking and usage logs; protected routes fail closed if server authentication is unavailable.
 - Plans are defined in the API as Free, Analyst and Pro; Stripe checkout is inactive until `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ANALYST` and `STRIPE_PRICE_PRO` are configured.
 - Durable off-host storage is now available for free through Cloudflare D1 on the Worker. Render can still mirror compact records to Supabase or an external webhook if those env vars are configured.
-- Alert delivery is best-effort: webhook/Discord use HTTPS targets, Telegram requires `TELEGRAM_BOT_TOKEN`, and email requires `ALERT_EMAIL_WEBHOOK_URL`.
+- Alert delivery is best-effort: webhook/Discord targets require an explicit HTTPS hostname allowlist, Telegram requires bot/chat/webhook secrets, and email requires `ALERT_EMAIL_WEBHOOK_URL`.
 - Public backtests expose hit rate, Brier score, calibration error, P10/P90 coverage, VaR breach rates and random-walk benchmark fields.
 
 GitHub Actions monitoring:
@@ -202,7 +214,7 @@ gpt_custom_upload_bundle/
 - Market loading uses local CSV first, then public online Bitget candles unless `--no-online` is set. Non-Bitget market fallback is disabled by default for live GPT runs.
 - If real market data are unavailable, the engine generates synthetic prices tagged `mock` and logs `MOCK`.
 - Missing fundamental fields remain SQL `NULL` and are logged in `logs/system.log`.
-- SQLite tables include `timestamp`, `source`, and `statut` (`real`, `mock`, or `missing`).
+- Historical SQLite tables include `timestamp`, `source`, and legacy `statut` values. API adapters normalize them to the canonical status vocabulary without rewriting old archives.
 
 ## Optional input files
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -25,7 +25,7 @@ def build_archive_summary(monitor_summary: dict[str, Any], run: dict[str, Any]) 
     fundamentals = run.get("fundamental_inputs") or {}
     archive = run.get("archive") or {}
     version = run.get("version") or {}
-    created_at = datetime.now(timezone.utc)
+    created_at = datetime.now(UTC)
     return {
         "schema": "quant_btc_external_archive_v1",
         "created_at": created_at.isoformat(),
@@ -70,7 +70,13 @@ def build_archive_summary(monitor_summary: dict[str, Any], run: dict[str, Any]) 
             "archive_id": monitor_summary.get("archive_id"),
         },
         "frames": [compact_frame(frame) for frame in run.get("frames") or []],
-        "policy": "Probabilistic output only. No deterministic prediction and no financial advice.",
+        "policy": {
+            "user_effect": "information_only",
+            "execution_authority": "none",
+            "financial_advice": False,
+            "paper_trading": "mock_only",
+            "live_trading": "blocked",
+        },
     }
 
 
@@ -121,7 +127,7 @@ def main() -> int:
 
     monitor_summary, run = evaluate()
     summary = build_archive_summary(monitor_summary, run)
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
     archive_id = (summary.get("runtime_archive") or {}).get("archive_id") or created.strftime("%Y%m%dT%H%M%SZ")
     output_dir = args.output_dir / created.strftime("%Y") / created.strftime("%m") / created.strftime("%d")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -130,7 +136,11 @@ def main() -> int:
     markdown_path = output_dir / f"{stem}.md"
     json_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2, default=str), encoding="utf-8")
     markdown_path.write_text(build_markdown(summary), encoding="utf-8")
-    print(json.dumps({"json_path": str(json_path), "markdown_path": str(markdown_path), "archive_id": archive_id}, indent=2))
+    print(
+        json.dumps(
+            {"json_path": str(json_path), "markdown_path": str(markdown_path), "archive_id": archive_id}, indent=2
+        )
+    )
     return 0
 
 
